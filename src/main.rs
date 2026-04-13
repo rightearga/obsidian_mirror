@@ -22,6 +22,21 @@ use obsidian_mirror::{
     VERSION, APP_NAME,
 };
 
+/// GET /sw.js — 从根路径提供 Service Worker 文件
+/// 浏览器安全限制：SW 只能控制与其注册路径同级或下级的资源，
+/// 因此必须从 /sw.js 而非 /static/sw.js 提供。
+async fn serve_service_worker(_req: actix_web::HttpRequest) -> actix_web::Result<actix_files::NamedFile> {
+    actix_files::NamedFile::open("static/sw.js")
+        .map_err(|_| actix_web::error::ErrorNotFound("sw.js not found"))
+        .map(|f| f.use_last_modified(true).use_etag(true))
+}
+
+/// GET /manifest.json — 从根路径提供 Web App Manifest
+async fn serve_manifest(_req: actix_web::HttpRequest) -> actix_web::Result<actix_files::NamedFile> {
+    actix_files::NamedFile::open("static/manifest.json")
+        .map_err(|_| actix_web::error::ErrorNotFound("manifest.json not found"))
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // 初始化日志
@@ -376,6 +391,10 @@ async fn start_http_server(
         // 添加通用路由
         app
             .service(fs::Files::new("/static", "static").show_files_listing())
+            // Service Worker 必须从根路径提供（浏览器安全限制：scope 由注册路径决定）
+            .route("/sw.js", web::get().to(serve_service_worker))
+            // Web App Manifest 也从根路径提供（标准做法）
+            .route("/manifest.json", web::get().to(serve_manifest))
             .service(health_handler)  // 健康检查端点
             .service(metrics_handler)  // Prometheus 指标端点
             .service(stats_handler)   // 统计信息端点
