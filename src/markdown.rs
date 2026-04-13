@@ -24,6 +24,20 @@ lazy_static! {
     /// 匹配 YAML Frontmatter 块（支持 \r\n 和 \n）
     static ref FRONTMATTER_REGEX: Regex =
         Regex::new(r"(?s)^---\s*\r?\n(.*?)\r?\n---\s*\r?\n(.*)$").unwrap();
+
+    /// 匹配块级数学公式：$$ ... $$ （可跨行，非贪婪）
+    static ref MATH_BLOCK_REGEX: Regex =
+        Regex::new(r"\$\$([\s\S]*?)\$\$").unwrap();
+
+    /// 匹配行内数学公式：$...$（不跨行，首尾非空格非美元符）
+    /// 必须先处理块级 $$，之后此正则不会重复匹配
+    /// （Rust regex 不支持 lookahead/lookbehind，改用字符类约束首尾）
+    static ref MATH_INLINE_REGEX: Regex =
+        Regex::new(r"\$(?P<content>[^\s\$\n\r][^\$\n\r]*[^\s\$\n\r]|[^\s\$\n\r])\$").unwrap();
+
+    /// 匹配 Obsidian 高亮语法：==文本==（不跨行）
+    static ref HIGHLIGHT_REGEX: Regex =
+        Regex::new(r"==([^=\n\r]+)==").unwrap();
 }
 
 pub struct MarkdownProcessor;
@@ -41,6 +55,9 @@ impl MarkdownProcessor {
     ) {
         // 1. Extract Frontmatter
         let (content_body, frontmatter) = Self::extract_frontmatter(content);
+
+        // 1.5. 预处理 Obsidian 扩展语法（数学公式 / 高亮），在 WikiLink 处理之前执行
+        let content_body: String = Self::preprocess_extended_syntax(&content_body);
 
         // 2. Pre-process Image/File WikiLinks (处理 ![[...]] 语法)
         let mut processed_content = IMAGE_WIKI_REGEX
@@ -326,7 +343,49 @@ impl MarkdownProcessor {
         // 6. 提取标签
         let tags = tags::extract_tags(&content_body, &frontmatter);
 
+        // 7. 图片懒加载：为所有 <img> 标签添加 loading="lazy" 属性
+        let html_output = html_output.replace("<img ", "<img loading=\"lazy\" ");
+
         (html_output, links, tags, frontmatter, toc)
+    }
+
+    /// 预处理 Obsidian 扩展语法：KaTeX 数学公式 + ==高亮==
+    ///
+    /// 必须在 WikiLink 处理之前执行，以防止 pulldown-cmark 错误解析 LaTeX 内容。
+    fn preprocess_extended_syntax(content: &str) -> String {
+        // 步骤一：将块级数学公式 $$...$$ 包装为 HTML div（data-math 属性存储 LaTeX）
+        let s = MATH_BLOCK_REGEX.replace_all(content, |caps: &regex::Captures| {
+            let latex = caps.get(1).map_or("", |m| m.as_str()).trim();
+            let escaped = Self::html_escape_attr(latex);
+            // 块级 div 前后需要空行，确保 pulldown-cmark 将其识别为块级 HTML
+            format!("\n<div class=\"math-block\" data-math=\"{}\"></div>\n", escaped)
+        });
+
+        // 步骤二：将行内数学公式 $...$ 包装为 HTML span
+        let s = MATH_INLINE_REGEX.replace_all(&s, |caps: &regex::Captures| {
+            let latex = caps
+                .name("content")
+                .map_or("", |m| m.as_str())
+                .trim();
+            let escaped = Self::html_escape_attr(latex);
+            format!("<span class=\"math-inline\" data-math=\"{}\"></span>", escaped)
+        });
+
+        // 步骤三：将 ==高亮== 转换为 <mark>高亮</mark>
+        let s = HIGHLIGHT_REGEX.replace_all(&s, |caps: &regex::Captures| {
+            let text = caps.get(1).map_or("", |m| m.as_str());
+            format!("<mark>{}</mark>", Self::html_escape(text))
+        });
+
+        s.into_owned()
+    }
+
+    /// 对 HTML 属性值进行转义（用于 data-math 等属性）
+    fn html_escape_attr(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('"', "&quot;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
     }
 
     /// 对字符串进行 HTML 转义，防止 XSS 注入
@@ -793,6 +852,66 @@ fn main() {
         assert!(
             toc[0].text.contains('<'),
             "TOC 保留原始文本，不二次转义"
+        );
+    }
+
+    #[test]
+    fn test_math_block() {
+        // 块级数学公式 $$...$$ 应被包装为 div.math-block（带 data-math 属性）
+        let content = "段落前\n\n$$\nE = mc^2\n$$\n\n段落后";
+        let (html, _links, _tags, _, _) = MarkdownProcessor::process(content);
+        assert!(
+            html.contains("class=\"math-block\""),
+            "块级数学公式应生成 math-block div"
+        );
+        assert!(
+            html.contains("data-math="),
+            "应包含 data-math 属性存储 LaTeX"
+        );
+        assert!(
+            !html.contains("$$"),
+            "原始 $$ 不应出现在输出中"
+        );
+    }
+
+    #[test]
+    fn test_math_inline() {
+        // 行内数学公式 $...$ 应被包装为 span.math-inline
+        let content = "根据爱因斯坦公式 $E=mc^2$ 推导";
+        let (html, _links, _tags, _, _) = MarkdownProcessor::process(content);
+        assert!(
+            html.contains("class=\"math-inline\""),
+            "行内数学公式应生成 math-inline span"
+        );
+        assert!(
+            html.contains("data-math="),
+            "应包含 data-math 属性"
+        );
+    }
+
+    #[test]
+    fn test_highlight_syntax() {
+        // ==高亮== 应转换为 <mark>
+        let content = "这段文字中有 ==重要内容== 需要高亮。";
+        let (html, _links, _tags, _, _) = MarkdownProcessor::process(content);
+        assert!(
+            html.contains("<mark>重要内容</mark>"),
+            "==text== 应转换为 <mark>text</mark>"
+        );
+        assert!(
+            !html.contains("==重要内容=="),
+            "原始 == 语法不应出现在输出中"
+        );
+    }
+
+    #[test]
+    fn test_image_lazy_loading() {
+        // 图片应包含 loading="lazy" 属性
+        let content = "![[image.png]]";
+        let (html, _links, _tags, _, _) = MarkdownProcessor::process(content);
+        assert!(
+            html.contains("loading=\"lazy\""),
+            "图片应包含 loading=\"lazy\" 属性"
         );
     }
 }

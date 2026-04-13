@@ -1,0 +1,120 @@
+/* ==========================================
+   图片灯箱样式 — v1.4.1
+   ========================================== */
+
+/* ---- 模态遮罩 ---- */
+.lightbox-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 3000;
+    align-items: center;
+    justify-content: center;
+}
+
+.lightbox-modal.show {
+    display: flex;
+}
+
+.lightbox-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+    cursor: zoom-out;
+}
+
+/* ---- 图片容器 ---- */
+.lightbox-container {
+    position: relative;
+    z-index: 1;
+    max-width: 92vw;
+    max-height: 88vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    animation: lightbox-in 0.18s ease-out both;
+}
+
+@keyframes lightbox-in {
+    from { opacity: 0; transform: scale(0.94); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+.lightbox-img {
+    max-width: 92vw;
+    max-height: 80vh;
+    object-fit: contain;
+    border-radius: 4px;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+    user-select: none;
+}
+
+/* ---- 图片说明 ---- */
+.lightbox-caption {
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 14px;
+    text-align: center;
+    max-width: 80vw;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.lightbox-counter {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- 控制按钮 ---- */
+.lightbox-btn {
+    position: fixed;
+    z-index: 2;
+    width: 44px;
+    height: 44px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+    backdrop-filter: blur(4px);
+}
+
+.lightbox-btn:hover {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.lightbox-btn svg {
+    width: 22px;
+    height: 22px;
+}
+
+.lightbox-prev {
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.lightbox-next {
+    right: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.lightbox-close {
+    top: 16px;
+    right: 16px;
+}
+
+/* ---- 移动端 ---- */
+@media (max-width: 480px) {
+    .lightbox-prev { left: 6px; }
+    .lightbox-next { right: 6px; }
+    .lightbox-close { top: 8px; right: 8px; }
+}

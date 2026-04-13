@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.0 🎉  
+**当前版本**: v1.4.1 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -677,50 +677,59 @@
 
 ---
 
-### ✨ v1.4.1 (计划中 - 内容渲染增强)
+### ✅ v1.4.1 (已发布 - 2026-04-13)
 
-**主题**: Obsidian 语法扩展支持  
-**预计发布**: 2026-08 月
+**主题**: Obsidian 语法扩展支持
 
 补全 Obsidian 常用的富文本语法，让镜像站内容与客户端高度一致。
 
 #### 数学公式
 
-- [ ] **KaTeX 渲染**（引入前端 KaTeX 库，无需后端依赖）
+- ✅ **KaTeX 渲染**（引入前端 KaTeX 库，无需后端依赖）
   - 行内公式：`$E = mc^2$` → 渲染为内联数学公式
-  - 块级公式：`$$\int_0^\infty e^{-x}\,dx = 1$$` → 居中显示
-  - 后端预处理：将公式块包装为 `<span class="math-inline">` / `<div class="math-block">`，前端 KaTeX 渲染
-  - 渲染失败时回退显示原始 LaTeX 文本（优雅降级）
+  - 块级公式：`$$...$$` → 居中块级显示
+  - 后端：`markdown.rs` 将公式包装为 `<span class="math-inline" data-math="...">` / `<div class="math-block" data-math="...">`
+  - 前端：`katex-init.js` 读取 `data-math` 属性，KaTeX CDN 渲染
+  - 渲染失败时显示原始 LaTeX（优雅降级）
 
 #### Obsidian 标注语法
 
-- [ ] **Callout 块**（`> [!TYPE] Title`）
-  - 支持类型：`NOTE` `TIP` `WARNING` `DANGER` `INFO` `SUCCESS` `QUESTION` `QUOTE`
+- ✅ **Callout 块**（`> [!TYPE] Title`）
+  - 支持类型：`NOTE` `TIP` `WARNING` `DANGER` `INFO` `SUCCESS` `QUESTION` `QUOTE` `BUG` `TODO` 等 20+ 类型
   - 可折叠：`> [!NOTE]-` 默认收起，`> [!NOTE]+` 默认展开
-  - 每种类型配色和图标对应 Obsidian 默认样式（CSS 变量实现）
-- [ ] **高亮语法**
+  - `callout.js` 前端解析，`callout.css` 深/浅色各自配色
+- ✅ **高亮语法**
   - `==高亮文本==` → `<mark>高亮文本</mark>`
-  - 深色/浅色模式颜色自适应
+  - `math.css` 提供深/浅色模式颜色自适应样式
 
 #### 图片体验
 
-- [ ] **灯箱效果**
-  - 点击图片弹出全屏模态层放大显示
-  - 键盘导航：`←` `→` 在当前页图片间切换，`Esc` 关闭
-  - 显示 alt 文本作为图片说明
-- [ ] **图片懒加载**
-  - `loading="lazy"` + IntersectionObserver
-  - 减少大型笔记首屏加载的图片请求数
+- ✅ **灯箱效果**
+  - `lightbox.js` 点击图片弹出全屏模态层，`lightbox.css` 毛玻璃遮罩
+  - 键盘导航：`←` `→` 切换，`Esc` 关闭；显示 alt 文本说明和图片计数
+- ✅ **图片懒加载**
+  - `markdown.rs` 后处理为所有 `<img>` 添加 `loading="lazy"`
 
 #### Mermaid 图表扩展
 
-- [ ] **支持更多图表类型**（当前仅渲染 flowchart）
-  - 序列图（`sequenceDiagram`）
-  - 甘特图（`gantt`）
-  - 类图（`classDiagram`）
-  - 状态图（`stateDiagram`）
-- [ ] **Mermaid 主题联动**
-  - 深色模式下自动切换 `mermaid.theme = 'dark'`
+- ✅ **更多图表类型** — `mermaid-init.js` 已配置 sequence/gantt/class/state/er（在之前版本实现）
+- ✅ **Mermaid 主题联动** — `theme.js` 已调用 `MermaidManager.switchTheme()`（在之前版本实现）
+
+#### 实际交付物
+
+- 修改文件：`src/markdown.rs`（数学公式包装 + ==高亮== + img lazy + 4个新测试）
+- 新增文件：`static/js/katex-init.js`（KaTeX 渲染）
+- 新增文件：`static/js/callout.js`（Callout 块解析）
+- 新增文件：`static/js/lightbox.js`（图片灯箱）
+- 新增文件：`static/css/math.css`（数学公式 + 高亮样式）
+- 新增文件：`static/css/callout.css`（Callout 配色）
+- 新增文件：`static/css/lightbox.css`（灯箱样式）
+- 修改文件：`templates/layout.html`（引入 KaTeX CDN + 新文件）
+
+#### 测试结果
+
+- 全量测试：**70/70 通过**（前 66 + 新增 4）
+- 新增测试：4 个（`test_math_block`/`test_math_inline`/`test_highlight_syntax`/`test_image_lazy_loading`）
 
 ---
 
@@ -994,7 +1003,7 @@
 
 **Q3 (7-9月)**: 体验提升期
 - ✅ 完成 v1.4.0（交互体验：快捷键、主题定制、动画）🎉
-- 完成 v1.4.1（内容渲染：KaTeX 数学公式、Callout、高亮、图片灯箱）
+- ✅ 完成 v1.4.1（内容渲染：KaTeX 数学公式、Callout、高亮、图片灯箱）🎉
 - 完成 v1.4.2（搜索发现：实时建议、孤立笔记、随机漫游、最近更新）
 
 **Q4 (10-12月)**: 深度功能期

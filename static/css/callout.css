@@ -1,0 +1,147 @@
+/* ==========================================
+   Callout 块样式 — v1.4.1
+   对应 Obsidian > [!TYPE] Title 语法
+   ========================================== */
+
+/* ---- 基础容器 ---- */
+.callout {
+    border-radius: 6px;
+    border-left: 4px solid var(--callout-color, var(--primary-color));
+    background: color-mix(in srgb, var(--callout-color, var(--primary-color)) 8%, var(--bg-color));
+    margin: 1em 0;
+    overflow: hidden;
+}
+
+/* ---- 标题行 ---- */
+.callout-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 0.92em;
+    color: var(--callout-color, var(--primary-color));
+    user-select: none;
+}
+
+.callout-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    color: var(--callout-color, var(--primary-color));
+}
+
+.callout-icon svg {
+    width: 16px;
+    height: 16px;
+}
+
+.callout-title {
+    flex: 1;
+}
+
+.callout-fold-icon {
+    font-size: 12px;
+    opacity: 0.7;
+    transition: transform 0.2s ease;
+}
+
+.callout-foldable .callout-fold-icon {
+    transform: rotate(0deg);
+}
+
+.callout-foldable.callout-collapsed .callout-fold-icon {
+    transform: rotate(-90deg);
+}
+
+/* ---- 内容区 ---- */
+.callout-content {
+    padding: 0 14px 12px;
+    font-size: 0.95em;
+}
+
+.callout-content > *:first-child {
+    margin-top: 0;
+}
+
+.callout-content > *:last-child {
+    margin-bottom: 0;
+}
+
+/* 折叠时隐藏内容 */
+.callout-collapsed .callout-content {
+    display: none;
+}
+
+/* ---- 各类型配色 ---- */
+
+/* NOTE — 蓝紫 */
+.callout-note { --callout-color: #6a5acd; }
+/* TIP — 绿色 */
+.callout-tip  { --callout-color: #22a06b; }
+/* INFO — 蓝色 */
+.callout-info { --callout-color: #0969da; }
+/* WARNING / CAUTION — 橙黄 */
+.callout-warning,
+.callout-caution { --callout-color: #d1820a; }
+/* DANGER / ERROR — 红色 */
+.callout-danger,
+.callout-error   { --callout-color: #cf222e; }
+/* SUCCESS / CHECK / DONE — 绿色 */
+.callout-success,
+.callout-check,
+.callout-done    { --callout-color: #1a7f37; }
+/* QUESTION / FAQ / HELP — 紫色 */
+.callout-question,
+.callout-faq,
+.callout-help    { --callout-color: #8250df; }
+/* QUOTE / CITE — 灰色 */
+.callout-quote,
+.callout-cite    { --callout-color: #6e7781; }
+/* BUG / FAILURE / FAIL — 深红 */
+.callout-bug,
+.callout-failure,
+.callout-fail    { --callout-color: #cf222e; }
+/* EXAMPLE / EXPERIMENT — 橙色 */
+.callout-example,
+.callout-experiment { --callout-color: #e36209; }
+/* ABSTRACT / SUMMARY / TLDR — 青色 */
+.callout-abstract,
+.callout-summary,
+.callout-tldr    { --callout-color: #0e7cb5; }
+/* TODO — 蓝色 */
+.callout-todo    { --callout-color: #0969da; }
+/* MISSING — 红色 */
+.callout-missing { --callout-color: #cf222e; }
+
+/* ---- 深色模式调整 ---- */
+[data-theme="dark"] .callout {
+    background: color-mix(in srgb, var(--callout-color, var(--primary-color)) 12%, var(--bg-color));
+}
+
+[data-theme="dark"] .callout-note    { --callout-color: #7aa2f7; }
+[data-theme="dark"] .callout-tip     { --callout-color: #9ece6a; }
+[data-theme="dark"] .callout-info    { --callout-color: #7aa2f7; }
+[data-theme="dark"] .callout-warning,
+[data-theme="dark"] .callout-caution { --callout-color: #e0af68; }
+[data-theme="dark"] .callout-danger,
+[data-theme="dark"] .callout-error   { --callout-color: #f7768e; }
+[data-theme="dark"] .callout-success,
+[data-theme="dark"] .callout-check,
+[data-theme="dark"] .callout-done    { --callout-color: #9ece6a; }
+[data-theme="dark"] .callout-question,
+[data-theme="dark"] .callout-faq,
+[data-theme="dark"] .callout-help    { --callout-color: #bb9af7; }
+[data-theme="dark"] .callout-quote,
+[data-theme="dark"] .callout-cite    { --callout-color: #9aa5ce; }
+[data-theme="dark"] .callout-bug,
+[data-theme="dark"] .callout-failure,
+[data-theme="dark"] .callout-fail    { --callout-color: #f7768e; }
+[data-theme="dark"] .callout-example,
+[data-theme="dark"] .callout-experiment { --callout-color: #ff9e64; }
+[data-theme="dark"] .callout-abstract,
+[data-theme="dark"] .callout-summary,
+[data-theme="dark"] .callout-tldr    { --callout-color: #2ac3de; }
+[data-theme="dark"] .callout-todo    { --callout-color: #7aa2f7; }

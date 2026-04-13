@@ -6,6 +6,22 @@
 
 ---
 
+## [v1.4.1] — 2026-04-13
+
+内容渲染增强：KaTeX 数学公式、Callout 标注块、==高亮==、图片灯箱与懒加载。
+
+### Added
+- **KaTeX 数学公式渲染**：后端 `markdown.rs` 将 `$$...$$`（块级）和 `$...$`（行内）转换为带 `data-math` 属性的 HTML 元素；前端 `katex-init.js` 通过 KaTeX CDN 渲染；渲染失败时显示原始 LaTeX 文本（优雅降级）
+- **Callout 标注块**：`callout.js` 前端解析 `> [!TYPE] Title` 语法的 blockquote 并转换为样式化 callout div，支持 20+ 类型（NOTE/TIP/WARNING/DANGER/SUCCESS/QUESTION/QUOTE/BUG/TODO 等），支持 `[!NOTE]-` 默认收起 / `[!NOTE]+` 默认展开；`callout.css` 深/浅色模式各自配色
+- **高亮语法**：`markdown.rs` 将 `==高亮文本==` 转换为 `<mark>高亮文本</mark>`，样式在 `math.css` 中
+- **图片灯箱**：`lightbox.js` 点击 `.markdown-body img` 弹出全屏模态层，`←`/`→` 键在当前页图片间切换，`Esc` 关闭；`lightbox.css` 毛玻璃遮罩样式
+- **图片懒加载**：`markdown.rs` 输出的所有 `<img>` 标签自动添加 `loading="lazy"`，减少首屏图片请求
+
+### Changed
+- Mermaid 图表类型扩展（序列图/甘特图/类图/状态图）和主题联动已在之前版本实现，本版本在 ROADMAP 中标记完成
+
+---
+
 ## [v1.4.0] — 2026-04-13
 
 交互体验基础：全套键盘快捷键、主题预设与定制、代码块主题选择、动画优化。
