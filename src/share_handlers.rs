@@ -81,7 +81,7 @@ impl From<&ShareLink> for ShareInfoResponse {
             creator: share.creator.clone(),
             created_at,
             expires_at,
-            has_password: share.password.is_some(),
+            has_password: share.password_hash.is_some(),
             max_visits: share.max_visits,
             visit_count: share.visit_count,
             is_valid: share.is_valid(),

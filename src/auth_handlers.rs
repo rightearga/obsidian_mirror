@@ -1,6 +1,9 @@
 //! 认证相关的 HTTP 处理器
 
-use actix_web::{cookie::Cookie, web, HttpMessage, HttpRequest, HttpResponse, Responder};
+use actix_web::{
+    cookie::{Cookie, SameSite},
+    web, HttpMessage, HttpRequest, HttpResponse, Responder,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use time::Duration;
@@ -89,10 +92,14 @@ pub async fn login_handler(
                         Duration::hours(24)
                     };
 
+                    // 安全属性：HttpOnly 防止 JS 读取；Secure 防止 HTTP 明文传输；
+                    // SameSite::Lax 防止 CSRF 同时允许顶层导航跳转后携带 Cookie
                     let cookie = Cookie::build("auth_token", token.clone())
                         .path("/")
                         .max_age(max_age)
                         .http_only(true)
+                        .secure(true)
+                        .same_site(SameSite::Lax)
                         .finish();
 
                     HttpResponse::Ok()
@@ -131,10 +138,13 @@ pub async fn login_handler(
 
 /// 登出处理器
 pub async fn logout_handler() -> impl Responder {
-    // 删除 Cookie
+    // 删除 Cookie（属性必须与设置时完全一致，浏览器才能正确清除）
     let cookie = Cookie::build("auth_token", "")
         .path("/")
         .max_age(Duration::seconds(0))
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Lax)
         .finish();
 
     HttpResponse::Ok()

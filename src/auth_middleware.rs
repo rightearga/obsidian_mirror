@@ -78,17 +78,15 @@ where
         }
 
         let path = req.path().to_string();
-        
-        // 公开路径：不需要认证
-        let public_paths = vec![
-            "/login",
-            "/api/auth/login",
-            "/static/",
-            "/share/",  // 分享链接访问
-        ];
-        
-        let is_public = public_paths.iter().any(|p| path.starts_with(p));
-        
+
+        // 公开路径判断：
+        // - 精确路径（不以 / 结尾）使用 == 精确匹配，防止 /login-admin 等路径绕过认证
+        // - 有子路径的前缀（以 / 结尾）使用 starts_with 前缀匹配
+        let is_public = path == "/login"
+            || path == "/api/auth/login"
+            || path.starts_with("/static/")
+            || path.starts_with("/share/");
+
         // 如果是公开路径，直接放行
         if is_public {
             let service = self.service.clone();

@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.3.1 🎉  
+**当前版本**: v1.3.2 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -480,29 +480,37 @@
 
 ---
 
-### 🔒 v1.3.2 (计划中 - 安全加固)
+### ✅ v1.3.2 (已发布 - 2026-04-13)
 
-**主题**: 安全加固  
-**预计发布**: 2026-05 月
+**主题**: 安全加固
 
-修复 `CODEREVIEW_1.3.md` 中全部安全类问题。
+修复 `CODEREVIEW_1.3.md` 中全部安全类问题（S2/S3/S4）。
 
-#### 安全修复
+#### 核心功能
 
-- [ ] **[S2] Cookie 补充 `Secure` 标志**
-  - 文件：`src/auth_handlers.rs:92`
-  - 问题：`auth_token` Cookie 缺少 `Secure` 属性，HTTP 连接下 JWT 会明文传输
-  - 修复：生产环境下设置 `.secure(true)`，并添加 `SameSite::Lax`
+- ✅ **[S2] Cookie 补充 `Secure` 和 `SameSite` 属性**
+  - 文件：`src/auth_handlers.rs`
+  - 修复：登录/登出 Cookie 添加 `.secure(true).same_site(SameSite::Lax)`，防止 JWT Token 在 HTTP 连接下明文传输
 
-- [ ] **[S3] 分享链接密码改用哈希存储**
-  - 文件：`src/share_db.rs`
-  - 问题：分享链接的访问密码以明文存储在 redb 数据库中
-  - 修复：创建分享时使用 `bcrypt` 对密码哈希，验证时使用 `bcrypt::verify`；字段重命名为 `password_hash`
+- ✅ **[S3] 分享链接密码改用 bcrypt 哈希存储**
+  - 文件：`src/share_db.rs`、`src/share_handlers.rs`
+  - 修复：`password` 字段重命名为 `password_hash`；创建分享时用 `bcrypt::hash` 哈希，验证时用 `bcrypt::verify`；`has_password` 字段同步更新
 
-- [ ] **[S4] 认证中间件路径匹配收紧**
-  - 文件：`src/auth_middleware.rs:83`
-  - 问题：`/login` 使用 `starts_with` 匹配，理论上 `/login-admin` 等路径也会绕过认证
-  - 修复：对精确路径使用 `==` 比较，仅对有子路径的前缀（`/static/`、`/share/`）保留 `starts_with`
+- ✅ **[S4] 认证中间件路径匹配收紧**
+  - 文件：`src/auth_middleware.rs`
+  - 修复：`/login`、`/api/auth/login` 改为精确匹配 `==`；`/static/`、`/share/` 保留 `starts_with`
+
+#### 实际交付物
+
+- 修改文件：`src/auth_handlers.rs`（S2 Cookie 安全属性）
+- 修改文件：`src/share_db.rs`（S3 密码哈希化）
+- 修改文件：`src/share_handlers.rs`（S3 has_password 字段）
+- 修改文件：`src/auth_middleware.rs`（S4 路径精确匹配）
+
+#### 测试结果
+
+- 全量测试：**52/52 通过**
+- 新增测试：0 个（已有 share_db 测试增强了哈希验证断言）
 
 ---
 
@@ -722,7 +730,7 @@
 
 **Q2 (4-6月)**: 质量加固期
 - ✅ 完成 v1.3.1（紧急 Bug 修复 + XSS 安全修复）🎉
-- 完成 v1.3.2（安全加固：Cookie、分享密码哈希、中间件收紧）
+- ✅ 完成 v1.3.2（安全加固：Cookie、分享密码哈希、中间件收紧）🎉
 - 完成 v1.4.0（性能优化 + 用户体验细节完善）
 - 持续补充单元测试
 

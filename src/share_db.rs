@@ -10,6 +10,9 @@ use std::time::{Duration, SystemTime};
 use tracing::{debug, info};
 use uuid::Uuid;
 
+/// 分享链接密码的 bcrypt 哈希成本，用于保护密码不被数据库泄露所暴露
+const PASSWORD_BCRYPT_COST: u32 = bcrypt::DEFAULT_COST;
+
 /// 分享链接表定义
 /// Key: share_token (String)
 /// Value: ShareLink (序列化为 JSON)
@@ -33,8 +36,9 @@ pub struct ShareLink {
     /// 过期时间（None 表示永久有效）
     pub expires_at: Option<SystemTime>,
 
-    /// 访问密码（None 表示无需密码）
-    pub password: Option<String>,
+    /// 访问密码的 bcrypt 哈希（None 表示无需密码）
+    /// 存储哈希而非明文，防止数据库泄露导致密码暴露
+    pub password_hash: Option<String>,
 
     /// 访问次数限制（None 表示无限制）
     pub max_visits: Option<u32>,
@@ -45,6 +49,9 @@ pub struct ShareLink {
 
 impl ShareLink {
     /// 创建新的分享链接
+    ///
+    /// 若提供了密码，将使用 bcrypt 对其进行单向哈希后存储，
+    /// 防止数据库文件被盗取时密码明文暴露。
     pub fn new(
         note_path: String,
         creator: String,
@@ -56,13 +63,19 @@ impl ShareLink {
         let created_at = SystemTime::now();
         let expires_at = expires_in.map(|d| created_at + d);
 
+        // 对密码进行 bcrypt 哈希，不存储明文
+        let password_hash = password.map(|p| {
+            bcrypt::hash(p, PASSWORD_BCRYPT_COST)
+                .expect("bcrypt 哈希失败（不应发生）")
+        });
+
         Self {
             token,
             note_path,
             creator,
             created_at,
             expires_at,
-            password,
+            password_hash,
             max_visits,
             visit_count: 0,
         }
@@ -88,10 +101,15 @@ impl ShareLink {
     }
 
     /// 验证访问密码
+    ///
+    /// 使用 bcrypt::verify 比较提供的明文密码与存储的哈希值。
     pub fn verify_password(&self, password: Option<&str>) -> bool {
-        match (&self.password, password) {
+        match (&self.password_hash, password) {
             (None, _) => true, // 无密码保护
-            (Some(expected), Some(provided)) => expected == provided,
+            (Some(hash), Some(provided)) => {
+                // bcrypt::verify 失败时（哈希格式错误等）视为验证失败
+                bcrypt::verify(provided, hash).unwrap_or(false)
+            }
             (Some(_), None) => false, // 需要密码但未提供
         }
     }
@@ -316,9 +334,16 @@ mod tests {
             None,
         );
 
-        assert!(share_with_pwd.verify_password(Some("secret")));
-        assert!(!share_with_pwd.verify_password(Some("wrong")));
-        assert!(!share_with_pwd.verify_password(None));
+        // 验证 bcrypt 哈希后的密码不是明文
+        assert!(share_with_pwd.password_hash.is_some(), "密码应被存储为哈希");
+        let hash = share_with_pwd.password_hash.as_ref().unwrap();
+        assert_ne!(hash.as_str(), "secret", "存储的不应是明文密码");
+        assert!(hash.starts_with("$2"), "密码哈希应符合 bcrypt 格式（$2x$...）");
+
+        // 验证正确密码通过 bcrypt::verify 验证
+        assert!(share_with_pwd.verify_password(Some("secret")), "正确密码应验证成功");
+        assert!(!share_with_pwd.verify_password(Some("wrong")), "错误密码应验证失败");
+        assert!(!share_with_pwd.verify_password(None), "无密码时应验证失败");
 
         let share_without_pwd = ShareLink::new(
             "test/note.md".to_string(),
@@ -328,7 +353,7 @@ mod tests {
             None,
         );
 
-        assert!(share_without_pwd.verify_password(None));
-        assert!(share_without_pwd.verify_password(Some("anything")));
+        assert!(share_without_pwd.verify_password(None), "无密码保护时任何访问均应通过");
+        assert!(share_without_pwd.verify_password(Some("anything")), "无密码保护时提供密码也应通过");
     }
 }

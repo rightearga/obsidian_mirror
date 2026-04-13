@@ -6,6 +6,20 @@
 
 ---
 
+## [v1.3.2] — 2026-04-13
+
+安全加固：修复 3 项安全类问题（Cookie 安全属性、分享密码哈希存储、中间件路径精确匹配）。
+
+### Fixed
+- **[S2] Cookie 补充 `Secure` 和 `SameSite` 属性**：`auth_handlers.rs` 登录/登出 Cookie 添加 `.secure(true).same_site(SameSite::Lax)`，防止 JWT Token 在 HTTP 连接下明文传输
+- **[S3] 分享链接密码改用 bcrypt 哈希存储**：`share_db.rs` 将 `password` 字段重命名为 `password_hash`，创建时使用 `bcrypt` 单向哈希，验证时使用 `bcrypt::verify`，防止数据库泄露时密码明文暴露；`share_handlers.rs` 同步更新 `has_password` 字段
+- **[S4] 认证中间件路径匹配收紧**：`auth_middleware.rs` 将 `/login`、`/api/auth/login` 从 `starts_with` 改为精确匹配 `==`，防止 `/login-admin` 等路径绕过认证
+
+### 修复统计
+- 🟠 P1 修复：3 项（S2、S3、S4）
+
+---
+
 ## [v1.3.1] — 2026-04-13
 
 Bug 修复与安全加固：修复 4 个 P0/P1 级问题（标签持久化残留、增量反向链接丢失、标题 XSS、同步并发竞争）。
