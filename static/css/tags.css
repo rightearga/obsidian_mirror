@@ -1,0 +1,224 @@
+/* 标签页面样式 */
+
+/* 标签云容器 */
+.tags-cloud {
+    padding: 2rem 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    justify-content: flex-start;
+}
+
+/* 标签云项 */
+.tag-cloud-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 2px solid var(--border-color, #e0e0e0);
+    border-radius: 20px;
+    text-decoration: none;
+    color: var(--text-color);
+    transition: all 0.2s ease;
+    font-size: 1rem;
+}
+
+/* 根据笔记数量调整标签云大小 */
+.tag-cloud-item[data-count="1"],
+.tag-cloud-item[data-count="2"] {
+    font-size: 0.9rem;
+}
+
+.tag-cloud-item[data-count="3"],
+.tag-cloud-item[data-count="4"],
+.tag-cloud-item[data-count="5"] {
+    font-size: 1rem;
+}
+
+.tag-cloud-item[data-count="6"],
+.tag-cloud-item[data-count="7"],
+.tag-cloud-item[data-count="8"],
+.tag-cloud-item[data-count="9"] {
+    font-size: 1.1rem;
+}
+
+.tag-cloud-item:where([data-count^="1"], [data-count^="2"], [data-count^="3"], [data-count^="4"], [data-count^="5"], [data-count^="6"], [data-count^="7"], [data-count^="8"], [data-count^="9"])[data-count$="0"],
+.tag-cloud-item:where([data-count^="1"], [data-count^="2"], [data-count^="3"], [data-count^="4"], [data-count^="5"], [data-count^="6"], [data-count^="7"], [data-count^="8"], [data-count^="9"]):not([data-count="1"]):not([data-count="2"]):not([data-count="3"]):not([data-count="4"]):not([data-count="5"]):not([data-count="6"]):not([data-count="7"]):not([data-count="8"]):not([data-count="9"]) {
+    font-size: 1.2rem;
+}
+
+.tag-cloud-item:hover {
+    background: var(--link-color);
+    color: white;
+    border-color: var(--link-color);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.tag-cloud-item .tag-name {
+    font-weight: 500;
+}
+
+.tag-cloud-item .tag-count {
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+/* 标签列表 */
+.tags-list {
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--border-color);
+}
+
+.tags-list h2 {
+    margin-bottom: 1.5rem;
+    color: var(--text-color);
+}
+
+.tags-list ul {
+    list-style: none;
+    padding: 0;
+}
+
+.tags-list li {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.tags-list li:last-child {
+    border-bottom: none;
+}
+
+.tags-list a {
+    text-decoration: none;
+    color: var(--link-color);
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.tags-list a:hover {
+    color: var(--link-hover);
+    text-decoration: underline;
+}
+
+.tags-list .note-count {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* 单个标签页面 */
+.tag-description {
+    margin: 1.5rem 0;
+    padding: 1rem;
+    background: transparent;
+    border-left: 4px solid var(--link-color);
+    border-radius: 4px;
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--link-color);
+}
+
+.tag-description code {
+    background: var(--code-bg);
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+}
+
+/* 笔记列表 */
+.note-list {
+    list-style: none;
+    padding: 0;
+    margin: 2rem 0;
+}
+
+.note-list li {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.note-list li:last-child {
+    border-bottom: none;
+}
+
+.note-list a {
+    text-decoration: none;
+    color: var(--text-color);
+    font-size: 1.05rem;
+    transition: color 0.2s ease;
+}
+
+.note-list a:hover {
+    color: var(--link-color);
+}
+
+.note-list a::before {
+    content: "📄 ";
+    margin-right: 0.5rem;
+}
+
+/* 标签操作按钮 */
+.tag-actions {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.tag-actions .button {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    background: var(--link-color);
+    color: white;
+    text-decoration: none;
+    border-radius: 5px;
+    transition: background 0.2s ease;
+}
+
+.tag-actions .button:hover {
+    background: var(--link-hover);
+}
+
+/* 空消息 */
+.empty-message {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin: 2rem 0;
+}
+
+.empty-message code {
+    background: var(--code-bg);
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .tags-cloud {
+        gap: 0.75rem;
+    }
+    
+    .tag-cloud-item {
+        font-size: 0.9rem !important;
+        padding: 0.4rem 0.8rem;
+    }
+    
+    .tags-list {
+        margin-top: 2rem;
+    }
+    
+    .tags-list li {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+}

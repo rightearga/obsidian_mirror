@@ -1,0 +1,418 @@
+/* ==========================================
+   Mermaid 图表样式
+   ========================================== */
+
+/* Mermaid 容器 */
+.markdown-body .mermaid {
+    margin: 2em 0;
+    padding: 1.5em;
+    background-color: var(--code-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow-x: auto;
+    overflow-y: visible;  /* 改为 visible，允许内容溢出 */
+    text-align: center;
+    transition: background-color 0.2s, border-color 0.2s;
+}
+
+/* 暗色主题调整 */
+[data-theme="dark"] .markdown-body .mermaid {
+    background-color: rgba(45, 55, 72, 0.5);
+    border-color: rgba(90, 107, 125, 0.3);
+}
+
+/* Mermaid SVG 样式 */
+.markdown-body .mermaid svg {
+    max-width: 100%;
+    height: auto;
+    display: inline-block;
+    vertical-align: middle;
+}
+
+/* Mermaid 文本样式 - 确保文字不被截断 */
+.markdown-body .mermaid .nodeLabel,
+.markdown-body .mermaid .edgeLabel {
+    overflow: visible !important;
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    word-break: break-word !important;
+}
+
+/* 边标签特殊处理 - 确保连线文字可见 */
+/* 移除这些规则 - 让 JavaScript 完全控制边标签样式 */
+
+/* 节点文本自适应 - 关键：确保节点框高度自适应 */
+/* 强制显示所有形状节点 - 针对 htmlLabels: false 的情况 */
+.markdown-body .mermaid rect.basic,
+.markdown-body .mermaid rect.label-container,
+.markdown-body .mermaid g.node rect {
+    stroke: #00ff00 !important;  /* 临时改为绿色，超级明显 */
+    stroke-width: 4px !important;  /* 加粗到 4px */
+    fill: #2a2a2a !important;
+    opacity: 1 !important;
+    rx: 5 !important;
+    ry: 5 !important;
+    display: block !important;  /* 关键修复：强制 block */
+    height: auto !important;   /* 关键修复：高度自动 */
+    width: auto !important;
+}
+
+/* 亮色主题节点样式 */
+html:not([data-theme="dark"]) .markdown-body .mermaid rect.basic,
+html:not([data-theme="dark"]) .markdown-body .mermaid rect.label-container,
+html:not([data-theme="dark"]) .markdown-body .mermaid g.node rect {
+    stroke: #ff0000 !important;  /* 临时改为红色，超级明显 */
+    fill: #ffffff !important;
+    stroke-width: 4px !important;
+    display: block !important;
+    height: auto !important;
+    width: auto !important;
+}
+
+/* 其他形状节点 */
+.markdown-body .mermaid g.node circle,
+.markdown-body .mermaid g.node ellipse,
+.markdown-body .mermaid g.node polygon,
+.markdown-body .mermaid g.node path {
+    stroke: #7aa2f7 !important;
+    stroke-width: 2px !important;
+    fill: #2a2a2a !important;
+    opacity: 1 !important;
+}
+
+html:not([data-theme="dark"]) .markdown-body .mermaid g.node circle,
+html:not([data-theme="dark"]) .markdown-body .mermaid g.node ellipse,
+html:not([data-theme="dark"]) .markdown-body .mermaid g.node polygon,
+html:not([data-theme="dark"]) .markdown-body .mermaid g.node path {
+    stroke: #7aa2f7 !important;
+    fill: #ffffff !important;
+}
+
+/* 节点文本颜色 */
+.markdown-body .mermaid g.node text,
+.markdown-body .mermaid .node text,
+.markdown-body .mermaid .nodeLabel {
+    fill: #dcddde !important;
+}
+
+html:not([data-theme="dark"]) .markdown-body .mermaid g.node text,
+html:not([data-theme="dark"]) .markdown-body .mermaid .node text,
+html:not([data-theme="dark"]) .markdown-body .mermaid .nodeLabel {
+    fill: #333333 !important;
+}
+
+/* 边标签文本样式 - htmlLabels: false 时使用 <text> 元素 */
+.markdown-body .mermaid .edgeLabel text,
+.markdown-body .mermaid g.edgeLabel text {
+    fill: #dcddde !important;
+    font-size: 13px !important;
+}
+
+html:not([data-theme="dark"]) .markdown-body .mermaid .edgeLabel text,
+html:not([data-theme="dark"]) .markdown-body .mermaid g.edgeLabel text {
+    fill: #333333 !important;
+}
+
+/* 针对 foreignObject 的特殊处理 */
+.markdown-body .mermaid g.node foreignObject {
+    overflow: visible; /* 允许溢出，防止裁剪 */
+    background: transparent !important;
+}
+
+/* 确保 foreignObject 内部 div 不遮挡 - 仅针对节点，不影响边标签 */
+.markdown-body .mermaid g.node foreignObject div,
+.markdown-body .mermaid g.node .label,
+.markdown-body .mermaid .nodeLabel,
+.markdown-body .mermaid g.node .label div {
+    background-color: transparent !important;
+}
+
+/* 注意：不要让 edgeLabel 的背景透明 */
+/* 移除这些规则 - 让 JavaScript 完全控制边标签样式 */
+
+/* Fallback: 给 foreignObject 下的第一级 div 添加边框 
+   这是一种兜底策略，主要针对渲染为 rect 但 SVG 不可见的节点（如包含 HTML 的节点）。
+*/
+.markdown-body .mermaid g.node foreignObject > div {
+    border: 1px solid var(--mermaid-node-border, #7aa2f7);
+    border-radius: 4px;
+    box-sizing: border-box;
+    background-color: var(--mermaid-main-bkg, #2a2a2a) !important; 
+    color: var(--mermaid-text-color, #dcddde);
+    padding: 4px;
+    width: 100% !important;
+    height: 100% !important;
+}
+
+/* 
+   排除那些拥有独立 SVG 形状（非 rect）的节点，防止出现双重边框。
+   例如：数据库(path), 圆形(circle/ellipse), 菱形(polygon) 等。
+   使用 :has 选择器（现代浏览器支持）。
+*/
+.markdown-body .mermaid g.node:has(path) foreignObject > div,
+.markdown-body .mermaid g.node:has(circle) foreignObject > div,
+.markdown-body .mermaid g.node:has(ellipse) foreignObject > div,
+.markdown-body .mermaid g.node:has(polygon) foreignObject > div {
+    border: none !important;
+    background-color: transparent !important;
+    padding: 0 !important;
+}
+
+/* 当 htmlLabels: false 时，不使用 foreignObject，所以不需要 fallback 边框 */
+/* 但我们需要确保 text 元素的样式正确 */
+.markdown-body .mermaid g.node text {
+    fill: var(--text-color, #dcddde) !important;
+    font-size: 14px !important;
+}
+
+[data-theme="light"] .markdown-body .mermaid g.node text {
+    fill: #333333 !important;
+}
+
+/* 移除原有的可能冲突的样式 */
+.markdown-body .mermaid g.node rect {
+    /* 如果有了上面的 fallback，也许我们不需要强制显示 rect 了？
+       不，还是保留它，但也许透明度调低？
+       或者，我们可以让 fallback 覆盖在 rect 上。
+    */
+}
+
+/* 强制节点标签容器自适应高度 */
+.markdown-body .mermaid .label {
+    overflow: visible !important;
+}
+
+.markdown-body .mermaid .label foreignObject {
+    overflow: visible !important;
+    height: auto !important;
+}
+
+.markdown-body .mermaid .label div {
+    overflow: visible !important;
+    height: auto !important;
+    min-height: fit-content !important;
+}
+
+/* 标签文本 */
+.markdown-body .mermaid text {
+    /* 确保文本可见 */
+    overflow: visible !important;
+}
+
+/* 节点组 */
+.markdown-body .mermaid .node {
+    overflow: visible !important;
+}
+
+.markdown-body .mermaid .node .label-container {
+    overflow: visible !important;
+    height: auto !important;
+}
+
+/* 类图和 ER 图的文本 */
+.markdown-body .mermaid .classLabel,
+.markdown-body .mermaid .entityLabel {
+    overflow: visible;
+    white-space: normal;
+}
+
+/* 序列图 actor 文本 */
+.markdown-body .mermaid .actor {
+    overflow: visible;
+}
+
+/* 甘特图任务文本 */
+.markdown-body .mermaid .taskText,
+.markdown-body .mermaid .sectionTitle {
+    overflow: visible;
+    white-space: normal;
+}
+
+/* Mermaid 错误提示 */
+.markdown-body .mermaid-error {
+    color: var(--error-color, #f56565);
+    background-color: var(--error-bg, #fff5f5);
+    border: 1px solid var(--error-border, #feb2b2);
+    border-radius: 6px;
+    padding: 1em;
+    margin: 1.5em 0;
+    text-align: left;
+}
+
+[data-theme="dark"] .markdown-body .mermaid-error {
+    background-color: rgba(124, 45, 18, 0.2);
+    border-color: rgba(245, 101, 101, 0.3);
+}
+
+.markdown-body .mermaid-error p {
+    margin: 0 0 0.5em 0;
+    font-weight: 600;
+}
+
+.markdown-body .mermaid-error pre {
+    margin: 0;
+    padding: 0.5em;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 4px;
+    font-size: 0.85em;
+    overflow-x: auto;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .markdown-body .mermaid {
+        padding: 1em;
+        margin: 1.5em 0;
+        /* 允许水平滚动以容纳大图表 */
+        overflow-x: auto;
+    }
+    
+    .markdown-body .mermaid svg {
+        /* 在移动端，允许图表超出容器宽度并可滚动 */
+        min-width: 100%;
+    }
+}
+
+/* 打印样式 */
+@media print {
+    .markdown-body .mermaid {
+        background-color: transparent;
+        border: 1px solid #ddd;
+        page-break-inside: avoid;
+    }
+}
+
+/* 额外的文本显示修复 - 针对被截断的问题 */
+.markdown-body .mermaid svg .edgeLabel,
+.markdown-body .mermaid svg .nodeLabel,
+.markdown-body .mermaid svg text {
+    dominant-baseline: auto !important;
+}
+
+/* 确保 edgeLabel 文字可见 - 多种可能的类名 */
+.markdown-body .mermaid svg .edgeLabel,
+.markdown-body .mermaid svg g.edgeLabel,
+.markdown-body .mermaid svg .label-container,
+.markdown-body .mermaid svg g.label {
+    overflow: visible !important;
+}
+
+.markdown-body .mermaid svg .edgeLabel .label,
+.markdown-body .mermaid svg g.edgeLabel foreignObject,
+.markdown-body .mermaid svg g.edgeLabel div,
+.markdown-body .mermaid svg .edgeLabel span {
+    background-color: var(--code-bg, #f5f5f5) !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    font-size: 13px !important;
+    color: var(--text-color, #333) !important;
+}
+
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel .label,
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel foreignObject,
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel div,
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel span {
+    background-color: rgba(42, 42, 42, 0.95) !important;
+    color: var(--text-color, #dcddde) !important;
+    border: 1px solid rgba(65, 72, 104, 0.5);
+}
+
+/* 确保 foreignObject 高度自适应 */
+.markdown-body .mermaid svg foreignObject {
+    overflow: visible !important;
+}
+
+/* 节点内的 span 和 p 标签 */
+.markdown-body .mermaid .nodeLabel span,
+.markdown-body .mermaid .nodeLabel p {
+    line-height: 1.5 !important;
+    padding: 4px 8px !important;
+    display: block !important;
+}
+
+/* === 边标签（连线文字）终极修复 === */
+/* 覆盖所有可能的边标签选择器 */
+.markdown-body .mermaid svg g.edgeLabel,
+.markdown-body .mermaid svg .edgeLabel,
+.markdown-body .mermaid g.edgeLabel,
+.markdown-body .mermaid .edgeLabel {
+    pointer-events: all !important;
+    visibility: visible !important;
+    display: block !important;
+    opacity: 1 !important;
+    overflow: visible !important;
+}
+
+/* 关键修复：g.label 容器也必须 overflow: visible */
+.markdown-body .mermaid svg g.edgeLabel g.label,
+.markdown-body .mermaid g.edgeLabel g.label {
+    overflow: visible !important;
+}
+
+/* 边标签内的文字容器 */
+.markdown-body .mermaid svg g.edgeLabel foreignObject,
+.markdown-body .mermaid svg .edgeLabel foreignObject,
+.markdown-body .mermaid svg g.edgeLabel .label,
+.markdown-body .mermaid svg .edgeLabel .label,
+.markdown-body .mermaid svg g.edgeLabel div,
+.markdown-body .mermaid svg .edgeLabel div,
+.markdown-body .mermaid svg g.edgeLabel span,
+.markdown-body .mermaid svg .edgeLabel span,
+.markdown-body .mermaid svg g.edgeLabel text,
+.markdown-body .mermaid svg .edgeLabel text {
+    visibility: visible !important;
+    display: inline-block !important;
+    opacity: 1 !important;
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    white-space: pre-wrap !important;
+    word-break: keep-all !important;
+    min-width: 40px !important;
+    min-height: 20px !important;
+    overflow: visible !important;
+}
+
+/* 边标签内的文字容器 */
+.markdown-body .mermaid svg g.edgeLabel foreignObject,
+.markdown-body .mermaid svg .edgeLabel foreignObject,
+.markdown-body .mermaid svg g.edgeLabel .label,
+.markdown-body .mermaid svg .edgeLabel .label,
+.markdown-body .mermaid svg g.edgeLabel div,
+.markdown-body .mermaid svg .edgeLabel div,
+.markdown-body .mermaid svg g.edgeLabel span,
+.markdown-body .mermaid svg .edgeLabel span,
+.markdown-body .mermaid svg g.edgeLabel text,
+.markdown-body .mermaid svg .edgeLabel text {
+    visibility: visible !important;
+    display: inline-block !important;
+    opacity: 1 !important;
+    background-color: var(--code-bg, #ffffff) !important;
+    padding: 4px 8px !important;
+    border-radius: 4px !important;
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    color: var(--text-color, #333333) !important;
+    white-space: pre-wrap !important;
+    word-break: keep-all !important;
+    border: 1px solid var(--border-color, #e5e7eb);
+    min-width: 40px !important;
+    min-height: 20px !important;
+    overflow: visible !important;
+}
+
+/* 暗色主题边标签 */
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel foreignObject,
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel foreignObject,
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel .label,
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel .label,
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel div,
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel div,
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel span,
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel span,
+[data-theme="dark"] .markdown-body .mermaid svg g.edgeLabel text,
+[data-theme="dark"] .markdown-body .mermaid svg .edgeLabel text {
+    background-color: rgba(42, 42, 42, 0.98) !important;
+    color: #dcddde !important;
+    border: 1px solid rgba(65, 72, 104, 0.6) !important;
+}
+

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ note_title }} - 分享</title>
+    
+    <!-- 基础样式 -->
+    <link rel="stylesheet" href="/static/css/variables.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/markdown.css?v=20260131">
+    
+    <!-- 代码高亮 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css" media="(prefers-color-scheme: light)">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css" media="(prefers-color-scheme: dark)">
+    
+    <style>
+        /* 分享页面专用样式 */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #2c3e50;
+            background: #f8f9fa;
+        }
+        
+        .share-container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .share-header {
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+        
+        .share-header h1 {
+            margin: 0 0 16px 0;
+            font-size: 32px;
+            font-weight: 600;
+            color: #1a1a1a;
+        }
+        
+        .share-meta {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: 14px;
+            color: #7f8c8d;
+        }
+        
+        .share-meta-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .share-meta-item svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .share-content {
+            background: white;
+            border-radius: 12px;
+            padding: 32px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            min-height: 400px;
+        }
+        
+        .share-footer {
+            margin-top: 20px;
+            padding: 20px;
+            text-align: center;
+            font-size: 14px;
+            color: #95a5a6;
+        }
+        
+        .share-footer a {
+            color: #4a90e2;
+            text-decoration: none;
+        }
+        
+        .share-footer a:hover {
+            text-decoration: underline;
+        }
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .share-container {
+                padding: 12px;
+            }
+            
+            .share-header {
+                padding: 16px;
+            }
+            
+            .share-header h1 {
+                font-size: 24px;
+            }
+            
+            .share-content {
+                padding: 20px;
+            }
+            
+            .share-meta {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+        }
+        
+        /* 暗色主题 */
+        @media (prefers-color-scheme: dark) {
+            body {
+                background: #1a1a1a;
+                color: #e0e0e0;
+            }
+            
+            .share-header,
+            .share-content {
+                background: #2a2a2a;
+            }
+            
+            .share-header h1 {
+                color: #ffffff;
+            }
+            
+            .share-meta {
+                color: #a0a0a0;
+            }
+            
+            .share-footer {
+                color: #7f7f7f;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="share-container">
+        <!-- 分享页头 -->
+        <div class="share-header">
+            <h1>{{ note_title }}</h1>
+            <div class="share-meta">
+                <div class="share-meta-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span>分享者: {{ creator }}</span>
+                </div>
+                <div class="share-meta-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span>{{ created_at }}</span>
+                </div>
+                <div class="share-meta-item">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                    <span>访问次数: {{ visit_count }}</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 笔记内容 -->
+        <div class="share-content markdown-body">
+            {{content_html|safe}}
+        </div>
+        
+        <!-- 页脚 -->
+        <div class="share-footer">
+            <p>本内容由 <strong>{{ creator }}</strong> 通过 Obsidian Mirror 分享</p>
+        </div>
+    </div>
+    
+    <!-- 代码高亮 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
+    <script>
+        // 初始化代码高亮
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('pre code').forEach((block) => {
+                hljs.highlightElement(block);
+            });
+        });
+    </script>
+</body>
+</html>

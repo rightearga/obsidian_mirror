@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }} - Obsidian Mirror</title>
+    <!-- 模块化 CSS -->
+    <link rel="stylesheet" href="/static/css/variables.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/layout.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/sidebar.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/search.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/stats.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/recent.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/favorites.css?v=20260201">
+
+    <link rel="stylesheet" href="/static/css/markdown.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/tags.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/toc.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/graph.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/breadcrumb.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/statusbar.css?v=20260131b">
+    <link rel="stylesheet" href="/static/css/preview.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/settings.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/share.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/reading-progress.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/i18n.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/mobile.css?v=20260201">
+    <link rel="stylesheet" href="/static/css/mermaid.css?v=20260202display">
+    <!-- Highlight.js for Syntax Highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css" id="highlight-theme-dark">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css" id="highlight-theme-light" disabled>
+    
+    <!-- 子模板可以通过 block head 添加额外的 head 内容 -->
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <!-- 左侧栏遮罩层（点击关闭） -->
+    <div class="sidebar-backdrop" onclick="toggleSidebarState(event)"></div>
+    
+    <div class="sidebar">
+        <!-- 常驻顶部按钮栏 -->
+        <div class="sidebar-header">
+            <strong data-i18n="sidebar.files">文件</strong>
+            <!-- 用户菜单（仅在启用认证时显示） -->
+            <div class="user-menu" id="user-menu" style="display: none;">
+                <button class="user-menu-button" id="user-menu-button" title="用户菜单">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                        <circle cx="12" cy="7" r="4"></circle>
+                    </svg>
+                    <span id="username-display"></span>
+                </button>
+                <div class="user-menu-dropdown" id="user-menu-dropdown" style="display: none;">
+                    <a href="/change-password" class="user-menu-item">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                        </svg>
+                        <span data-i18n="sidebar.change_password">修改密码</span>
+                    </a>
+                    <button class="user-menu-item" id="logout-button">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                            <polyline points="16 17 21 12 16 7"></polyline>
+                            <line x1="21" y1="12" x2="9" y2="12"></line>
+                        </svg>
+                        <span data-i18n="sidebar.logout">登出</span>
+                    </button>
+                </div>
+            </div>
+            <div class="sidebar-controls">
+                <button class="tags-toggle" onclick="window.location.href='/tags'" data-i18n-attr="title" data-i18n="sidebar.tags" title="标签列表">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                        <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                    </svg>
+                </button>
+                <button class="search-toggle" onclick="toggleSearchModal()" data-i18n-attr="title" data-i18n="sidebar.search" title="搜索 (Ctrl+K)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                </button>
+                <button class="settings-btn" onclick="Settings.open()" data-i18n-attr="title" data-i18n="sidebar.settings" title="设置">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                    </svg>
+                </button>
+                <button class="theme-toggle" onclick="toggleTheme()" data-i18n-attr="title" data-i18n="sidebar.theme" title="切换主题">
+                    <!-- Sun Icon (for Dark mode) -->
+                    <svg class="icon-sun" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line></svg>
+                    <!-- Moon Icon (for Light mode) -->
+                    <svg class="icon-moon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+                </button>
+                <button class="sync-btn" onclick="triggerSync()">
+                    <span class="spinner"></span>
+                    <span class="btn-text" data-i18n="sidebar.sync">同步</span>
+                </button>
+            </div>
+        </div>
+        
+        <!-- 页签切换栏 -->
+        <div class="sidebar-tabs">
+            <button class="sidebar-tab" data-tab="overview" onclick="switchSidebarTab('overview')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="3" width="7" height="7"></rect>
+                    <rect x="14" y="14" width="7" height="7"></rect>
+                    <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+                <span data-i18n="sidebar.tab_overview">概览</span>
+            </button>
+            <button class="sidebar-tab active" data-tab="notes" onclick="switchSidebarTab('notes')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+                <span data-i18n="sidebar.tab_notes">笔记</span>
+            </button>
+        </div>
+        
+        <!-- 页签内容区 -->
+        <div class="sidebar-content">
+            <!-- 概览页签内容 -->
+            <div class="sidebar-tab-content" id="tab-overview" style="display: none;">
+                <!-- 笔记统计面板 -->
+                <div class="stats-panel" id="stats-panel">
+                    <div class="stats-grid" id="stats-container">
+                        <!-- 通过 JavaScript 动态填充 -->
+                    </div>
+                </div>
+                
+                <!-- 最近访问笔记面板 -->
+                <div class="recent-notes-panel" id="recent-notes-panel">
+                    <div class="recent-notes-header" onclick="RecentNotes.toggle()">
+                        <span class="recent-notes-title">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <polyline points="12 6 12 12 16 14"></polyline>
+                            </svg>
+                            <span data-i18n="recent.title">最近访问</span>
+                        </span>
+                        <span class="recent-notes-toggle">▼</span>
+                    </div>
+                    <div class="recent-notes-content" id="recent-notes-container">
+                        <!-- 通过 JavaScript 动态填充 -->
+                    </div>
+                </div>
+                
+                <!-- 收藏夹面板 -->
+                <div class="favorites-panel" id="favorites-panel">
+                    <div class="favorites-header" onclick="Favorites.togglePanel()">
+                        <span class="favorites-title">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                            </svg>
+                            <span data-i18n="favorites.title">收藏夹</span>
+                        </span>
+                        <span class="favorites-toggle">▼</span>
+                    </div>
+                    <div class="favorites-content" id="favorites-container">
+                        <!-- 通过 JavaScript 动态填充 -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 笔记页签内容 -->
+            <div class="sidebar-tab-content active" id="tab-notes">
+                <div class="sidebar-tree">
+                    {% for node in sidebar %}
+                    <div class="tree-item" data-depth="{{ node.depth }}">
+                        {% match node.path %}
+                            {% when Some with (p) %}
+                                <!-- File -->
+                                <a href="/doc/{{ p }}" class="tree-row file" style="padding-left: {{ node.depth * 16 }}px">
+                                    <span class="tree-icon hidden">▶</span> <!-- 占位符，与目录图标宽度一致 -->
+                                    <span class="label">{{ node.name }}</span>
+                                </a>
+                            {% when None %}
+                                <!-- Directory -->
+                                <div class="tree-row folder" onclick="toggleFolderFlat(this)" style="padding-left: {{ node.depth * 16 }}px">
+                                    <span class="tree-icon rotated">▶</span>
+                                    <span class="label" style="font-weight: 600;">{{ node.name }}</span>
+                                </div>
+                        {% endmatch %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- 侧边栏拖动手柄 -->
+        <div class="sidebar-resizer" id="sidebar-resizer"></div>
+    </div>
+    <div class="main-content">
+        <button class="sidebar-toggle" title="切换侧边栏">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+        </button>
+        
+        <div class="main-scroll-container">
+            <div class="markdown-body">
+                {% block content %}
+                {% endblock %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 右侧 TOC 栏（仅在笔记页面显示） -->
+    {% block right_sidebar %}
+    {% endblock %}
+
+    <!-- 底部状态栏 -->
+    <div class="statusbar">
+        <div class="statusbar-left">
+            <!-- 同步状态 -->
+            <div class="statusbar-item statusbar-sync">
+                <div id="statusbar-sync-indicator" class="statusbar-sync-indicator"></div>
+                <span id="statusbar-sync-text" data-i18n="statusbar.sync">未同步</span>
+            </div>
+            
+            <div class="statusbar-separator"></div>
+            
+            <!-- 字数统计 -->
+            <div class="statusbar-item statusbar-wordcount clickable" onclick="Statusbar.showNoteStats()" data-i18n-attr="title" data-i18n="statusbar.click_stats" title="点击查看详细统计">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+                <span id="statusbar-wordcount">0 字</span>
+            </div>
+            
+            <div class="statusbar-separator"></div>
+            
+            <!-- 行数统计 -->
+            <div class="statusbar-item statusbar-linecount clickable" onclick="Statusbar.showNoteStats()" data-i18n-attr="title" data-i18n="statusbar.click_stats" title="点击查看详细统计">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="8" y1="6" x2="21" y2="6"></line>
+                    <line x1="8" y1="12" x2="21" y2="12"></line>
+                    <line x1="8" y1="18" x2="21" y2="18"></line>
+                    <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                    <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                    <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                </svg>
+                <span id="statusbar-linecount">0 行</span>
+            </div>
+        </div>
+        
+        <div class="statusbar-right">
+            <!-- 当前时间 -->
+            <div class="statusbar-item">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <polyline points="12 6 12 12 16 14"></polyline>
+                </svg>
+                <span id="statusbar-time">00:00</span>
+            </div>
+            
+            <div class="statusbar-separator"></div>
+            
+            <!-- 版本号 -->
+            <div class="statusbar-item statusbar-version">
+                <span id="statusbar-version">v1.2.0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 笔记预览卡片 -->
+    <div id="note-preview-card" class="note-preview-card">
+        <div class="note-preview-header">
+            <svg class="note-preview-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+            </svg>
+            <h3 class="note-preview-title" id="note-preview-title" data-i18n="preview.title">笔记标题</h3>
+        </div>
+        <div class="note-preview-content" id="note-preview-content">
+            <div class="note-preview-loading"></div>
+        </div>
+    </div>
+
+    <!-- 搜索弹窗 -->
+    <div id="search-modal" class="search-modal" style="display: none;">
+        <div class="search-modal-backdrop" onclick="closeSearchModal()"></div>
+        <div class="search-modal-dialog">
+            <!-- 拖拽调整大小的手柄 -->
+            <div class="search-modal-resize-handle"></div>
+            
+            <!-- 对话框头部 -->
+            <div class="search-modal-header">
+                <div class="search-modal-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <span data-i18n="search.title">搜索笔记</span>
+                </div>
+                <button class="search-modal-close" onclick="closeSearchModal()" data-i18n-attr="title" data-i18n="search.shortcut_close" title="关闭 (Esc)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- 搜索输入区 -->
+            <div class="search-modal-input-wrapper">
+                <svg class="search-modal-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <path d="m21 21-4.35-4.35"></path>
+                </svg>
+                <input type="text" id="search-modal-input" class="search-modal-input" data-i18n-attr="placeholder" data-i18n="search.placeholder" placeholder="输入关键词搜索..." autofocus>
+                <button class="search-modal-clear" id="search-modal-clear" style="display: none;" onclick="clearSearchModal()" data-i18n-attr="title" data-i18n="app.close" title="清除">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- 排序选择器 -->
+            <div class="search-modal-sort">
+                <label class="search-sort-label" data-i18n="search.sort_label">排序方式：</label>
+                <div class="search-sort-options">
+                    <button class="search-sort-btn active" data-sort="relevance" onclick="changeSearchSort('relevance')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="18 15 12 9 6 15"></polyline>
+                        </svg>
+                        <span data-i18n="search.sort_relevance">相关度</span>
+                    </button>
+                    <button class="search-sort-btn" data-sort="modified" onclick="changeSearchSort('modified')">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        <span data-i18n="search.sort_modified">最新修改</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 高级过滤选项 -->
+            <div class="search-modal-filters" id="search-modal-filters">
+                <button class="search-filters-toggle" onclick="toggleSearchFilters()">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                    </svg>
+                    <span data-i18n="search.filters">高级过滤</span>
+                    <svg class="chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </button>
+                
+                <div class="search-filters-panel" id="search-filters-panel" style="display: none;">
+                    <!-- 标签过滤 -->
+                    <div class="search-filter-group">
+                        <label class="search-filter-label">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"></path>
+                                <line x1="7" y1="7" x2="7.01" y2="7"></line>
+                            </svg>
+                            标签
+                        </label>
+                        <input type="text" 
+                               id="search-filter-tags" 
+                               class="search-filter-input" 
+                               placeholder="输入标签，多个用逗号分隔"
+                               oninput="applySearchFilters()">
+                    </div>
+                    
+                    <!-- 文件夹过滤 -->
+                    <div class="search-filter-group">
+                        <label class="search-filter-label">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                            </svg>
+                            文件夹
+                        </label>
+                        <input type="text" 
+                               id="search-filter-folder" 
+                               class="search-filter-input" 
+                               placeholder="输入文件夹路径，如: docs/tech"
+                               oninput="applySearchFilters()">
+                    </div>
+                    
+                    <!-- 日期过滤 -->
+                    <div class="search-filter-group">
+                        <label class="search-filter-label">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                                <line x1="16" y1="2" x2="16" y2="6"></line>
+                                <line x1="8" y1="2" x2="8" y2="6"></line>
+                                <line x1="3" y1="10" x2="21" y2="10"></line>
+                            </svg>
+                            日期范围
+                        </label>
+                        <div class="search-filter-date-range">
+                            <input type="date" 
+                                   id="search-filter-date-from" 
+                                   class="search-filter-input search-filter-date" 
+                                   onchange="applySearchFilters()">
+                            <span class="search-filter-date-separator">至</span>
+                            <input type="date" 
+                                   id="search-filter-date-to" 
+                                   class="search-filter-input search-filter-date" 
+                                   onchange="applySearchFilters()">
+                        </div>
+                    </div>
+                    
+                    <!-- 清除过滤 -->
+                    <div class="search-filter-actions">
+                        <button class="search-filter-clear" onclick="clearSearchFilters()">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                            </svg>
+                            清除所有过滤
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 搜索结果区域 -->
+            <div class="search-modal-results" id="search-modal-results">
+                <div class="search-modal-empty">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3;">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <path d="m21 21-4.35-4.35"></path>
+                    </svg>
+                    <p data-i18n="search.empty">输入关键词开始搜索</p>
+                    <div class="search-modal-tips">
+                        <span data-i18n="search.tips">提示: 使用</span>
+                        <kbd>Ctrl</kbd> + <kbd>K</kbd>
+                        <span data-i18n="search.shortcut_open">快速打开搜索</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部提示 -->
+            <div class="search-modal-footer">
+                <div class="search-modal-shortcuts">
+                    <span><kbd>↑</kbd><kbd>↓</kbd> <span data-i18n="search.shortcut_select">选择</span></span>
+                    <span><kbd>Enter</kbd> <span data-i18n="search.shortcut_enter">打开</span></span>
+                    <span><kbd>Esc</kbd> <span data-i18n="search.shortcut_close">关闭</span></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mermaid.js 用于图表渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- 加载额外的语言支持 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/glsl.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/cpp.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/java.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+    <!-- Vis.js 用于图谱可视化 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/standalone/umd/vis-network.min.js"></script>
+    <!-- i18n 多语言支持（必须在其他脚本之前加载） -->
+    <script src="/static/js/i18n.js?v=20260201"></script>
+    <!-- 应用主逻辑（模块化） -->
+    <script src="/static/js/utils.js?v=20260130"></script>
+    <script src="/static/js/theme.js?v=20260130"></script>
+    <script src="/static/js/sidebar.js?v=20260201"></script>
+    <script src="/static/js/search.js?v=20260130"></script>
+    <script src="/static/js/graph.js?v=20260131"></script>
+    <script src="/static/js/stats.js?v=20260131"></script>
+    <script src="/static/js/recent.js?v=20260131"></script>
+    <script src="/static/js/favorites.js?v=20260131"></script>
+    <script src="/static/js/toc.js?v=20260131b"></script>
+    <script src="/static/js/auth.js?v=20260131"></script>
+    <script src="/static/js/statusbar.js?v=20260131c"></script>
+    <script src="/static/js/preview.js?v=20260131"></script>
+    <script src="/static/js/share.js?v=20260131"></script>
+    <script src="/static/js/reading-progress.js?v=20260131L"></script>
+    <script src="/static/js/settings.js?v=20260131"></script>
+    <script src="/static/js/mermaid-init.js?v=20260202v1"></script></script>
+    <script src="/static/js/init.js?v=20260130"></script>
+</body>
+</html>

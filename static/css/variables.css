@@ -1,0 +1,127 @@
+/* ==========================================
+   主题变量定义
+   ========================================== */
+
+:root {
+    /* Base Variables (Default Light - Elegant Low Contrast) */
+    --bg-color: #fdfdfd; /* Off-white */
+    --bg-secondary: #f5f5f5; /* 次要背景色（稍深） */
+    --text-color: #333333; /* Dark Grey */
+    --text-muted: #666666;
+    --text-faint: #999999;
+    
+    /* Elegant Accents - Muted Palette */
+    --h1-color: #2c2c2c;
+    --h2-color: #6a5acd; /* SlateBlue */
+    --h3-color: #c7802d; /* Goldenrod/Bronze */
+    --h4-color: #458b74; /* SeaGreen */
+    --h5-color: #cd5c5c; /* IndianRed */
+    --h6-color: #777777;
+
+    --link-color: #6a5acd;
+    --link-hover: #483d8b;
+    --primary-color: #007bff;
+    --primary-hover: #0056b3;
+    
+    --sidebar-bg: #f7f7f7;
+    --sidebar-text: #555555;
+    --border-color: #e6e6e6;
+    
+    --code-bg: #f0f0f0;
+    --quote-bg: #f9f9f9;
+    --quote-border: #d0d0d0;
+    
+    --table-header-bg: #f4f4f4;
+    --table-row-alt: #fafafa;
+    
+    --font-ui: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-text: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: "JetBrains Mono", "Fira Code", Consolas, monospace;
+    
+    /* 按钮颜色 */
+    --button-bg: rgba(0, 0, 0, 0.05);
+    --button-hover-bg: rgba(0, 0, 0, 0.08);
+    
+    /* 可定制的排版变量 */
+    --font-size-base: 16px;
+    --font-size-small: 14px;
+    --font-size-large: 18px;
+    --font-size-ui: 14px;  /* UI 元素（侧边栏、按钮等）字体大小 */
+    --line-height: 1.6;
+    /* --content-max-width: 800px; */ /* 已禁用：内容宽度现在自适应，不再限制最大宽度 */
+}
+
+[data-theme="dark"] {
+    /* Minimal 主题启发的深色配色 - 优雅深灰 */
+    --bg-color: #202020;        /* 主背景 - 接近 Minimal 的 #202225 */
+    --bg-secondary: #2a2a2a;    /* 次要背景色（稍亮） */
+    --text-color: #dcddde;      /* 主文本 - 接近 Minimal 的 #fbfbfb */
+    --text-muted: #b3b3b3;      /* 次要文本 - 接近 Minimal 的 #CBCCCD */
+    --text-faint: #6c6e70;      /* 弱化文本 - 直接使用 Minimal 的值 */
+    
+    --h1-color: #e0e0e0;
+    --h2-color: #7aa2f7;        /* 蓝紫色 - 接近 Minimal 的强调色 */
+    --h3-color: #e0af68;        /* 金色 - 接近 Minimal 的橙黄 */
+    --h4-color: #9ece6a;        /* 绿色 - 接近 Minimal 的绿色 */
+    --h5-color: #f7768e;        /* 红色 - 接近 Minimal 的红色 */
+    --h6-color: #9aa5ce;
+
+    --link-color: #7aa2f7;      /* 蓝色链接 - 接近 Minimal 的 accent */
+    --link-hover: #9db4ff;      /* 浅蓝色 - 接近 Minimal 的 hover */
+    --primary-color: #7aa2f7;
+    --primary-hover: #9db4ff;
+    
+    --sidebar-bg: #1a1b1e;      /* 侧边栏 - 比主背景更深 */
+    --sidebar-text: #9aa5ce;    /* 侧边栏文本 */
+    --border-color: #2a2b2e;    /* 边框 - 接近 Minimal 的 #3A3B3F */
+    
+    --code-bg: #16161e;         /* 代码块背景 - 深色 */
+    --quote-bg: #1a1b1e;        /* 引用块背景 */
+    --quote-border: #414868;    /* 引用块边框 */
+    
+    /* 按钮颜色 */
+    --button-bg: rgba(255, 255, 255, 0.05);
+    --button-hover-bg: rgba(255, 255, 255, 0.08);
+    
+    --table-header-bg: #1a1b1e;
+    --table-row-alt: #24283b;
+}
+
+/* System Preference Fallback (matches default/light above, overrides if system is dark) */
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        /* Minimal 主题启发的深色配色 */
+        --bg-color: #202020;
+        --bg-secondary: #2a2a2a;
+        --text-color: #dcddde;
+        --text-muted: #b3b3b3;
+        --text-faint: #6c6e70;
+        
+        --h1-color: #e0e0e0;
+        --h2-color: #7aa2f7;
+        --h3-color: #e0af68;
+        --h4-color: #9ece6a;
+        --h5-color: #f7768e;
+        --h6-color: #9aa5ce;
+
+        --link-color: #7aa2f7;
+        --link-hover: #9db4ff;
+        --primary-color: #7aa2f7;
+        --primary-hover: #9db4ff;
+        
+        --sidebar-bg: #1a1b1e;
+        --sidebar-text: #9aa5ce;
+        --border-color: #2a2b2e;
+        
+        --code-bg: #16161e;
+        --quote-bg: #1a1b1e;
+        --quote-border: #414868;
+        
+        /* 按钮颜色 */
+        --button-bg: rgba(255, 255, 255, 0.05);
+        --button-hover-bg: rgba(255, 255, 255, 0.08);
+        
+        --table-header-bg: #1a1b1e;
+        --table-row-alt: #24283b;
+    }
+}

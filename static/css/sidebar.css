@@ -1,0 +1,457 @@
+/* ==========================================
+   侧边栏样式
+   ========================================== */
+
+.sidebar {
+    width: 320px;
+    min-width: 200px;
+    max-width: 600px;
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--border-color);
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    transition: border 0.3s ease;
+    flex-shrink: 0;
+    position: relative;
+    user-select: none;
+}
+
+.sidebar.resizing {
+    transition: none;
+}
+
+.sidebar-resizer {
+    position: absolute;
+    top: 0;
+    right: -4px;
+    width: 8px;
+    height: 100%;
+    cursor: col-resize;
+    background: transparent;
+    z-index: 1000;
+    transition: background 0.2s;
+}
+
+.sidebar-resizer:hover,
+.sidebar-resizer.resizing {
+    background: var(--link-color);
+    opacity: 0.6;
+}
+
+body.sidebar-collapsed .sidebar {
+    width: 0 !important; /* 使用 !important 覆盖内联样式 */
+    min-width: 0;
+    border-right: none;
+    overflow: hidden;
+}
+
+body.sidebar-collapsed .sidebar-resizer {
+    display: none;
+}
+
+.sidebar-header {
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.sidebar-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.sidebar-tree {
+    padding: 8px;
+    flex: 1;
+}
+
+/* Sidebar Tree */
+.tree-item {
+    display: block;
+}
+
+.tree-row {
+    display: flex;
+    align-items: flex-start;
+    padding: 2px 8px 2px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    color: var(--sidebar-text);
+    text-decoration: none;
+    font-size: var(--font-size-ui, 14px);
+    user-select: none;
+}
+
+.tree-row:hover {
+    background-color: rgba(0,0,0,0.05);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .tree-row:hover {
+    background-color: rgba(255,255,255,0.08);
+}
+
+.tree-row.active {
+    background-color: rgba(123, 104, 238, 0.1);
+    color: var(--link-color);
+    font-weight: 500;
+}
+
+.tree-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 4px;
+    margin-top: 2px;
+    flex-shrink: 0;
+    transition: transform 0.15s ease;
+    font-size: 10px;
+    color: var(--sidebar-text);
+}
+
+.tree-icon.rotated {
+    transform: rotate(90deg);
+}
+
+.tree-icon.hidden {
+    visibility: hidden;
+}
+
+.tree-row .label {
+    flex: 1;
+    word-wrap: break-word;
+    word-break: break-word;
+    line-height: 1.4;
+    padding-left: 20px;
+    text-indent: -20px;
+}
+
+.tree-children {
+    display: none;
+}
+
+.tree-children.expanded {
+    display: block;
+}
+
+/* Tags Button */
+.tags-toggle {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--sidebar-text);
+    padding: 6px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+[data-theme="dark"] .tags-toggle {
+    background: transparent;
+}
+
+.tags-toggle:hover {
+    opacity: 1;
+    background-color: rgba(0,0,0,0.05);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .tags-toggle:hover {
+    background-color: rgba(255,255,255,0.08);
+}
+
+/* Sync Button */
+.sync-btn {
+    background-color: var(--link-color);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: calc(var(--font-size-ui, 14px) - 2px);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-ui);
+    transition: opacity 0.2s;
+}
+
+.sync-btn:hover {
+    opacity: 0.9;
+}
+
+.sync-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.spinner {
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-radius: 50%;
+    border-top-color: #fff;
+    animation: spin 1s linear infinite;
+    display: none;
+}
+
+.sync-btn.loading .spinner {
+    display: block;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ==========================================
+   用户菜单样式
+   ========================================== */
+
+.user-menu {
+    position: relative;
+    margin-right: 8px;
+}
+
+.user-menu-button {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: calc(var(--font-size-ui, 14px) - 2px);
+    color: var(--text-color);
+    transition: all 0.2s;
+}
+
+.user-menu-button:hover {
+    background-color: rgba(0,0,0,0.05);
+}
+
+[data-theme="dark"] .user-menu-button:hover {
+    background-color: rgba(255,255,255,0.08);
+}
+
+.user-menu-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    min-width: 160px;
+    z-index: 1000;
+    overflow: hidden;
+}
+
+.user-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    width: 100%;
+    background: transparent;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-size: calc(var(--font-size-ui, 14px) - 1px);
+    color: var(--text-color);
+    text-decoration: none;
+    transition: background-color 0.2s;
+}
+
+.user-menu-item:hover {
+    background-color: rgba(0,0,0,0.05);
+}
+
+[data-theme="dark"] .user-menu-item:hover {
+    background-color: rgba(255,255,255,0.08);
+}
+
+/* ==========================================
+   侧边栏滚动条样式
+   ========================================== */
+
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 3px;
+}
+
+.sidebar::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+/* ==========================================
+   侧边栏页签样式
+   ========================================== */
+
+/* 页签栏 */
+.sidebar-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border-color);
+    background-color: var(--bg-secondary);
+    flex-shrink: 0; /* 不受滚动影响 */
+}
+
+.sidebar-tab {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+}
+
+.sidebar-tab svg {
+    flex-shrink: 0;
+}
+
+.sidebar-tab span {
+    white-space: nowrap;
+}
+
+.sidebar-tab:hover {
+    background-color: var(--hover-bg);
+    color: var(--text-color);
+}
+
+.sidebar-tab.active {
+    color: var(--accent-color);
+    border-bottom-color: var(--accent-color);
+    background-color: var(--bg-color);
+}
+
+/* 页签内容区 */
+.sidebar-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.sidebar-tab-content {
+    display: none;
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sidebar-tab-content.active {
+    display: flex;
+    flex-direction: column;
+}
+
+/* 概览页签内滚动区 */
+#tab-overview {
+    padding: 12px 0;
+}
+
+/* 笔记页签内直接包含 sidebar-tree，无需额外 padding */
+#tab-notes {
+    padding: 0;
+}
+
+#tab-notes .sidebar-tree {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* 调整侧边栏整体布局为 flexbox */
+.sidebar {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+/* sidebar-header 保持固定，不滚动 */
+.sidebar-header {
+    flex-shrink: 0;
+}
+
+/* 移动端页签适配 */
+@media (max-width: 768px) {
+    .sidebar-tab {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+    
+    .sidebar-tab svg {
+        width: 12px;
+        height: 12px;
+    }
+    
+    /* 移动端显示页签文字（移除之前的隐藏设置） */
+    .sidebar-tab span {
+        display: inline; /* 显示文字 */
+    }
+}
+
+/* ==========================================
+   页签内容区滚动条样式（统一主题）
+   ========================================== */
+
+.sidebar-tab-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.sidebar-tab-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-tab-content::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 4px;
+}
+
+.sidebar-tab-content::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+/* sidebar-tree 内部的滚动条也需要适配 */
+.sidebar-tree::-webkit-scrollbar {
+    width: 8px;
+}
+
+.sidebar-tree::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-tree::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 4px;
+}
+
+.sidebar-tree::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}

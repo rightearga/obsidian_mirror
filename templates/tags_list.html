@@ -1,0 +1,30 @@
+{% extends "layout.html" %}
+
+{% block content %}
+    <h1>🏷️ 标签列表</h1>
+    
+    {% if tags.is_empty() %}
+        <p class="empty-message">还没有标签。在笔记中添加 <code>#标签</code> 或在 frontmatter 中定义标签吧！</p>
+    {% else %}
+        <div class="tags-cloud">
+            {% for (tag_name, count) in tags %}
+                <a href="/tag/{{ tag_name|urlencode }}" class="tag-cloud-item" data-count="{{ count }}">
+                    <span class="tag-name">#{{ tag_name }}</span>
+                    <span class="tag-count">({{ count }})</span>
+                </a>
+            {% endfor %}
+        </div>
+        
+        <div class="tags-list">
+            <h2>所有标签 ({{ tags.len() }} 个)</h2>
+            <ul>
+                {% for (tag_name, count) in tags %}
+                    <li>
+                        <a href="/tag/{{ tag_name|urlencode }}">#{{ tag_name }}</a>
+                        <span class="note-count">{{ count }} 篇笔记</span>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+    {% endif %}
+{% endblock %}

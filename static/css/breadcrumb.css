@@ -1,0 +1,130 @@
+/* ==========================================
+   面包屑导航样式
+   ========================================== */
+
+.breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* 面包屑项 */
+.breadcrumb-item {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: all 0.2s ease;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* 可点击的面包屑项 */
+.breadcrumb-item:not(.current) {
+    cursor: pointer;
+}
+
+.breadcrumb-item:not(.current):hover {
+    color: var(--link-color);
+    background-color: var(--bg-hover);
+}
+
+/* 当前页面（不可点击） */
+.breadcrumb-item.current {
+    color: var(--text-color);
+    font-weight: 500;
+    cursor: default;
+}
+
+/* 分隔符 */
+.breadcrumb-separator {
+    color: var(--text-tertiary);
+    user-select: none;
+    opacity: 0.5;
+}
+
+/* 暗色主题适配 */
+[data-theme="dark"] .breadcrumb-item:not(.current):hover {
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ==========================================
+   移动端适配
+   ========================================== */
+
+/* 手机设备 (宽度 <= 768px) */
+@media (max-width: 768px) {
+    .breadcrumb {
+        font-size: 13px;
+        gap: 6px;
+        padding: 10px 0;
+        margin-bottom: 16px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .breadcrumb-item {
+        padding: 3px 6px;
+        white-space: nowrap;
+    }
+    
+    .breadcrumb-separator {
+        font-size: 12px;
+    }
+}
+
+/* 小屏手机 (宽度 <= 480px) */
+@media (max-width: 480px) {
+    .breadcrumb {
+        font-size: 12px;
+        gap: 4px;
+        padding: 8px 0;
+        margin-bottom: 12px;
+    }
+    
+    .breadcrumb-item {
+        padding: 2px 4px;
+        font-size: 12px;
+    }
+    
+    /* 在极小屏幕上，只显示首页和当前页面 */
+    .breadcrumb-item:not(:first-child):not(.current),
+    .breadcrumb-item:not(:first-child):not(.current) + .breadcrumb-separator {
+        display: none;
+    }
+    
+    /* 在当前页面前添加省略号 */
+    .breadcrumb-item.current::before {
+        content: "... / ";
+        color: var(--text-tertiary);
+        margin-right: 4px;
+    }
+    
+    /* 如果只有首页和当前页面，不显示省略号 */
+    .breadcrumb-item:first-child + .breadcrumb-separator + .breadcrumb-item.current::before {
+        content: "";
+        margin-right: 0;
+    }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+    .breadcrumb-item:not(.current) {
+        min-height: 36px;
+        min-width: 36px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .breadcrumb-item:not(.current):active {
+        background-color: var(--bg-active);
+        transform: scale(0.98);
+    }
+}

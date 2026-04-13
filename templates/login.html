@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - Obsidian Mirror</title>
+    <link rel="stylesheet" href="/static/css/variables.css?v=20260131">
+    <link rel="stylesheet" href="/static/css/login.css?v=20260131">
+</head>
+<body data-theme="light">
+    <div class="login-container">
+        <div class="login-box">
+            <div class="login-header">
+                <h1>🔐 Obsidian Mirror</h1>
+                <p>请登录以继续</p>
+            </div>
+            
+            <form id="login-form" class="login-form">
+                <div class="form-group">
+                    <label for="username">用户名</label>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        required 
+                        autocomplete="username"
+                        placeholder="请输入用户名"
+                    >
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">密码</label>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        required 
+                        autocomplete="current-password"
+                        placeholder="请输入密码"
+                    >
+                </div>
+                
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="remember_me" name="remember_me">
+                        <span>记住我（30天）</span>
+                    </label>
+                </div>
+                
+                <div id="error-message" class="error-message" style="display: none;"></div>
+                
+                <button type="submit" class="login-button" id="login-button">
+                    登录
+                </button>
+            </form>
+            
+            <div class="login-footer">
+                <p id="version-info">Obsidian Mirror <span id="version-number">v1.1.0</span></p>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const loginForm = document.getElementById('login-form');
+        const loginButton = document.getElementById('login-button');
+        const errorMessage = document.getElementById('error-message');
+        
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            // 禁用按钮，防止重复提交
+            loginButton.disabled = true;
+            loginButton.textContent = '登录中...';
+            errorMessage.style.display = 'none';
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const rememberMe = document.getElementById('remember_me').checked;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username,
+                        password,
+                        remember_me: rememberMe
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // 登录成功，跳转到首页
+                    window.location.href = '/';
+                } else {
+                    // 显示错误信息
+                    errorMessage.textContent = data.message || '登录失败';
+                    errorMessage.style.display = 'block';
+                    loginButton.disabled = false;
+                    loginButton.textContent = '登录';
+                }
+            } catch (error) {
+                console.error('登录错误:', error);
+                errorMessage.textContent = '网络错误，请稍后重试';
+                errorMessage.style.display = 'block';
+                loginButton.disabled = false;
+                loginButton.textContent = '登录';
+            }
+        });
+        
+        // 按 Enter 键提交表单
+        document.getElementById('password').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                loginForm.dispatchEvent(new Event('submit'));
+            }
+        });
+    </script>
+    
+    <!-- 主题初始化脚本 -->
+    <script>
+        // 页面加载时读取并应用主题（与主应用同步）
+        (function() {
+            const savedTheme = localStorage.getItem('obsidian_mirror_theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            document.body.setAttribute('data-theme', savedTheme);
+        })();
+        
+        // 动态加载版本号
+        (async function() {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                if (data.version) {
+                    document.getElementById('version-number').textContent = 'v' + data.version;
+                }
+            } catch (error) {
+                console.error('获取版本号失败:', error);
+                // 保持默认的 v1.1.0
+            }
+        })();
+    </script>
+</body>
+</html>

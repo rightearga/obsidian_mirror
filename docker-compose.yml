@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  obsidian_mirror:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: obsidian_mirror
+    restart: unless-stopped
+    ports:
+      - "3080:3080"
+    volumes:
+      # 挂载配置文件
+      - ./config.ron:/app/config.ron:ro
+      # 持久化笔记数据（可选，避免每次重启都重新克隆）
+      - ./my-note:/app/my-note
+      # 如果需要使用 SSH key 访问私有仓库
+      # - ~/.ssh:/home/appuser/.ssh:ro
+    environment:
+      - RUST_LOG=info
+    # 如果需要配置 Git credentials
+    # environment:
+    #   - GIT_CONFIG_GLOBAL=/app/.gitconfig
+    # volumes:
+    #   - ./.gitconfig:/app/.gitconfig:ro
+    networks:
+      - obsidian_network
+
+networks:
+  obsidian_network:
+    driver: bridge

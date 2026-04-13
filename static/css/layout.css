@@ -1,0 +1,278 @@
+/* ==========================================
+   页面基础布局
+   ========================================== */
+
+body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-ui);
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+    width: 100%;
+}
+
+/* 右侧 TOC 栏（仅在有 TOC 时显示） */
+.right-sidebar {
+    width: 280px;
+    min-width: 200px;
+    max-width: 500px;
+    background-color: var(--sidebar-bg);
+    border-left: 1px solid var(--border-color);
+    overflow: hidden; /* 禁用整体滚动，由内部 toc-wrapper 控制 */
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    position: relative;
+    transition: width 0.3s ease, min-width 0.3s ease;
+    box-sizing: border-box; /* 确保宽度包含边框，避免计算误差 */
+}
+
+/* 拖动时禁用过渡动画，避免卡顿和宽度计算错误 */
+.right-sidebar.resizing {
+    transition: none !important;
+}
+
+/* 右侧栏收起状态：完全隐藏侧边栏，释放内容区域 */
+.right-sidebar.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    border-left: none;
+    overflow: hidden;
+}
+
+/* 收起时隐藏内部内容与拖动手柄 */
+.right-sidebar.collapsed .toc-wrapper {
+    display: none;
+}
+
+.right-sidebar.collapsed .right-sidebar-resizer {
+    display: none;
+}
+
+/* 右侧栏拖动调整拉杆 */
+.right-sidebar-resizer {
+    position: absolute;
+    left: -2px; /* 向左偏移，增加可点击区域 */
+    top: 0;
+    bottom: 0;
+    width: 8px; /* 增加宽度到 8px */
+    cursor: ew-resize;
+    background-color: transparent;
+    transition: background-color 0.2s;
+    z-index: 100; /* 提高 z-index 确保在最上层 */
+}
+
+.right-sidebar-resizer:hover {
+    background-color: var(--link-color);
+}
+
+.right-sidebar-resizer.resizing {
+    background-color: var(--link-color);
+}
+
+/* 收起时用于重新展开的浮动按钮（桌面端） */
+.right-sidebar-toggle-floating {
+    position: fixed;
+    right: 20px; /* 与 TOC 内部按钮位置大致对齐 */
+    top: 20px;
+    z-index: 150;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    background-color: var(--sidebar-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    cursor: pointer;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 0;
+    transition: all 0.2s ease;
+}
+
+.right-sidebar-toggle-floating:hover {
+    color: var(--text-color);
+    background-color: var(--hover-bg);
+    transform: scale(1.05);
+}
+
+/* 收起时显示浮动展开按钮（按钮紧跟在 aside 之后时生效） */
+.right-sidebar.collapsed + .right-sidebar-toggle-floating {
+    display: flex;
+}
+
+/* Main Content */
+.main-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    position: relative;
+    /* 让主内容根据剩余空间自适应宽度，而不是强制 100% */
+}
+
+.main-scroll-container {
+    flex: 1;
+    /* 默认由外层容器负责滚动，兼容没有内层滚动区域的页面 */
+    overflow-y: auto;
+    padding: 40px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* 笔记页面存在内层滚动容器（.page-scrollable-content）时，禁用外层滚动，避免双滚动条 */
+body.page-has-inner-scroll .main-scroll-container {
+    overflow-y: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 0; /* 移除内边距，让滚动条贴边 */
+}
+
+/* 补偿头部内边距 */
+body.page-has-inner-scroll .page-fixed-header {
+    padding: 20px 40px 16px 40px;
+}
+
+/* 移动端头部适配 */
+@media (max-width: 768px) {
+    body.page-has-inner-scroll .page-fixed-header {
+        padding: 16px 20px 12px 20px;
+    }
+}
+
+body.page-has-inner-scroll .markdown-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    max-width: none;
+    width: 100%;
+}
+
+/* Buttons */
+.sidebar-toggle, .theme-toggle {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--sidebar-text);
+    padding: 6px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.6;
+    transition: all 0.2s;
+}
+
+[data-theme="dark"] .sidebar-toggle,
+[data-theme="dark"] .theme-toggle {
+    background: transparent;
+}
+
+.sidebar-toggle:hover, .theme-toggle:hover {
+    opacity: 1;
+    background-color: rgba(0,0,0,0.05);
+    color: var(--text-color);
+}
+
+[data-theme="dark"] .sidebar-toggle:hover,
+[data-theme="dark"] .theme-toggle:hover {
+    background-color: rgba(255,255,255,0.08);
+}
+
+.sidebar-toggle {
+    display: flex;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 100;
+}
+
+/* 移动端适配：隐藏右侧栏及浮动按钮 */
+@media (max-width: 768px) {
+    .right-sidebar {
+        display: none !important;
+    }
+
+    .right-sidebar-toggle-floating {
+        display: none !important;
+    }
+}
+
+/* ==========================================
+   正文区域滚动条样式
+   ========================================== */
+
+.main-scroll-container::-webkit-scrollbar {
+    width: 8px;
+}
+
+.main-scroll-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.main-scroll-container::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 4px;
+}
+
+.main-scroll-container::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+/* ==========================================
+   文章页面固定顶部布局
+   ========================================== */
+
+/* 固定顶部区域（面包屑 + 标题 + 按钮） */
+.page-fixed-header {
+    flex-shrink: 0; /* 不被压缩 */
+    background-color: var(--bg-color);
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 16px;
+    z-index: 10;
+    position: relative;
+}
+
+/* 可滚动内容区域 */
+.page-scrollable-content {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-top: 16px;
+    padding-right: 16px; /* 增加右侧内边距，使滚动条与正文保持距离 */
+}
+
+/* 可滚动内容区的滚动条样式 */
+.page-scrollable-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.page-scrollable-content::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.page-scrollable-content::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 4px;
+}
+
+.page-scrollable-content::-webkit-scrollbar-thumb:hover {
+    background-color: var(--text-muted);
+}
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+    .page-fixed-header {
+        padding-bottom: 12px;
+    }
+    
+    .page-scrollable-content {
+        padding-top: 12px;
+    }
+}

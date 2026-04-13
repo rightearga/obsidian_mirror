@@ -1,0 +1,39 @@
+# Rust 编译输出
+target/
+**/*.rs.bk
+
+# 日志文件
+*.log
+logs/
+network_logs/
+temp/
+
+# IDE 配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 环境变量
+.env
+.env.local
+
+# Git 相关
+.git/
+.gitignore
+
+# 笔记数据（运行时动态生成）
+my-note/
+
+# 文档
+README.md
+CLAUDE.md
+
+# Docker 相关
+Dockerfile
+.dockerignore
+docker-compose.yml

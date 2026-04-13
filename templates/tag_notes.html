@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+
+{% block content %}
+    <h1>🏷️ {{ tag_name }}</h1>
+    
+    <p class="tag-description">包含标签 <code>#{{ tag_name }}</code> 的笔记（共 {{ notes.len() }} 篇）</p>
+    
+    {% if notes.is_empty() %}
+        <p class="empty-message">没有找到包含此标签的笔记。</p>
+    {% else %}
+        <ul class="note-list">
+            {% for (note_title, note_path) in notes %}
+                <li>
+                    <a href="/doc/{{ note_path|urlencode }}">{{ note_title }}</a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    
+    <div class="tag-actions">
+        <a href="/tags" class="button">← 返回标签列表</a>
+    </div>
+{% endblock %}

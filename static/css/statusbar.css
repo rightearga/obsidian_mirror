@@ -1,0 +1,172 @@
+/* 底部状态栏样式 */
+
+.statusbar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 28px;
+    background: var(--sidebar-bg);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+    z-index: 100;
+    user-select: none;
+    transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.statusbar-left,
+.statusbar-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.statusbar-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+    cursor: default;
+}
+
+.statusbar-item svg {
+    width: 13px;
+    height: 13px;
+    opacity: 0.7;
+}
+
+.statusbar-item:hover {
+    color: var(--text-color);
+}
+
+.statusbar-item:hover svg {
+    opacity: 1;
+}
+
+/* 可点击的状态项 */
+.statusbar-item.clickable {
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.statusbar-item.clickable:hover {
+    color: var(--link-color);
+}
+
+/* 分隔符 */
+.statusbar-separator {
+    width: 1px;
+    height: 16px;
+    background: var(--border-color);
+    opacity: 0.5;
+}
+
+/* 同步状态指示器 */
+.statusbar-sync {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.statusbar-sync-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--text-faint);
+}
+
+.statusbar-sync-indicator.syncing {
+    background: #e0af68;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.statusbar-sync-indicator.synced {
+    background: #9ece6a;
+}
+
+.statusbar-sync-indicator.error {
+    background: #f7768e;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
+    }
+}
+
+/* 字数统计 */
+.statusbar-wordcount {
+    font-variant-numeric: tabular-nums;
+}
+
+/* 行数统计 */
+.statusbar-linecount {
+    font-variant-numeric: tabular-nums;
+}
+
+/* 版本号 */
+.statusbar-version {
+    opacity: 0.6;
+    font-size: 11px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .statusbar {
+        height: 32px;
+        padding: 0 8px;
+        font-size: 11px;
+    }
+    
+    .statusbar-left,
+    .statusbar-right {
+        gap: 8px;
+    }
+    
+    /* 缩小图标 */
+    .statusbar-item svg {
+        width: 12px;
+        height: 12px;
+    }
+    
+    /* 隐藏分隔符节省空间 */
+    .statusbar-separator {
+        display: none;
+    }
+    
+    /* 隐藏次要信息 */
+    .statusbar-item.hide-mobile {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    .statusbar {
+        font-size: 10px;
+        gap: 6px;
+    }
+    
+    .statusbar-left,
+    .statusbar-right {
+        gap: 6px;
+    }
+    
+    /* 更小的图标 */
+    .statusbar-item svg {
+        width: 11px;
+        height: 11px;
+    }
+}
+
+/* 为主内容区域添加底部边距，避免被状态栏遮挡 */
+body {
+    padding-bottom: 28px;
+}

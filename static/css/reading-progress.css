@@ -1,0 +1,208 @@
+/* 阅读进度提示样式 */
+.reading-progress-prompt {
+    position: fixed;
+    bottom: -100px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    transition: bottom 0.3s ease-out;
+}
+
+.reading-progress-prompt.show {
+    bottom: 24px;
+}
+
+.reading-progress-prompt-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--background-primary, #ffffff);
+    border: 1px solid var(--background-modifier-border, #e0e0e0);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+    font-size: 14px;
+    color: var(--text-normal, #2c3e50);
+}
+
+.reading-progress-prompt-content svg {
+    flex-shrink: 0;
+    color: var(--interactive-accent, #4a90e2);
+}
+
+.reading-progress-prompt-actions {
+    display: flex;
+    gap: 8px;
+    margin-left: 8px;
+}
+
+.reading-progress-prompt button {
+    padding: 6px 14px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: none;
+}
+
+.reading-progress-prompt .btn-restore {
+    background: var(--interactive-accent, #4a90e2);
+    color: white;
+}
+
+.reading-progress-prompt .btn-restore:hover {
+    background: var(--interactive-accent-hover, #357abd);
+}
+
+.reading-progress-prompt .btn-dismiss {
+    background: transparent;
+    color: var(--text-muted, #7f8c8d);
+    border: 1px solid var(--background-modifier-border, #e0e0e0);
+}
+
+.reading-progress-prompt .btn-dismiss:hover {
+    background: var(--background-secondary, #f5f5f5);
+    border-color: var(--background-modifier-border-hover, #d0d0d0);
+}
+
+/* 阅读历史侧边栏 */
+.reading-history-section {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--background-modifier-border, #e0e0e0);
+}
+
+.reading-history-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted, #7f8c8d);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.reading-history-header svg {
+    width: 14px;
+    height: 14px;
+}
+
+.reading-history-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.reading-history-item {
+    margin-bottom: 4px;
+}
+
+.reading-history-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 4px;
+    color: var(--text-normal, #2c3e50);
+    text-decoration: none;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.reading-history-link:hover {
+    background: var(--background-modifier-hover, #f5f5f5);
+}
+
+.reading-history-link.in-progress {
+    background: var(--background-modifier-hover, #f0f7ff);
+    border-left: 2px solid var(--interactive-accent, #4a90e2);
+}
+
+.reading-history-progress {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted, #7f8c8d);
+}
+
+.reading-history-progress.completed {
+    color: var(--interactive-success, #27ae60);
+}
+
+.reading-history-time {
+    display: block;
+    font-size: 11px;
+    color: var(--text-faint, #95a5a6);
+    margin-top: 2px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .reading-progress-prompt {
+        left: 12px;
+        right: 12px;
+        transform: none;
+        bottom: -150px;
+    }
+    
+    .reading-progress-prompt.show {
+        bottom: 12px;
+    }
+    
+    .reading-progress-prompt-content {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 16px;
+    }
+    
+    .reading-progress-prompt-actions {
+        width: 100%;
+        margin-left: 0;
+    }
+    
+    .reading-progress-prompt button {
+        flex: 1;
+    }
+}
+
+/* 暗色主题支持 */
+@media (prefers-color-scheme: dark) {
+    .reading-progress-prompt-content {
+        background: var(--background-primary, #1e1e1e);
+        border-color: var(--background-modifier-border, #3e3e3e);
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    }
+    
+    .reading-progress-prompt-content {
+        color: var(--text-normal, #e0e0e0);
+    }
+    
+    .reading-progress-prompt .btn-dismiss {
+        background: transparent;
+        color: var(--text-muted, #a0a0a0);
+        border-color: var(--background-modifier-border, #3e3e3e);
+    }
+    
+    .reading-progress-prompt .btn-dismiss:hover {
+        background: var(--background-secondary, #2e2e2e);
+        border-color: var(--background-modifier-border-hover, #4e4e4e);
+    }
+    
+    .reading-history-section {
+        border-top-color: var(--background-modifier-border, #3e3e3e);
+    }
+    
+    .reading-history-link {
+        color: var(--text-normal, #e0e0e0);
+    }
+    
+    .reading-history-link:hover {
+        background: var(--background-modifier-hover, #2e2e2e);
+    }
+    
+    .reading-history-link.in-progress {
+        background: var(--background-modifier-hover, #1a2a3a);
+    }
+}

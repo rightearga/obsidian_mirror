@@ -1,0 +1,57 @@
+(
+    // Git 仓库地址（支持 http/https/ssh）
+    repo_url: "http://your-git-server.com/your-repo.git",
+
+    // 本地笔记存储路径
+    local_path: "./my-note",
+
+    // 服务器监听地址
+    // Docker 部署时建议使用 0.0.0.0 以允许外部访问
+    listen_addr: "0.0.0.0:3080",
+
+    // 工作线程数（0 表示使用 CPU 核心数）
+    workers: 4,
+
+    // 忽略的文件夹/文件名（不区分大小写）
+    ignore_patterns: [
+        ".obsidian",     // Obsidian 配置目录
+        ".trash",        // 回收站
+        "私密",          // 自定义私密文件夹
+        "草稿",
+    ],
+    
+    // 数据库配置（可选，使用默认值即可）
+    database: (
+        // 搜索索引数据库路径（默认: ./index.db）
+        index_db_path: "./index.db",
+        
+        // 用户认证数据库路径（默认: ./auth.db）
+        auth_db_path: "./auth.db",
+        
+        // 分享链接数据库路径（默认: ./share.db）
+        share_db_path: "./share.db",
+        
+        // 阅读进度数据库路径（默认: ./reading_progress.db）
+        reading_progress_db_path: "./reading_progress.db",
+    ),
+    
+    // 安全认证配置（可选）
+    // 如果不需要认证，可以删除此配置块或设置 auth_enabled: false
+    security: (
+        // 是否启用用户认证（默认 false）
+        auth_enabled: true,
+        
+        // JWT 密钥（请修改为随机字符串！至少 32 个字符）
+        // 可以使用以下命令生成: openssl rand -base64 32
+        jwt_secret: "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY_AT_LEAST_32_CHARS",
+        
+        // Token 有效期（小时，默认 24）
+        token_lifetime_hours: 24,
+        
+        // 默认管理员用户名（仅用于首次初始化）
+        default_admin_username: "admin",
+        
+        // 默认管理员密码（仅用于首次初始化，请立即修改！）
+        default_admin_password: "admin",
+    ),
+)

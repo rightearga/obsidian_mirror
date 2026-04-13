@@ -1,0 +1,38 @@
+# Rust编译输出
+target/
+
+# Rust备份文件
+**/*.rs.bk
+
+# 日志文件
+*.log
+/logs/
+**/logs/
+/network_logs/
+**/network_logs/
+/temp/
+**/temp/
+
+# IDE和编辑器配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 环境变量文件
+.env
+.env.local
+
+# 依赖锁文件
+Cargo.lock
+
+*.db
+settings.local.json
+
+# obsidian_mirror 配置文件（包含敏感信息）
+config.ron
+.gitconfig
