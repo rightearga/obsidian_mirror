@@ -250,7 +250,24 @@ pub async fn index_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
     }
 }
 
+/// 验证文件路径位于 base_dir 内，防止路径遍历攻击（`../../etc/passwd` 等）。
+///
+/// 使用 `canonicalize` 解析符号链接并消解 `..`，再验证结果路径以 base_dir 开头。
+/// 仅在文件已存在时调用（canonicalize 要求路径在磁盘上存在）。
+fn is_path_within(base_dir: &std::path::Path, target: &std::path::Path) -> bool {
+    // canonicalize 解析 .. 并跟随符号链接，返回绝对规范路径
+    let Ok(canonical_target) = std::fs::canonicalize(target) else {
+        return false;
+    };
+    let Ok(canonical_base) = std::fs::canonicalize(base_dir) else {
+        return false;
+    };
+    canonical_target.starts_with(&canonical_base)
+}
+
 /// GET /assets/{filename} - 静态资源处理器（图片、PDF 等）
+///
+/// 安全：对所有候选路径执行 `is_path_within` 校验，拒绝 `../../` 类路径遍历请求。
 #[get("/assets/{filename:.*}")]
 pub async fn assets_handler(
     filename: web::Path<String>,
@@ -267,6 +284,11 @@ pub async fn assets_handler(
     // 先尝试直接访问（可能是完整路径）
     let direct_path = data.config.local_path.join(&decoded_filename);
     if direct_path.exists() && direct_path.is_file() {
+        // 路径遍历防护：确保解析后的路径仍在 local_path 内
+        if !is_path_within(&data.config.local_path, &direct_path) {
+            error!("❌ 路径遍历攻击被拒绝: {}", decoded_filename);
+            return Err(actix_web::error::ErrorForbidden("Access denied"));
+        }
         return actix_files::NamedFile::open(direct_path)
             .map_err(actix_web::error::ErrorInternalServerError);
     }
@@ -276,6 +298,11 @@ pub async fn assets_handler(
     if let Some(full_path) = file_index.get(&decoded_filename) {
         let file_path = data.config.local_path.join(full_path);
         if file_path.exists() && file_path.is_file() {
+            // 文件索引中的路径由系统构建，理论上已在 local_path 内，但仍做防御性检查
+            if !is_path_within(&data.config.local_path, &file_path) {
+                error!("❌ 文件索引路径遍历防护触发: {}", full_path);
+                return Err(actix_web::error::ErrorForbidden("Access denied"));
+            }
             return actix_files::NamedFile::open(file_path)
                 .map_err(actix_web::error::ErrorInternalServerError);
         }
@@ -1124,5 +1151,129 @@ mod tests {
             body.contains("孤立笔记") || body.contains("孤"),
             "/orphans 页面应包含相关内容"
         );
+    }
+
+    // ─── 路径遍历防护测试（S1 修复回归） ─────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_is_path_within_blocks_traversal() {
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let base = tmp.path();
+
+        // 在 base 内创建一个合法文件
+        let legal_file = base.join("note.md");
+        std::fs::write(&legal_file, "内容").unwrap();
+
+        // 合法路径：base/note.md → 应通过
+        assert!(is_path_within(base, &legal_file), "base 内的文件应通过检查");
+
+        // 路径遍历：父目录在 base 之外 → 应被拒绝
+        let parent = base.parent().unwrap();
+        assert!(!is_path_within(base, parent), "base 父目录不应通过检查");
+
+        // 不存在的路径（canonicalize 失败）→ 应返回 false
+        let nonexistent = base.join("does_not_exist.md");
+        assert!(!is_path_within(base, &nonexistent), "不存在的路径应返回 false");
+
+        // base 自身（目录）→ 路径在 base 内
+        assert!(is_path_within(base, base), "base 目录自身应通过前缀检查");
+    }
+
+    #[actix_web::test]
+    async fn test_assets_handler_blocks_path_traversal() {
+        // /assets/../../etc/passwd 类请求应返回 404（路径不存在于索引）或 403（canonicalize 越界）
+        let state = make_test_state().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .service(assets_handler),
+        )
+        .await;
+
+        // 尝试路径遍历（编码后的 ../..）
+        let req = test::TestRequest::get()
+            .uri("/assets/..%2F..%2Fetc%2Fpasswd")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        // 应返回 403 或 404，绝不能返回 200
+        assert!(
+            resp.status() == actix_web::http::StatusCode::FORBIDDEN
+                || resp.status() == actix_web::http::StatusCode::NOT_FOUND,
+            "路径遍历请求应被拒绝，实际状态码: {}",
+            resp.status()
+        );
+    }
+
+    // ─── Webhook 签名验证测试（T2） ────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_verify_github_signature_correct() {
+        // 使用已知 secret + body 计算正确签名，验证应通过
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        let secret = "webhook_secret";
+        let body = b"payload body";
+
+        let mut mac: Hmac<Sha256> = Mac::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(body);
+        let result = mac.finalize().into_bytes();
+        let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
+        let sig = format!("sha256={}", hex);
+
+        assert!(
+            verify_github_signature(secret, body, &sig),
+            "正确签名应通过验证"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_verify_github_signature_wrong_secret() {
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+
+        let body = b"payload body";
+        let mut mac: Hmac<Sha256> = Mac::new_from_slice(b"wrong_secret").unwrap();
+        mac.update(body);
+        let result = mac.finalize().into_bytes();
+        let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
+        let sig = format!("sha256={}", hex);
+
+        assert!(
+            !verify_github_signature("correct_secret", body, &sig),
+            "错误 secret 生成的签名应验证失败"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_verify_github_signature_missing_prefix() {
+        // 签名缺少 sha256= 前缀应被拒绝
+        assert!(
+            !verify_github_signature("secret", b"body", "abcdef1234"),
+            "缺少 sha256= 前缀应验证失败"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_verify_github_signature_invalid_hex() {
+        // 非法十六进制字符串应被拒绝
+        assert!(
+            !verify_github_signature("secret", b"body", "sha256=ZZZZZZ"),
+            "非法十六进制应验证失败"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_hex_decode_odd_length() {
+        // 奇数长度十六进制字符串应返回 None
+        assert!(hex_decode("abc").is_none(), "奇数长度十六进制应返回 None");
+    }
+
+    #[actix_web::test]
+    async fn test_hex_decode_valid() {
+        // 合法十六进制解码
+        assert_eq!(hex_decode("deadbeef"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
     }
 }

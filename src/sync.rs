@@ -38,8 +38,27 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     info!("========================================");
     let sync_start = std::time::Instant::now();
 
-    // 标记同步状态为 running
+    // 标记同步状态为 running，并注册 RAII 守卫：
+    // 正常退出时在函数末尾手动设为 IDLE；异常（? 传播）退出时 guard Drop 将状态设为 FAILED。
     data.sync_status.store(sync_status::RUNNING, Ordering::Relaxed);
+
+    // RAII 守卫：在 Drop 时若状态仍为 RUNNING（意味着未正常完成），设置为 FAILED
+    struct SyncStatusGuard<'a> {
+        status: &'a std::sync::atomic::AtomicU8,
+        completed: bool,
+    }
+    impl Drop for SyncStatusGuard<'_> {
+        fn drop(&mut self) {
+            if !self.completed {
+                // 未正常完成（中途 return Err 或 panic），标记为 FAILED
+                self.status.store(sync_status::FAILED, Ordering::Relaxed);
+            }
+        }
+    }
+    let mut _status_guard = SyncStatusGuard {
+        status: &data.sync_status,
+        completed: false,
+    };
 
     // ✅ 步骤 0: 在 Git 同步前，先尝试加载持久化数据（如果内存为空）
     let notes_count_before = data.notes.read().await.len();
@@ -421,6 +440,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     data.last_sync_at.store(now_ts, Ordering::Relaxed);
     data.last_sync_duration_ms.store(duration_ms, Ordering::Relaxed);
     data.sync_status.store(sync_status::IDLE, Ordering::Relaxed);
+    _status_guard.completed = true; // 正常完成，阻止 Drop 设置 FAILED
 
     // 更新 Prometheus 指标
     SYNC_TOTAL.inc();

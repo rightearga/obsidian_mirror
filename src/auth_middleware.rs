@@ -125,26 +125,42 @@ where
                         })
                     }
                     Err(_) => {
-                        // Token 无效，返回 401
+                        // Token 无效：API 路径返回 401 JSON，页面路径重定向到 /login
+                        let is_api = path.starts_with("/api/");
                         Box::pin(async move {
                             let (req, _) = req.into_parts();
-                            let response = HttpResponse::Found()
-                                .insert_header(("Location", "/login"))
-                                .finish()
-                                .map_into_right_body();
+                            let response = if is_api {
+                                HttpResponse::Unauthorized()
+                                    .content_type("application/json")
+                                    .body(r#"{"error":"未认证，请先登录"}"#)
+                                    .map_into_right_body()
+                            } else {
+                                HttpResponse::Found()
+                                    .insert_header(("Location", "/login"))
+                                    .finish()
+                                    .map_into_right_body()
+                            };
                             Ok(ServiceResponse::new(req, response))
                         })
                     }
                 }
             }
             None => {
-                // 没有 token，重定向到登录页
+                // 无 token：API 路径返回 401 JSON，页面路径重定向到 /login
+                let is_api = path.starts_with("/api/");
                 Box::pin(async move {
                     let (req, _) = req.into_parts();
-                    let response = HttpResponse::Found()
-                        .insert_header(("Location", "/login"))
-                        .finish()
-                        .map_into_right_body();
+                    let response = if is_api {
+                        HttpResponse::Unauthorized()
+                            .content_type("application/json")
+                            .body(r#"{"error":"未认证，请先登录"}"#)
+                            .map_into_right_body()
+                    } else {
+                        HttpResponse::Found()
+                            .insert_header(("Location", "/login"))
+                            .finish()
+                            .map_into_right_body()
+                    };
                     Ok(ServiceResponse::new(req, response))
                 })
             }

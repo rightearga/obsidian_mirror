@@ -6,6 +6,27 @@
 
 ---
 
+## [v1.4.10] — 2026-04-13
+
+代码审计修复版本（CODEREVIEW_1.4）。
+
+### Fixed
+- **[S1] assets_handler 路径遍历**：添加 `is_path_within` 函数，使用 `canonicalize` + 路径前缀验证，拒绝 `../../etc/passwd` 类请求
+- **[B1] sync_status 不更新 FAILED**：`perform_sync` 内使用 RAII 守卫，异常退出（`?` 传播/早期 return）时自动将状态设为 FAILED
+- **[Q1] API 认证失败返回 302**：`auth_middleware` 对 `/api/*` 路径返回 `401 + JSON`，页面路径仍重定向 `/login`
+- **[Q4] git.rs 韩文注释**：统一替换为中文
+
+### Added
+- **T1/T2 测试补全**（8 个新测试）：`is_path_within` 路径遍历防护、assets 端点路径遍历回归、webhook HMAC-SHA256 签名验证（正确/错误 secret/无前缀/非法十六进制/奇数长度）
+
+### 审计统计
+- 🔴 P0 修复：1 项（S1 路径遍历）
+- 🟠 P1 修复：2 项（B1 状态管理、Q1 API 认证）
+- 🔵 P3 修复：1 项（Q4 注释规范）
+- 发现问题总计：15 项（含推迟 8 项、接受 1 项）
+
+---
+
 ## [v1.4.9] — 2026-04-13
 
 架构优化：移除 `Note.content_text`，大型笔记库内存占用降低约 40-50%。

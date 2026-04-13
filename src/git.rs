@@ -23,7 +23,7 @@ impl GitClient {
     pub async fn sync(repo_url: &str, local_path: &Path) -> Result<SyncResult> {
         let clean_url = repo_url.trim();
         
-        // 1. 목록 존재 시 처리
+        // 1. 目录已存在时的处理
         if local_path.exists() {
             if local_path.join(".git").exists() {
                 // 已是 git 仓库 → 执行 pull

@@ -4,7 +4,7 @@ resolver = "3"
 
 [package]
 name = "obsidian_mirror"
-version = "1.4.9"
+version = "1.4.10"
 edition = "2024"
 
 [lib]
