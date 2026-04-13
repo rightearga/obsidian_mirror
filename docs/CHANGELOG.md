@@ -6,6 +6,22 @@
 
 ---
 
+## [v1.3.1] — 2026-04-13
+
+Bug 修复与安全加固：修复 4 个 P0/P1 级问题（标签持久化残留、增量反向链接丢失、标题 XSS、同步并发竞争）。
+
+### Fixed
+- **[B1] `persistence::clear()` 未清理标签索引**：`clear()` 方法补充清空 `TAG_INDEX_TABLE`，消除调用后标签数据残留问题
+- **[B4] 增量同步反向链接丢失**：在 `Note` 添加 `outgoing_links` 字段，`BacklinkBuilder::build` 改为基于全量笔记出链重建，增量同步不再遗漏未变更笔记的反向链接；`CURRENT_VERSION` 升至 2 强制缓存重建
+- **[S1] 标题文本 XSS 漏洞**：`MarkdownProcessor` 添加 `html_escape()` 函数，标题输出前对 pulldown-cmark 解码后的文本字符（`<`、`>`、`&`、`"`）进行 HTML 转义
+- **[B2] `/sync` 端点缺少并发保护**：`AppState` 添加 `sync_lock: tokio::sync::Mutex<()>`，`sync_handler` 使用 `try_lock()` 防止并发同步（返回 409 Conflict）
+
+### 修复统计
+- 🔴 P0 修复：2 项（B1、B4）
+- 🟠 P1 修复：2 项（S1、B2）
+
+---
+
 ## [v1.3.0] — 2026-02-01
 
 高级搜索功能：多条件过滤、搜索排序、分享链接、阅读进度跟踪。

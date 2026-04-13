@@ -1,7 +1,5 @@
-// use anyhow::Result;
 use pulldown_cmark::{html, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use regex::Regex;
-// use std::borrow::Cow;
 use crate::domain::TocItem;
 use crate::tags;
 
@@ -244,10 +242,10 @@ impl MarkdownProcessor {
                         HeadingLevel::H6 => 6,
                     };
 
-                    // 输出带 ID 的标题
+                    // 输出带 ID 的标题（标题文本必须转义，防止 XSS 注入）
                     html_output.push_str(&format!(
                         "<h{} id=\"{}\">{}</h{}>\n",
-                        level_num, id, current_heading_text, level_num
+                        level_num, id, Self::html_escape(&current_heading_text), level_num
                     ));
 
                     in_heading = false;
@@ -311,6 +309,14 @@ impl MarkdownProcessor {
         let tags = tags::extract_tags(&content_body, &frontmatter);
 
         (html_output, links, tags, frontmatter, toc)
+    }
+
+    /// 对字符串进行 HTML 转义，防止 XSS 注入
+    fn html_escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
     }
 
     /// 生成标题 ID（用于锚点）
@@ -744,6 +750,35 @@ fn main() {
         assert!(
             !html.contains("<div class=\"mermaid\">"),
             "不应渲染为 mermaid"
+        );
+    }
+
+    #[test]
+    fn test_heading_xss_escape() {
+        // pulldown-cmark 将 markdown 中的 HTML 实体（如 &lt;）解码为文本字符 <，
+        // 这些字符会出现在 Event::Text 中，插入 HTML 前必须再次转义，防止 XSS。
+        // 例如：# Note &lt;tag&gt; → Event::Text("Note <tag>") → 需转义为 &lt;tag&gt;
+        let content = "# Note &lt;injected&gt; & \"test\"";
+        let (html, _links, _tags, _, toc) = MarkdownProcessor::process(content);
+
+        // 转义后的 HTML 不应含有原始的 < 或 > 或未转义的 &
+        assert!(
+            !html.contains("<injected>"),
+            "标题中解码后的 < > 字符应被 html_escape 重新转义"
+        );
+        // 应该包含转义后的形式
+        assert!(
+            html.contains("&lt;injected&gt;"),
+            "< > 应被转义为 &lt; &gt;"
+        );
+        assert!(
+            html.contains("&amp;"),
+            "& 应被转义为 &amp;"
+        );
+        // TOC 中保留解码后的原始文本（供模板自行处理）
+        assert!(
+            toc[0].text.contains('<'),
+            "TOC 保留原始文本，不二次转义"
         );
     }
 }

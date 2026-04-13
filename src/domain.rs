@@ -55,6 +55,9 @@ pub struct Note {
     pub toc: Vec<TocItem>, // 目录列表
     pub mtime: SystemTime,
     pub frontmatter: Frontmatter, // Frontmatter 数据
+    /// 当前笔记的出链（指向的其他笔记标题列表），用于构建全量反向链接索引
+    #[serde(default)]
+    pub outgoing_links: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

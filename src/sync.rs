@@ -304,16 +304,16 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     let mut notes_write = data.notes.write().await;
     let mut link_index_write = data.link_index.write().await;
     
-    // 更新笔记和链接索引，获取临时链接映射
-    let temp_links = IndexUpdater::update_notes_and_links(
+    // 更新笔记和链接索引
+    IndexUpdater::update_notes_and_links(
         &mut notes_write,
         &mut link_index_write,
         processed_notes,
     );
-    
-    // 构建反向链接
+
+    // 基于全量 notes 重建反向链接，确保增量同步时不会遗漏未变更笔记的出链
     let mut backlinks_write = data.backlinks.write().await;
-    *backlinks_write = BacklinkBuilder::build(&notes_write, temp_links);
+    *backlinks_write = BacklinkBuilder::build(&notes_write);
     
     // 构建标签索引
     let mut tag_index_write = data.tag_index.write().await;
@@ -528,6 +528,8 @@ fn process_single_note(
         toc,
         mtime,
         frontmatter: crate::domain::Frontmatter(frontmatter),
+        // 保存出链列表，用于增量同步时正确重建全量反向链接索引
+        outgoing_links: links.clone(),
     };
 
     Some((note, links))

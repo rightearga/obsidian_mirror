@@ -1,7 +1,7 @@
 // 应用状态定义
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 
 use crate::config::AppConfig;
 use crate::domain::{Note, SidebarNode};
@@ -30,6 +30,8 @@ pub struct AppState {
     pub share_db: Arc<ShareDatabase>,
     /// 阅读进度数据库
     pub reading_progress_db: Arc<ReadingProgressDatabase>,
+    /// 同步互斥锁：防止并发 /sync 请求导致 Tantivy IndexWriter 冲突和数据竞争
+    pub sync_lock: Mutex<()>,
 }
 
 impl AppState {
@@ -51,6 +53,7 @@ impl AppState {
             search_engine,
             share_db,
             reading_progress_db,
+            sync_lock: Mutex::new(()),
         }
     }
 }

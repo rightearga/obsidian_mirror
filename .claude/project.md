@@ -12,14 +12,14 @@
 
 ## 当前开发状态
 
-**当前版本：1.3.0**
+**当前版本：1.3.1**
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
-| Markdown 处理 | ✅ 稳定 | WikiLink、图片嵌入、frontmatter、TOC |
+| Markdown 处理 | ✅ 稳定 | WikiLink、图片嵌入、frontmatter、TOC；标题文本已 HTML 转义（S1 修复） |
 | 全文搜索 | ✅ 稳定 | Tantivy + jieba 中文分词，支持标签/文件夹/日期过滤 |
-| Git 同步 | ✅ 稳定 | 增量同步（diff 驱动），支持首次克隆与后续 pull |
-| 持久化索引 | ✅ 稳定 | redb + postcard，以 Git commit hash 为缓存键 |
+| Git 同步 | ✅ 稳定 | 增量同步（diff 驱动）；并发保护（B2 修复）；增量反向链接修复（B4） |
+| 持久化索引 | ✅ 稳定 | redb + postcard（CURRENT_VERSION=2）；clear() 已补全标签清理（B1 修复） |
 | 认证系统 | ✅ 稳定 | JWT + bcrypt，可选启用 |
 | 分享链接 | ✅ 稳定 | UUID token，支持密码/次数/过期限制 |
 | 阅读进度 | ✅ 稳定 | 滚动位置记忆 + 阅读历史 |

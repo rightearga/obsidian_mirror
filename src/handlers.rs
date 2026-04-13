@@ -87,13 +87,24 @@ fn generate_breadcrumbs(note_path: &str, note_title: &str) -> Vec<BreadcrumbItem
 }
 
 /// POST /sync - 触发 Git 同步并重新处理所有笔记
+///
+/// 使用 sync_lock 防止并发同步请求导致 Tantivy IndexWriter 冲突和数据竞争。
+/// 若同步已在进行中，返回 409 Conflict。
 #[post("/sync")]
 pub async fn sync_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    // 使用 try_lock 防止并发同步：若已有同步在进行，立即返回 409
+    let _guard = match data.sync_lock.try_lock() {
+        Ok(guard) => guard,
+        Err(_) => {
+            return HttpResponse::Conflict().body("同步正在进行中，请稍后再试");
+        }
+    };
+
     match perform_sync(&data).await {
-        Ok(_) => HttpResponse::Ok().body("Sync successful"),
+        Ok(_) => HttpResponse::Ok().body("同步成功"),
         Err(e) => {
-            error!("Sync failed: {:?}", e);
-            HttpResponse::InternalServerError().body(format!("Sync failed: {}", e))
+            error!("同步失败: {:?}", e);
+            HttpResponse::InternalServerError().body(format!("同步失败: {}", e))
         }
     }
 }

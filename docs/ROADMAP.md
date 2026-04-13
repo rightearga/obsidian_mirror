@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.3.0 🎉  
+**当前版本**: v1.3.1 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -439,36 +439,44 @@
 
 ---
 
-### 🔧 v1.3.1 (计划中 - 紧急修复)
+### ✅ v1.3.1 (已发布 - 2026-04-13)
 
-**主题**: Bug 修复与安全加固  
-**预计发布**: 2026-04 月（本版本优先级最高，应尽快发布）
+**主题**: Bug 修复与安全加固
 
-基于 `docs/CODEREVIEW_1.3.md` 代码审查报告，修复所有 P0/P1 级别问题。
+基于 `docs/CODEREVIEW_1.3.md` 代码审查报告，修复全部 P0/P1 级别问题。
 
-#### 🔴 P0 - 立即修复
+#### 核心功能
 
-- [ ] **[B1] 修复 `persistence::clear()` 未清理标签索引**
-  - 文件：`src/persistence.rs:270`
-  - 问题：`clear()` 方法遗漏了 `TAG_INDEX_TABLE`，调用后标签数据残留
-  - 修复：在 `clear()` 中补充清空 `TAG_INDEX_TABLE`
+- ✅ **[B1] 修复 `persistence::clear()` 未清理标签索引**
+  - 文件：`src/persistence.rs`
+  - 修复：在 `clear()` 补充清空 `TAG_INDEX_TABLE`，消除调用后标签数据残留
 
-- [ ] **[B4] 修复增量同步时反向链接数据丢失**
-  - 文件：`src/sync.rs:315`，`src/indexer.rs:19`
-  - 问题：增量同步时 `BacklinkBuilder::build` 以不完整的 `temp_links` 覆盖全量反向链接索引，导致未变更文件的反向链接丢失
-  - 修复：增量同步时合并现有反向链接而非替换；或在增量模式下基于全量 `notes` 重建反向链接
+- ✅ **[B4] 修复增量同步时反向链接数据丢失**
+  - 文件：`src/domain.rs`、`src/sync.rs`、`src/indexer.rs`、`src/persistence.rs`
+  - 修复：`Note` 添加 `outgoing_links: Vec<String>` 字段存储出链；`BacklinkBuilder::build` 改为基于全量 `notes.outgoing_links` 重建，不再依赖增量 `temp_links`；`CURRENT_VERSION` 升至 2 强制缓存失效
 
-#### 🔴 P1 - 本周修复
+- ✅ **[S1] 修复 XSS：标题文本未 HTML 转义**
+  - 文件：`src/markdown.rs`
+  - 修复：添加 `html_escape()` 函数，标题输出前对 `current_heading_text` 进行 `&`, `<`, `>`, `"` 转义
 
-- [ ] **[S1] 修复 XSS：标题文本未 HTML 转义**
-  - 文件：`src/markdown.rs:249`
-  - 问题：`current_heading_text` 未转义直接插入 HTML，可能导致 XSS
-  - 修复：插入前使用 `&amp;` `&lt;` `&gt;` `&quot;` 转义特殊字符
+- ✅ **[B2] 修复 `/sync` 端点缺少并发保护**
+  - 文件：`src/state.rs`、`src/handlers.rs`
+  - 修复：`AppState` 添加 `sync_lock: tokio::sync::Mutex<()>`；`sync_handler` 使用 `try_lock()` 防并发，并发时返回 409 Conflict
 
-- [ ] **[B2] 修复 `/sync` 端点缺少并发保护**
-  - 文件：`src/handlers.rs:91`
-  - 问题：并发同步请求可导致 Tantivy IndexWriter 冲突及数据竞争
-  - 修复：在 `AppState` 中添加 `sync_lock: tokio::sync::Mutex<()>`，同一时间只允许一个同步任务执行
+#### 实际交付物
+
+- 修改文件：`src/persistence.rs`（B1 标签清理）
+- 修改文件：`src/domain.rs`（B4 出链字段）
+- 修改文件：`src/sync.rs`（B4 出链存储）
+- 修改文件：`src/indexer.rs`（B4 反向链接重建逻辑）
+- 修改文件：`src/markdown.rs`（S1 html_escape）
+- 修改文件：`src/state.rs`（B2 sync_lock 字段）
+- 修改文件：`src/handlers.rs`（B2 并发保护）
+
+#### 测试结果
+
+- 全量测试：**52/52 通过**
+- 新增测试：5 个（indexer 3 个、markdown 1 个）
 
 ---
 
@@ -713,7 +721,7 @@
 - ✅ 完成 v1.3.0 (高级搜索) 🎉
 
 **Q2 (4-6月)**: 质量加固期
-- 完成 v1.3.1（紧急 Bug 修复 + XSS 安全修复）
+- ✅ 完成 v1.3.1（紧急 Bug 修复 + XSS 安全修复）🎉
 - 完成 v1.3.2（安全加固：Cookie、分享密码哈希、中间件收紧）
 - 完成 v1.4.0（性能优化 + 用户体验细节完善）
 - 持续补充单元测试

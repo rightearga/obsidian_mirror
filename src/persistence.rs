@@ -28,7 +28,8 @@ struct PersistenceMetadata {
     ignore_patterns: Vec<String>,
 }
 
-const CURRENT_VERSION: u32 = 1;
+/// 持久化版本号：修改持久化结构体（Note 等）时必须递增，以强制重建缓存
+const CURRENT_VERSION: u32 = 2;
 
 /// 索引持久化管理器
 pub struct IndexPersistence {
@@ -291,6 +292,11 @@ impl IndexPersistence {
 
         {
             let mut table = write_txn.open_table(BACKLINKS_TABLE)?;
+            table.remove("data")?;
+        }
+
+        {
+            let mut table = write_txn.open_table(TAG_INDEX_TABLE)?;
             table.remove("data")?;
         }
 
