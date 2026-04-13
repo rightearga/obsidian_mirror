@@ -6,6 +6,29 @@
 
 ---
 
+## [v1.4.0] — 2026-04-13
+
+交互体验基础：全套键盘快捷键、主题预设与定制、代码块主题选择、动画优化。
+
+### Added
+- **键盘快捷键**（`static/js/keyboard.js`）
+  - 页面内导航：`j`/`k` 滚动、`g g` 顶部、`G` 底部、`[`/`]` 前后笔记、`b` 返回
+  - 功能：`g` 打开图谱（单击，等 450ms 无第二下则触发）、`t` 切换 TOC、`?` 帮助面板
+  - 焦点在输入框时自动停用；`prefers-reduced-motion` 时跳过滚动动画
+- **键盘快捷键帮助面板**（`?` 触发，`Esc` 关闭；`static/css/keyboard.css`）
+- **主题预设**：暖色 / 护眼 / 高对比度三套，叠加于深色/浅色基础上（`static/css/themes.css`）
+- **自定义强调色**：设置面板颜色选择器，写入 `--accent-color` CSS 变量，localStorage 持久化
+- **代码块主题独立选择**：6 套可选（auto / Atom One Dark / Atom One Light / GitHub Light / GitHub Dark / Dracula / Monokai），跟随深浅色自动或固定选择
+- **交互动画**（`static/css/animations.css`）
+  - 笔记内容区淡入（150ms fade-in）
+  - 侧边栏文件夹图标旋转过渡（cubic-bezier）
+  - 搜索结果错峰进入（stagger 20ms/条，最多 8 条）
+  - TOC 活跃链接颜色平滑过渡
+  - `prefers-reduced-motion` 媒体查询自动禁用所有动画
+- 设置面板新增：主题预设按钮组、强调色选择器、代码块主题下拉、动画开关
+
+---
+
 ## [v1.3.4] — 2026-04-13
 
 代码质量改进与测试覆盖补全：6 项 CODEREVIEW Q 系列问题全部落地，新增 14 个单元测试。

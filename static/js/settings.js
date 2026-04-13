@@ -7,7 +7,11 @@
         fontSize: 16,
         lineHeight: 1.6,
         fontFamily: 'system-ui',  // 默认使用系统字体
-        language: 'zh-CN',  // 默认语言
+        language: 'zh-CN',        // 默认语言
+        themePreset: 'none',      // 主题预设（none/warm/eye-care/high-contrast）
+        accentColor: '',          // 自定义强调色（空字符串 = 使用主题默认）
+        codeTheme: 'auto',        // 代码块主题（auto 跟随深/浅色）
+        animations: true,         // 是否启用交互动画
     };
     
     // 常用字体列表
@@ -69,7 +73,31 @@
             window.i18n.setLanguage(settings.language);
             window.i18n.translatePage();
         }
-        
+
+        // 应用主题预设
+        if ('themePreset' in settings && typeof applyThemePreset === 'function') {
+            applyThemePreset(settings.themePreset);
+        }
+
+        // 应用自定义强调色
+        if ('accentColor' in settings && typeof applyAccentColor === 'function') {
+            applyAccentColor(settings.accentColor || '');
+        }
+
+        // 应用代码块主题
+        if ('codeTheme' in settings && typeof applyCodeTheme === 'function') {
+            applyCodeTheme(settings.codeTheme);
+        }
+
+        // 应用动画开关
+        if ('animations' in settings) {
+            if (settings.animations) {
+                document.documentElement.removeAttribute('data-animations');
+            } else {
+                document.documentElement.setAttribute('data-animations', 'off');
+            }
+        }
+
         // 应用字体
         if (settings.fontFamily) {
             const selectedFont = FONT_OPTIONS.find(f => f.value === settings.fontFamily);
@@ -207,6 +235,72 @@
                                 <span class="range-value" id="line-height-value">${currentSettings.lineHeight}</span>
                             </div>
                         </div>
+
+                        <!-- 主题预设 -->
+                        <div class="setting-group">
+                            <label class="setting-label">
+                                <span class="label-text" data-i18n="settings.theme_preset">主题预设</span>
+                                <span class="label-desc" data-i18n="settings.theme_preset_desc">叠加在深色/浅色基础上的配色方案</span>
+                            </label>
+                            <div class="setting-control">
+                                <div class="theme-preset-options" id="theme-preset-options">
+                                    <button class="theme-preset-btn ${currentSettings.themePreset === 'none' ? 'active' : ''}" data-preset="none" data-i18n="settings.preset_none">默认</button>
+                                    <button class="theme-preset-btn ${currentSettings.themePreset === 'warm' ? 'active' : ''}" data-preset="warm" data-i18n="settings.preset_warm">暖色</button>
+                                    <button class="theme-preset-btn ${currentSettings.themePreset === 'eye-care' ? 'active' : ''}" data-preset="eye-care" data-i18n="settings.preset_eye_care">护眼</button>
+                                    <button class="theme-preset-btn ${currentSettings.themePreset === 'high-contrast' ? 'active' : ''}" data-preset="high-contrast" data-i18n="settings.preset_high_contrast">高对比</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 强调色 -->
+                        <div class="setting-group">
+                            <label class="setting-label">
+                                <span class="label-text" data-i18n="settings.accent_color">强调色</span>
+                                <span class="label-desc" data-i18n="settings.accent_color_desc">影响链接、活跃标签和高亮颜色</span>
+                            </label>
+                            <div class="setting-control">
+                                <div class="accent-color-row">
+                                    <input type="color" id="accent-color" class="accent-color-input"
+                                           value="${currentSettings.accentColor || '#6a5acd'}">
+                                    <button class="accent-color-reset" onclick="Settings.resetAccentColor()" data-i18n="settings.accent_color_reset">
+                                        重置默认
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 代码块主题 -->
+                        <div class="setting-group">
+                            <label class="setting-label">
+                                <span class="label-text" data-i18n="settings.code_theme">代码块主题</span>
+                                <span class="label-desc" data-i18n="settings.code_theme_desc">选择代码语法高亮配色</span>
+                            </label>
+                            <div class="setting-control">
+                                <select id="code-theme" name="codeTheme" class="font-select">
+                                    <option value="auto" ${currentSettings.codeTheme === 'auto' ? 'selected' : ''} data-i18n="settings.code_theme_auto">自动（跟随深/浅色）</option>
+                                    <option value="atom-one-dark"  ${currentSettings.codeTheme === 'atom-one-dark'  ? 'selected' : ''}>Atom One Dark</option>
+                                    <option value="atom-one-light" ${currentSettings.codeTheme === 'atom-one-light' ? 'selected' : ''}>Atom One Light</option>
+                                    <option value="github"      ${currentSettings.codeTheme === 'github'      ? 'selected' : ''}>GitHub Light</option>
+                                    <option value="github-dark" ${currentSettings.codeTheme === 'github-dark' ? 'selected' : ''}>GitHub Dark</option>
+                                    <option value="dracula"     ${currentSettings.codeTheme === 'dracula'     ? 'selected' : ''}>Dracula</option>
+                                    <option value="monokai"     ${currentSettings.codeTheme === 'monokai'     ? 'selected' : ''}>Monokai</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- 交互动画 -->
+                        <div class="setting-group">
+                            <label class="setting-label">
+                                <span class="label-text" data-i18n="settings.animations">交互动画</span>
+                                <span class="label-desc" data-i18n="settings.animations_desc">页面淡入、搜索结果错峰进入等动画效果</span>
+                            </label>
+                            <div class="setting-control">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="animations-toggle" ${currentSettings.animations !== false ? 'checked' : ''}>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                        </div>
                     </form>
                 </div>
                 
@@ -277,6 +371,47 @@
                 lineHeightValue.textContent = value.toFixed(1);
                 currentSettings.lineHeight = value;
                 applySettings({ lineHeight: value });
+            });
+        }
+
+        // 主题预设按钮
+        const presetContainer = document.getElementById('theme-preset-options');
+        if (presetContainer) {
+            presetContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.theme-preset-btn');
+                if (!btn) return;
+                const preset = btn.getAttribute('data-preset');
+                presetContainer.querySelectorAll('.theme-preset-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentSettings.themePreset = preset;
+                applySettings({ themePreset: preset });
+            });
+        }
+
+        // 强调色选择器
+        const accentInput = document.getElementById('accent-color');
+        if (accentInput) {
+            accentInput.addEventListener('input', (e) => {
+                currentSettings.accentColor = e.target.value;
+                applySettings({ accentColor: e.target.value });
+            });
+        }
+
+        // 代码块主题选择
+        const codeThemeSelect = document.getElementById('code-theme');
+        if (codeThemeSelect) {
+            codeThemeSelect.addEventListener('change', (e) => {
+                currentSettings.codeTheme = e.target.value;
+                applySettings({ codeTheme: e.target.value });
+            });
+        }
+
+        // 动画开关
+        const animToggle = document.getElementById('animations-toggle');
+        if (animToggle) {
+            animToggle.addEventListener('change', (e) => {
+                currentSettings.animations = e.target.checked;
+                applySettings({ animations: e.target.checked });
             });
         }
     }
@@ -351,13 +486,24 @@
         applySettings(currentSettings);
     }
     
+    /**
+     * 重置强调色为主题默认
+     */
+    function resetAccentColor() {
+        currentSettings.accentColor = '';
+        applySettings({ accentColor: '' });
+        const accentInput = document.getElementById('accent-color');
+        if (accentInput) accentInput.value = '#6a5acd';
+    }
+
     // 导出公共接口
     window.Settings = {
         open: openSettings,
         close: closeSettings,
         apply: apply,
         reset: reset,
-        init: init
+        init: init,
+        resetAccentColor: resetAccentColor,
     };
     
     // 页面加载完成后初始化

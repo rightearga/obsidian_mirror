@@ -1,0 +1,96 @@
+/* ==========================================
+   交互动画 — v1.4.0
+   ========================================== */
+
+/* ---------- 页面内容淡入 ---------- */
+@keyframes om-fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* 笔记内容区淡入（可通过设置 [data-animations="off"] 关闭） */
+:not([data-animations="off"]) .markdown-body {
+    animation: om-fade-in 0.15s ease-out both;
+}
+
+/* ---------- TOC 活跃链接平滑过渡 ---------- */
+.toc-link {
+    transition: color 0.15s ease, background-color 0.15s ease, border-left-color 0.15s ease;
+}
+
+/* TOC 活跃指示条 — 用滑动条代替跳跃切换 */
+.toc-link.active {
+    transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+/* ---------- 搜索结果错峰进入 ---------- */
+@keyframes om-slide-in-result {
+    from {
+        opacity: 0;
+        transform: translateX(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* JS 会设置 animation-delay，此处定义动画基础 */
+.search-modal-result-item {
+    animation: om-slide-in-result 0.12s ease-out both;
+}
+
+/* ---------- 侧边栏文件夹图标旋转 ---------- */
+.tree-icon {
+    display: inline-block;
+    transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* .rotated 状态通过 JS 切换，CSS 过渡接管动画 */
+.tree-icon.rotated {
+    transform: rotate(90deg);
+}
+
+/* ---------- 侧边栏项目悬停效果 ---------- */
+.tree-row {
+    transition: background-color 0.1s ease;
+}
+
+/* ---------- 主题切换过渡（仅对背景和文字，避免全局 transition 过宽） ---------- */
+body {
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.sidebar {
+    transition: background-color 0.2s ease;
+}
+
+/* ---------- 对 prefers-reduced-motion 的尊重 ---------- */
+@media (prefers-reduced-motion: reduce) {
+    :not([data-animations="off"]) .markdown-body {
+        animation: none;
+    }
+
+    .search-modal-result-item {
+        animation: none;
+    }
+
+    .toc-link {
+        transition: none;
+    }
+
+    .tree-icon {
+        transition: none;
+    }
+
+    body,
+    .sidebar {
+        transition: none;
+    }
+}

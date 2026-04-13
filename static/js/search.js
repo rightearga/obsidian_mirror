@@ -324,6 +324,12 @@ function displayModalSearchResults(results, query) {
     });
 
     searchModalResults.innerHTML = html;
+
+    // 为每个结果项设置错峰进入动画延迟（最多 8 项，之后延迟不再增加避免等待过长）
+    const items = searchModalResults.querySelectorAll('.search-modal-result-item');
+    items.forEach((item, i) => {
+        item.style.animationDelay = Math.min(i, 7) * 20 + 'ms';
+    });
 }
 
 /**

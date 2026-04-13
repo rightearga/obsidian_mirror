@@ -1,0 +1,200 @@
+/* ==========================================
+   主题预设 — 叠加在浅色/深色基础之上
+   ========================================== */
+
+/* ---------- 暖色方案 ---------- */
+[data-theme-preset="warm"] {
+    --bg-color: #faf7f2;
+    --bg-secondary: #f2ede6;
+    --text-color: #3d2b1f;
+    --text-muted: #7a6255;
+    --text-faint: #b09888;
+    --sidebar-bg: #f0e8df;
+    --border-color: #ddd0c4;
+    --link-color: #8b5e3c;
+    --link-hover: #6b4020;
+    --primary-color: #8b5e3c;
+    --primary-hover: #6b4020;
+    --h2-color: #8b5e3c;
+    --h3-color: #c07b3a;
+    --code-bg: #ede7de;
+    --quote-bg: #f5f0ea;
+    --quote-border: #c4a88a;
+    --button-bg: rgba(139, 94, 60, 0.08);
+    --button-hover-bg: rgba(139, 94, 60, 0.14);
+}
+
+[data-theme="dark"][data-theme-preset="warm"] {
+    --bg-color: #221a14;
+    --bg-secondary: #2c221a;
+    --text-color: #e8d8c8;
+    --text-muted: #c0a898;
+    --sidebar-bg: #1a130e;
+    --border-color: #3d2e22;
+    --link-color: #d4956a;
+    --link-hover: #e8b07a;
+    --primary-color: #d4956a;
+    --primary-hover: #e8b07a;
+    --h2-color: #d4956a;
+    --h3-color: #e0af68;
+    --code-bg: #2a1e18;
+    --quote-bg: #261c16;
+    --quote-border: #6b4020;
+}
+
+/* ---------- 护眼方案 ---------- */
+[data-theme-preset="eye-care"] {
+    --bg-color: #f4f8f0;
+    --bg-secondary: #ecf2e8;
+    --text-color: #2d3a25;
+    --text-muted: #5a7050;
+    --text-faint: #8aaa7a;
+    --sidebar-bg: #eaf1e4;
+    --border-color: #cddfc5;
+    --link-color: #4a7c59;
+    --link-hover: #357a45;
+    --primary-color: #4a7c59;
+    --primary-hover: #357a45;
+    --h2-color: #4a7c59;
+    --h3-color: #789b60;
+    --code-bg: #e8f0e0;
+    --quote-bg: #f0f6ec;
+    --quote-border: #99c47a;
+    --button-bg: rgba(74, 124, 89, 0.08);
+    --button-hover-bg: rgba(74, 124, 89, 0.14);
+}
+
+[data-theme="dark"][data-theme-preset="eye-care"] {
+    --bg-color: #1a2218;
+    --bg-secondary: #202c1e;
+    --text-color: #d0e8c4;
+    --text-muted: #9ab88a;
+    --sidebar-bg: #161e15;
+    --border-color: #2c3e28;
+    --link-color: #7fba6a;
+    --link-hover: #9ed48a;
+    --primary-color: #7fba6a;
+    --primary-hover: #9ed48a;
+    --h2-color: #7fba6a;
+    --h3-color: #a5c57a;
+    --code-bg: #1a2818;
+    --quote-bg: #1c2a1a;
+    --quote-border: #3a6a2a;
+}
+
+/* ---------- 高对比度方案 ---------- */
+[data-theme-preset="high-contrast"] {
+    --bg-color: #ffffff;
+    --bg-secondary: #f0f0f0;
+    --text-color: #000000;
+    --text-muted: #222222;
+    --text-faint: #555555;
+    --sidebar-bg: #eeeeee;
+    --border-color: #888888;
+    --link-color: #0000cc;
+    --link-hover: #551a8b;
+    --primary-color: #0000cc;
+    --primary-hover: #551a8b;
+    --h2-color: #0000aa;
+    --h3-color: #990000;
+    --code-bg: #f0f0f0;
+    --quote-bg: #f8f8f8;
+    --quote-border: #444444;
+    --button-bg: rgba(0, 0, 0, 0.1);
+    --button-hover-bg: rgba(0, 0, 0, 0.16);
+}
+
+[data-theme="dark"][data-theme-preset="high-contrast"] {
+    --bg-color: #000000;
+    --bg-secondary: #111111;
+    --text-color: #ffffff;
+    --text-muted: #dddddd;
+    --text-faint: #aaaaaa;
+    --sidebar-bg: #0a0a0a;
+    --border-color: #666666;
+    --link-color: #6699ff;
+    --link-hover: #99bbff;
+    --primary-color: #6699ff;
+    --primary-hover: #99bbff;
+    --h2-color: #6699ff;
+    --h3-color: #ffcc55;
+    --code-bg: #111111;
+    --quote-bg: #0d0d0d;
+    --quote-border: #666666;
+    --button-bg: rgba(255, 255, 255, 0.12);
+    --button-hover-bg: rgba(255, 255, 255, 0.2);
+}
+
+/* ---------- 强调色（用户自定义） ---------- */
+:root {
+    --accent-color: var(--link-color);
+}
+
+/* 当 --accent-color 被自定义时，更新链接和强调元素 */
+[data-accent] {
+    --link-color: var(--accent-color);
+    --link-hover: color-mix(in srgb, var(--accent-color) 80%, #000 20%);
+    --primary-color: var(--accent-color);
+    --h2-color: var(--accent-color);
+}
+
+/* 主题预设切换按钮区域样式 */
+.theme-preset-options {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.theme-preset-btn {
+    padding: 6px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--button-bg);
+    color: var(--text-color);
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.theme-preset-btn:hover {
+    background: var(--button-hover-bg);
+}
+
+.theme-preset-btn.active {
+    border-color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 15%, transparent);
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+/* 强调色选择器 */
+.accent-color-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.accent-color-input {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 2px;
+    background: none;
+    cursor: pointer;
+}
+
+.accent-color-reset {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: underline;
+}
+
+.accent-color-reset:hover {
+    color: var(--text-color);
+}
