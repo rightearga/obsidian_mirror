@@ -166,6 +166,11 @@ function toggleTheme() {
         localStorage.setItem(THEME_KEY, newTheme);
     } catch (e) {}
     updateThemeIcon(newTheme);
+    // 同步更新 PWA meta theme-color（深色/浅色切换时跟随）
+    const metaThemeColor = document.getElementById('meta-theme-color');
+    if (metaThemeColor) {
+        metaThemeColor.content = newTheme === 'dark' ? '#202020' : '#6a5acd';
+    }
     
     // 通知 Mermaid 主题已切换
     if (window.MermaidManager) {

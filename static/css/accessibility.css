@@ -1,0 +1,111 @@
+/* ==========================================
+   无障碍样式 — v1.4.4
+   跳过导航链接、焦点可见性、ARIA 辅助
+   ========================================== */
+
+/* ---- 跳过导航链接（Skip Link） ---- */
+/* 视觉上隐藏，但在键盘 Tab 聚焦时可见 */
+.skip-link {
+    position: absolute;
+    top: -100%;
+    left: 12px;
+    z-index: 10000;
+    padding: 8px 16px;
+    background: var(--primary-color);
+    color: #fff;
+    border-radius: 0 0 6px 6px;
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: top 0.1s;
+    white-space: nowrap;
+}
+
+.skip-link:focus {
+    top: 0;
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+}
+
+/* ---- 全局焦点样式 ---- */
+/* 默认浏览器 outline 往往不明显，统一增强 */
+:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+    border-radius: 2px;
+}
+
+/* 移除仅鼠标点击时的 outline（仅键盘聚焦显示） */
+:focus:not(:focus-visible) {
+    outline: none;
+}
+
+/* 按钮 / 链接焦点增强 */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: 2px;
+}
+
+/* ---- 侧边栏树项目焦点 ---- */
+.tree-row:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+    background: var(--button-bg);
+}
+
+/* ---- 搜索结果高亮焦点 ---- */
+.search-modal-result-item:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+}
+
+/* ---- 跳过链接之后的主内容区域 ---- */
+#main-content {
+    /* 允许被 :focus 定位，但不显示 outline */
+    outline: none;
+}
+
+/* ---- 高对比度模式适配 ---- */
+@media (prefers-contrast: high) {
+    :focus-visible {
+        outline: 3px solid ButtonText;
+        outline-offset: 3px;
+    }
+
+    .sidebar {
+        border-right-width: 2px;
+    }
+
+    .toc-link.active {
+        text-decoration: underline;
+        font-weight: bold;
+    }
+}
+
+/* ---- prefers-reduced-motion 扩展覆盖（补充 animations.css）---- */
+@media (prefers-reduced-motion: reduce) {
+    /* 灯箱动画 */
+    .lightbox-modal .lightbox-container {
+        animation: none !important;
+    }
+
+    /* 键盘帮助面板动画 */
+    .keyboard-help-content {
+        animation: none !important;
+    }
+
+    /* Callout 折叠动画 */
+    .callout-fold-icon {
+        transition: none !important;
+    }
+
+    /* 主题切换 body 过渡 */
+    body,
+    .sidebar {
+        transition: none !important;
+    }
+}

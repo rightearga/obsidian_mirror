@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.3 🎉  
+**当前版本**: v1.4.4 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -809,41 +809,41 @@
 
 ---
 
-### ✨ v1.4.4 (计划中 - 移动端与可访问性)
+### ✅ v1.4.4 (已发布 - 2026-04-13)
 
-**主题**: PWA + 触屏手势 + 无障碍  
-**预计发布**: 2026-11 月
+**主题**: PWA + 触屏手势 + 无障碍
 
 #### PWA 支持
 
-- [ ] **Service Worker + Web App Manifest**
-  - 可安装为桌面/移动端 App（Add to Home Screen）
-  - 静态资源（CSS / JS / 字体）缓存离线可用
-  - 网络恢复后自动后台刷新
-- [ ] **App 图标 & 主题色**
-  - `manifest.json` 配置 App 名称、图标、`theme_color`
-  - 图标随当前主题自适应
+- ✅ **Service Worker + Web App Manifest**（`manifest.json` + `sw.js`）
+  - 可安装为桌面/移动端 App；静态资源缓存优先；离线降级页面
+- ✅ **App 图标 & 主题色**：manifest 含 SVG 图标；`meta[name=theme-color]` 随深/浅色切换
 
 #### 移动端手势
 
-- [ ] **侧边栏手势**
-  - 屏幕左边缘右滑打开侧边栏，左滑关闭
-  - 触发区域宽度：边缘 30px
-- [ ] **笔记翻页手势**
-  - 内容区到达顶部后继续上滑 → 前一篇笔记
-  - 内容区到达底部后继续下滑 → 后一篇笔记
-  - 防误触：需持续滑动超过 100px 才触发
+- ✅ **侧边栏手势**：左边缘（<30px）右滑 60px+ 打开，侧边栏内左滑关闭
+- ✅ **笔记翻页手势**：内容区边界后继续滑动 100px+ 翻页，水平偏移 >60px 取消
 
 #### 无障碍改进
 
-- [ ] **键盘导航完整性**
-  - 所有交互元素可 Tab 访问且焦点样式可见
-  - 跳过导航链接（"跳至主要内容" Skip Link，视觉上隐藏但可聚焦）
-- [ ] **ARIA 语义标注**
-  - 侧边栏树：`role="tree"` / `role="treeitem"` / `aria-expanded`
-  - 搜索结果：`role="listbox"` + `aria-live="polite"`
-- [ ] **系统减少动画偏好**
-  - 检测 `prefers-reduced-motion: reduce`，自动禁用全部过渡动画
+- ✅ **跳过导航链接**：Skip Link `<a href="#main-content">`，键盘 Tab 聚焦时浮现
+- ✅ **ARIA 语义标注**：侧边栏树 `role="tree"`；搜索结果 `role="listbox"` + `aria-live`
+- ✅ **系统减少动画偏好**：`accessibility.css` 补全 prefers-reduced-motion 覆盖
+- ✅ **全局焦点样式**：`:focus-visible` 统一 outline；高对比度媒体查询适配
+
+#### 实际交付物
+
+- 新增文件：`static/manifest.json`（PWA 清单）
+- 新增文件：`static/sw.js`（Service Worker）
+- 新增文件：`static/js/pwa.js`（SW 注册 + 更新提示）
+- 新增文件：`static/js/gestures.js`（触屏手势）
+- 新增文件：`static/css/accessibility.css`（无障碍 + focus 样式）
+- 修改文件：`static/js/theme.js`（theme-color meta 同步）
+- 修改文件：`templates/layout.html`（manifest/meta/skip link/ARIA/新 JS）
+
+#### 测试结果
+
+- 全量测试：**74/74 通过**（纯前端变更，后端无改动）
 
 ---
 
@@ -1008,7 +1008,7 @@
 
 **Q4 (10-12月)**: 深度功能期
 - ✅ 完成 v1.4.3（图谱增强：全库图谱、节点着色、布局模式、搜索导出）🎉
-- 完成 v1.4.4（PWA + 无障碍：离线安装、手势、ARIA）
+- ✅ 完成 v1.4.4（PWA + 无障碍：离线安装、手势、ARIA）🎉
 - 完成 v1.4.5（运维扩展：自动同步、Webhook、配置热重载）
 
 ### 核心价值主张

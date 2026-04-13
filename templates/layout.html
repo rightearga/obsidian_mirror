@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }} - Obsidian Mirror</title>
+    <!-- PWA：Web App Manifest + 主题色 -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#6a5acd" id="meta-theme-color">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="ObsMirror">
     <!-- 模块化 CSS -->
     <link rel="stylesheet" href="/static/css/variables.css?v=20260201">
     <link rel="stylesheet" href="/static/css/layout.css?v=20260201">
@@ -26,6 +33,8 @@
     <link rel="stylesheet" href="/static/css/i18n.css?v=20260131">
     <link rel="stylesheet" href="/static/css/mobile.css?v=20260201">
     <link rel="stylesheet" href="/static/css/mermaid.css?v=20260202display">
+    <!-- v1.4.4 新增：无障碍样式 -->
+    <link rel="stylesheet" href="/static/css/accessibility.css?v=20260413">
     <!-- v1.4.0 新增：主题预设 + 动画 + 键盘帮助面板 -->
     <link rel="stylesheet" href="/static/css/themes.css?v=20260413">
     <link rel="stylesheet" href="/static/css/animations.css?v=20260413">
@@ -51,6 +60,9 @@
     {% block head %}{% endblock %}
 </head>
 <body>
+    <!-- 跳过导航链接（无障碍：键盘用户可跳过侧边栏直达主内容） -->
+    <a href="#main-content" class="skip-link">跳至主要内容</a>
+
     <!-- 左侧栏遮罩层（点击关闭） -->
     <div class="sidebar-backdrop" onclick="toggleSidebarState(event)"></div>
     
@@ -222,7 +234,7 @@
             
             <!-- 笔记页签内容 -->
             <div class="sidebar-tab-content active" id="tab-notes">
-                <div class="sidebar-tree">
+                <div class="sidebar-tree" role="tree" aria-label="笔记文件树">
                     {% for node in sidebar %}
                     <div class="tree-item" data-depth="{{ node.depth }}">
                         {% match node.path %}
@@ -256,7 +268,7 @@
             </svg>
         </button>
         
-        <div class="main-scroll-container">
+        <div class="main-scroll-container" id="main-content" role="main" tabindex="-1">
             <div class="markdown-body">
                 {% block content %}
                 {% endblock %}
@@ -481,7 +493,8 @@
             </div>
 
             <!-- 搜索结果区域 -->
-            <div class="search-modal-results" id="search-modal-results">
+            <div class="search-modal-results" id="search-modal-results"
+                 role="listbox" aria-label="搜索结果" aria-live="polite">
                 <div class="search-modal-empty">
                     <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="opacity: 0.3;">
                         <circle cx="11" cy="11" r="8"></circle>
@@ -619,5 +632,8 @@
     <script src="/static/js/callout.js?v=20260413"></script>
     <script src="/static/js/lightbox.js?v=20260413"></script>
     <script src="/static/js/init.js?v=20260130"></script>
+    <!-- v1.4.4 新增：触屏手势 + PWA 注册（defer 不阻塞首屏渲染） -->
+    <script defer src="/static/js/gestures.js?v=20260413"></script>
+    <script defer src="/static/js/pwa.js?v=20260413"></script>
 </body>
 </html>

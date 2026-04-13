@@ -1,0 +1,32 @@
+{
+    "name": "Obsidian Mirror",
+    "short_name": "ObsMirror",
+    "description": "将 Obsidian 笔记库镜像为可浏览的 Web 应用",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "any",
+    "theme_color": "#6a5acd",
+    "background_color": "#fdfdfd",
+    "lang": "zh-CN",
+    "icons": [
+        {
+            "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='24' fill='%236a5acd'/%3E%3Ccircle cx='96' cy='96' r='16' fill='white'/%3E%3Ccircle cx='96' cy='40' r='12' fill='white'/%3E%3Ccircle cx='96' cy='152' r='12' fill='white'/%3E%3Ccircle cx='40' cy='96' r='12' fill='white'/%3E%3Ccircle cx='152' cy='96' r='12' fill='white'/%3E%3Cline x1='96' y1='52' x2='96' y2='80' stroke='white' stroke-width='6'/%3E%3Cline x1='96' y1='112' x2='96' y2='140' stroke='white' stroke-width='6'/%3E%3Cline x1='52' y1='96' x2='80' y2='96' stroke='white' stroke-width='6'/%3E%3Cline x1='112' y1='96' x2='140' y2='96' stroke='white' stroke-width='6'/%3E%3C/svg%3E",
+            "sizes": "192x192",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "搜索笔记",
+            "url": "/?search=1",
+            "description": "打开搜索"
+        },
+        {
+            "name": "随机漫游",
+            "url": "/random",
+            "description": "跳转到随机笔记"
+        }
+    ],
+    "categories": ["productivity", "education"]
+}

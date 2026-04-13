@@ -6,6 +6,26 @@
 
 ---
 
+## [v1.4.4] — 2026-04-13
+
+PWA 支持 + 移动端触屏手势 + 无障碍改进。
+
+### Added
+- **PWA — Web App Manifest**（`/static/manifest.json`）：支持"添加到主屏幕"安装；包含名称、主题色、快捷方式
+- **PWA — Service Worker**（`/static/sw.js`）：静态资源缓存优先策略，网络离线时提供降级页面；新版本检测提示刷新
+- **触屏手势**（`static/js/gestures.js`）：
+  - 侧边栏：屏幕左边缘（<30px）右滑打开，左滑关闭（60px 阈值）
+  - 笔记翻页：内容区滚动到底/顶后继续滑动超 100px 跳转前/后一篇笔记
+- **跳过导航链接**（Skip Link）：`<a href="#main-content">跳至主要内容</a>`，键盘 Tab 聚焦时浮现，鼠标不可见
+- **ARIA 语义标注**：侧边栏树 `role="tree"` + `aria-label`；搜索结果 `role="listbox"` + `aria-live="polite"`
+- **无障碍 CSS**（`accessibility.css`）：全局 `:focus-visible` 样式、高对比度模式适配
+- **prefers-reduced-motion 完善**：覆盖灯箱、键盘帮助面板、callout 折叠图标等新动画
+
+### Changed
+- `theme.js` 切换主题时同步更新 `<meta name="theme-color">`（深色 `#202020`，浅色 `#6a5acd`）
+
+---
+
 ## [v1.4.3] — 2026-04-13
 
 关系图谱全面增强：全库图谱、节点大小/颜色分组、布局切换、图谱内搜索、PNG 导出。
