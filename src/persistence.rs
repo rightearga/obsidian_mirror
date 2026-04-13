@@ -50,6 +50,10 @@ impl IndexPersistence {
     }
 
     /// 保存所有索引到磁盘
+    ///
+    /// 笔记数量超过 1000 时按批次提交，避免单一大事务长期锁库。
+    /// 元数据（git commit hash）最后写入，作为"原子完成标记"：
+    /// 若中途崩溃，元数据未写入，下次启动会安全地触发全量重建。
     pub fn save_indexes(
         &self,
         git_commit: &str,
@@ -63,9 +67,65 @@ impl IndexPersistence {
         info!("💾 开始持久化索引...");
         let start = std::time::Instant::now();
 
+        const NOTES_BATCH_SIZE: usize = 1000;
+        let total_notes = notes.len();
+
+        // 阶段一：分批写入笔记（每 1000 条一个事务，降低单次锁库时长）
+        let notes_list: Vec<(&String, &Note)> = notes.iter().collect();
+        for (batch_idx, batch) in notes_list.chunks(NOTES_BATCH_SIZE).enumerate() {
+            let batch_txn = self.db.begin_write()?;
+            {
+                let mut table = batch_txn.open_table(NOTES_TABLE)?;
+                for (path, note) in batch {
+                    let serialized =
+                        postcard::to_allocvec(*note).context("Failed to serialize note")?;
+                    table.insert(path.as_str(), serialized.as_slice())?;
+                }
+            }
+            batch_txn.commit()?;
+
+            if total_notes > NOTES_BATCH_SIZE {
+                let done = ((batch_idx + 1) * NOTES_BATCH_SIZE).min(total_notes);
+                info!("  ├─ 笔记分批写入进度: {}/{}", done, total_notes);
+            }
+        }
+
+        // 阶段二：一次性写入其余索引 + 元数据（metadata 最后提交，作为完成标记）
         let write_txn = self.db.begin_write()?;
 
-        // 1. 保存元数据
+        // 1. 保存链接索引
+        {
+            let mut table = write_txn.open_table(LINK_INDEX_TABLE)?;
+            let serialized =
+                postcard::to_allocvec(link_index).context("Failed to serialize link_index")?;
+            table.insert("data", serialized.as_slice())?;
+        }
+
+        // 2. 保存反向链接
+        {
+            let mut table = write_txn.open_table(BACKLINKS_TABLE)?;
+            let serialized =
+                postcard::to_allocvec(backlinks).context("Failed to serialize backlinks")?;
+            table.insert("data", serialized.as_slice())?;
+        }
+
+        // 3. 保存标签索引
+        {
+            let mut table = write_txn.open_table(TAG_INDEX_TABLE)?;
+            let serialized =
+                postcard::to_allocvec(tag_index).context("Failed to serialize tag_index")?;
+            table.insert("data", serialized.as_slice())?;
+        }
+
+        // 4. 保存侧边栏
+        {
+            let mut table = write_txn.open_table(SIDEBAR_TABLE)?;
+            let serialized =
+                postcard::to_allocvec(sidebar).context("Failed to serialize sidebar")?;
+            table.insert("data", serialized.as_slice())?;
+        }
+
+        // 5. 保存元数据（最后写入，确保其他数据已写入后再标记为"已完成"）
         {
             let mut table = write_txn.open_table(METADATA_TABLE)?;
             let metadata = PersistenceMetadata {
@@ -76,47 +136,6 @@ impl IndexPersistence {
             };
             let metadata_json = serde_json::to_string(&metadata)?;
             table.insert("metadata", metadata_json.as_str())?;
-        }
-
-        // 2. 保存笔记索引
-        {
-            let mut table = write_txn.open_table(NOTES_TABLE)?;
-            for (path, note) in notes {
-                let serialized = postcard::to_allocvec(note).context("Failed to serialize note")?;
-                table.insert(path.as_str(), serialized.as_slice())?;
-            }
-        }
-
-        // 3. 保存链接索引
-        {
-            let mut table = write_txn.open_table(LINK_INDEX_TABLE)?;
-            let serialized =
-                postcard::to_allocvec(link_index).context("Failed to serialize link_index")?;
-            table.insert("data", serialized.as_slice())?;
-        }
-
-        // 4. 保存反向链接
-        {
-            let mut table = write_txn.open_table(BACKLINKS_TABLE)?;
-            let serialized =
-                postcard::to_allocvec(backlinks).context("Failed to serialize backlinks")?;
-            table.insert("data", serialized.as_slice())?;
-        }
-
-        // 5. 保存标签索引
-        {
-            let mut table = write_txn.open_table(TAG_INDEX_TABLE)?;
-            let serialized =
-                postcard::to_allocvec(tag_index).context("Failed to serialize tag_index")?;
-            table.insert("data", serialized.as_slice())?;
-        }
-
-        // 6. 保存侧边栏
-        {
-            let mut table = write_txn.open_table(SIDEBAR_TABLE)?;
-            let serialized =
-                postcard::to_allocvec(sidebar).context("Failed to serialize sidebar")?;
-            table.insert("data", serialized.as_slice())?;
         }
 
         write_txn.commit()?;
@@ -315,6 +334,152 @@ impl IndexPersistence {
         info!("✅ 持久化索引已清除");
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Frontmatter, TocItem};
+    use std::collections::HashMap;
+    use std::time::SystemTime;
+    use tempfile::TempDir;
+
+    /// 构造测试用 Note
+    fn make_note(title: &str) -> Note {
+        Note {
+            path: format!("{}.md", title),
+            title: title.to_string(),
+            content_html: format!("<p>{}</p>", title),
+            content_text: title.to_string(),
+            backlinks: Vec::new(),
+            tags: vec!["test".to_string()],
+            toc: Vec::<TocItem>::new(),
+            mtime: SystemTime::UNIX_EPOCH,
+            frontmatter: Frontmatter(serde_yml::Value::Null),
+            outgoing_links: Vec::new(),
+        }
+    }
+
+    /// 构造测试数据（notes + 其他索引）
+    fn make_test_data() -> (
+        HashMap<String, Note>,
+        HashMap<String, String>,
+        HashMap<String, Vec<String>>,
+        HashMap<String, Vec<String>>,
+        Vec<SidebarNode>,
+    ) {
+        let mut notes = HashMap::new();
+        notes.insert("A.md".to_string(), make_note("A"));
+        notes.insert("B.md".to_string(), make_note("B"));
+
+        let mut link_index = HashMap::new();
+        link_index.insert("A".to_string(), "A.md".to_string());
+        link_index.insert("B".to_string(), "B.md".to_string());
+
+        let mut backlinks = HashMap::new();
+        backlinks.insert("B".to_string(), vec!["A".to_string()]);
+
+        let mut tag_index = HashMap::new();
+        tag_index.insert("test".to_string(), vec!["A".to_string(), "B".to_string()]);
+
+        let sidebar = vec![SidebarNode::new_file("A".to_string(), "A.md".to_string())];
+
+        (notes, link_index, backlinks, tag_index, sidebar)
+    }
+
+    #[test]
+    fn test_persistence_round_trip() {
+        // 保存后加载，验证数据一致性
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("index.db");
+        let persistence = IndexPersistence::open(&db_path).unwrap();
+
+        let (notes, link_index, backlinks, tag_index, sidebar) = make_test_data();
+        let git_commit = "abcdef1234567890abcdef1234567890abcdef12";
+        let ignore_patterns = vec!["*.trash".to_string()];
+
+        persistence
+            .save_indexes(git_commit, &ignore_patterns, &notes, &link_index, &backlinks, &tag_index, &sidebar)
+            .unwrap();
+
+        let loaded = persistence
+            .load_indexes(git_commit, &ignore_patterns)
+            .unwrap()
+            .expect("应成功加载持久化数据");
+
+        assert_eq!(loaded.notes.len(), notes.len(), "笔记数量应一致");
+        assert!(loaded.notes.contains_key("A.md"), "笔记 A.md 应存在");
+        assert!(loaded.notes.contains_key("B.md"), "笔记 B.md 应存在");
+        assert_eq!(loaded.link_index, link_index, "链接索引应一致");
+        assert_eq!(loaded.backlinks, backlinks, "反向链接应一致");
+        assert_eq!(loaded.tag_index, tag_index, "标签索引应一致");
+        assert_eq!(loaded.sidebar.len(), sidebar.len(), "侧边栏节点数应一致");
+    }
+
+    #[test]
+    fn test_persistence_git_hash_mismatch_returns_none() {
+        // 加载时传入不同的 git hash，应返回 None（缓存失效）
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("index.db");
+        let persistence = IndexPersistence::open(&db_path).unwrap();
+
+        let (notes, link_index, backlinks, tag_index, sidebar) = make_test_data();
+        let saved_commit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let other_commit = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        persistence
+            .save_indexes(saved_commit, &[], &notes, &link_index, &backlinks, &tag_index, &sidebar)
+            .unwrap();
+
+        let result = persistence.load_indexes(other_commit, &[]).unwrap();
+        assert!(result.is_none(), "git hash 不匹配时应返回 None");
+    }
+
+    #[test]
+    fn test_persistence_ignore_patterns_change_returns_none() {
+        // ignore_patterns 变更后缓存应失效，返回 None
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("index.db");
+        let persistence = IndexPersistence::open(&db_path).unwrap();
+
+        let (notes, link_index, backlinks, tag_index, sidebar) = make_test_data();
+        let git_commit = "cccccccccccccccccccccccccccccccccccccccc";
+        let old_patterns = vec![".obsidian".to_string()];
+        let new_patterns = vec![".obsidian".to_string(), ".trash".to_string()];
+
+        persistence
+            .save_indexes(git_commit, &old_patterns, &notes, &link_index, &backlinks, &tag_index, &sidebar)
+            .unwrap();
+
+        let result = persistence.load_indexes(git_commit, &new_patterns).unwrap();
+        assert!(result.is_none(), "ignore_patterns 变更后应返回 None");
+    }
+
+    #[test]
+    fn test_persistence_clear_invalidates_cache() {
+        // clear() 后重新加载应返回 None
+        let dir = TempDir::new().unwrap();
+        let db_path = dir.path().join("index.db");
+        let persistence = IndexPersistence::open(&db_path).unwrap();
+
+        let (notes, link_index, backlinks, tag_index, sidebar) = make_test_data();
+        let git_commit = "dddddddddddddddddddddddddddddddddddddddd";
+
+        persistence
+            .save_indexes(git_commit, &[], &notes, &link_index, &backlinks, &tag_index, &sidebar)
+            .unwrap();
+
+        // 验证保存成功
+        assert!(
+            persistence.load_indexes(git_commit, &[]).unwrap().is_some(),
+            "clear 前应能加载数据"
+        );
+
+        persistence.clear().unwrap();
+
+        let result = persistence.load_indexes(git_commit, &[]).unwrap();
+        assert!(result.is_none(), "clear 后应返回 None");
     }
 }
 

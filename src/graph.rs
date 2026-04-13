@@ -139,3 +139,121 @@ pub fn generate_graph(
 fn extract_links_from_note(note: &Note) -> HashSet<String> {
     note.outgoing_links.iter().cloned().collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Frontmatter, TocItem};
+    use std::collections::HashMap;
+    use std::time::SystemTime;
+
+    /// 构造测试用 Note
+    fn make_note(title: &str, outgoing_links: Vec<&str>) -> Note {
+        Note {
+            path: format!("{}.md", title),
+            title: title.to_string(),
+            content_html: String::new(),
+            content_text: String::new(),
+            backlinks: Vec::new(),
+            tags: Vec::new(),
+            toc: Vec::<TocItem>::new(),
+            mtime: SystemTime::UNIX_EPOCH,
+            frontmatter: Frontmatter(serde_yml::Value::Null),
+            outgoing_links: outgoing_links.into_iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// 构建笔记集合和链接索引
+    fn build_notes_and_index(
+        specs: &[(&str, Vec<&str>)],
+    ) -> (HashMap<String, Note>, HashMap<String, String>) {
+        let mut notes = HashMap::new();
+        let mut link_index = HashMap::new();
+        for (title, links) in specs {
+            let note = make_note(title, links.clone());
+            link_index.insert(title.to_string(), note.path.clone());
+            notes.insert(note.path.clone(), note);
+        }
+        (notes, link_index)
+    }
+
+    #[test]
+    fn test_graph_nonexistent_note_returns_empty() {
+        // 中心笔记不存在时应返回空图谱
+        let (notes, link_index) = build_notes_and_index(&[("A", vec![])]);
+        let graph = generate_graph("不存在", &notes, &link_index, 2);
+        assert!(graph.nodes.is_empty(), "不存在的笔记应返回空节点");
+        assert!(graph.edges.is_empty(), "不存在的笔记应返回空边");
+    }
+
+    #[test]
+    fn test_graph_depth_1_includes_only_direct_links() {
+        // A→B→C，深度 1：图谱应包含 A 和 B，不包含 C
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec!["C"]), ("C", vec![])]);
+
+        let graph = generate_graph("A", &notes, &link_index, 1);
+        let node_labels: Vec<&str> = graph.nodes.iter().map(|n| n.label.as_str()).collect();
+
+        assert!(node_labels.contains(&"A"), "中心节点 A 应在图谱中");
+        assert!(node_labels.contains(&"B"), "直接链接 B 应在图谱中（深度 1）");
+        assert!(!node_labels.contains(&"C"), "间接链接 C 不应在深度 1 的图谱中");
+    }
+
+    #[test]
+    fn test_graph_depth_2_includes_two_hops() {
+        // A→B→C，深度 2：图谱应包含 A、B、C
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec!["C"]), ("C", vec![])]);
+
+        let graph = generate_graph("A", &notes, &link_index, 2);
+        let node_labels: Vec<&str> = graph.nodes.iter().map(|n| n.label.as_str()).collect();
+
+        assert!(node_labels.contains(&"A"), "中心节点 A 应在图谱中");
+        assert!(node_labels.contains(&"B"), "一跳节点 B 应在图谱中");
+        assert!(node_labels.contains(&"C"), "二跳节点 C 应在深度 2 的图谱中");
+    }
+
+    #[test]
+    fn test_graph_backlinks_included() {
+        // D→A（反向链接），A 的图谱应包含 D
+        let (notes, link_index) = build_notes_and_index(&[
+            ("A", vec![]),
+            ("D", vec!["A"]), // D 链接到 A（D 是 A 的反向链接）
+        ]);
+
+        let graph = generate_graph("A", &notes, &link_index, 1);
+        let node_labels: Vec<&str> = graph.nodes.iter().map(|n| n.label.as_str()).collect();
+
+        assert!(node_labels.contains(&"D"), "反向链接节点 D 应出现在图谱中");
+        // 应有 D→A 方向的边
+        let has_edge = graph.edges.iter().any(|e| e.from.contains("D") && e.to.contains("A"));
+        assert!(has_edge, "应有从 D 到 A 的反向链接边");
+    }
+
+    #[test]
+    fn test_graph_isolated_node_not_included() {
+        // E 与 A 无任何链接关系，不应出现在 A 的图谱中
+        let (notes, link_index) = build_notes_and_index(&[
+            ("A", vec!["B"]),
+            ("B", vec![]),
+            ("E", vec![]), // 孤立节点
+        ]);
+
+        let graph = generate_graph("A", &notes, &link_index, 2);
+        let node_labels: Vec<&str> = graph.nodes.iter().map(|n| n.label.as_str()).collect();
+
+        assert!(!node_labels.contains(&"E"), "孤立节点 E 不应出现在 A 的图谱中");
+    }
+
+    #[test]
+    fn test_graph_isolated_center_has_only_self() {
+        // 中心笔记没有出链，且没有人链接到它 → 图谱只有中心节点
+        let (notes, link_index) = build_notes_and_index(&[("Solo", vec![])]);
+
+        let graph = generate_graph("Solo", &notes, &link_index, 2);
+
+        assert_eq!(graph.nodes.len(), 1, "孤立中心笔记图谱应只有 1 个节点");
+        assert!(graph.edges.is_empty(), "孤立中心笔记图谱不应有边");
+    }
+}

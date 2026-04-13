@@ -237,7 +237,7 @@ impl ReadingProgressDatabase {
         Ok(removed)
     }
 
-    /// 添加阅读历史记录
+    /// 添加阅读历史记录，并自动清理超出上限的旧记录（保留最近 200 条）
     pub fn add_history(&self, history: &ReadingHistory) -> Result<()> {
         let key = history.db_key();
 
@@ -253,6 +253,9 @@ impl ReadingProgressDatabase {
             "✅ 添加阅读历史: {} -> {} ({}秒)",
             history.username, history.note_path, history.duration
         );
+
+        // 自动清理旧历史记录，防止无限增长（保留最近 200 条）
+        let _ = self.cleanup_old_history(&history.username, 200);
 
         Ok(())
     }

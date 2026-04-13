@@ -6,6 +6,24 @@
 
 ---
 
+## [v1.3.4] — 2026-04-13
+
+代码质量改进与测试覆盖补全：6 项 CODEREVIEW Q 系列问题全部落地，新增 14 个单元测试。
+
+### Changed
+- **[Q1] schema_matches 字段类型检查加强**：`search_engine.rs` `schema_matches` 同时比较字段名和字段类型变体，防止 TEXT→STRING 等类型变更时复用错误 schema
+- **[Q3] 阅读历史自动清理**：`reading_progress_db.rs` `add_history()` 写入后自动调用 `cleanup_old_history(200)`，防止历史记录无限增长
+- **[Q5] truncate_html 截断逻辑改进**：`handlers.rs` 先通过状态机去除 HTML 标签提取纯文本，再按字符数截断，确保 500 字预览显示真实可见内容
+- **[Q6] 持久化分批写入**：`persistence.rs` `save_indexes` 笔记按 1000 条分批提交，元数据最后写入（作为原子完成标记），降低单次事务锁库时长
+- **[Q7] metrics 指标注册去除 expect**：`metrics.rs` `init_metrics()` 改用 `let _ =` 静默忽略 AlreadyRegistered 错误，防止测试环境多次初始化时 panic
+
+### Added（测试覆盖补全）
+- `sync.rs`：4 个 `should_update_note` 测试（新文件/相同mtime/更旧mtime/路径不存在）
+- `graph.rs`：6 个 `generate_graph` 测试（不存在节点/深度1/深度2/反向链接/孤立节点/孤立中心）
+- `persistence.rs`：4 个往返测试（数据一致性/git hash 不匹配/ignore_patterns 变更/clear 后失效）
+
+---
+
 ## [v1.3.3] — 2026-04-13
 
 性能深度优化：5 项来自 CODEREVIEW_1.3 的性能改进全部落地。

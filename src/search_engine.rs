@@ -120,9 +120,11 @@ impl SearchEngine {
         })
     }
 
-    /// 检查两个 schema 是否匹配（简单检查字段数量）
+    /// 检查两个 schema 是否匹配（字段名 + 字段类型均需一致）
+    ///
+    /// 同时比较字段名和字段类型变体（TEXT/STRING/I64 等），
+    /// 防止字段类型变更后仍复用旧 schema 导致索引读写错误。
     fn schema_matches(schema1: &Schema, schema2: &Schema) -> bool {
-        // 简单比较：检查字段数量是否相同
         let fields1: Vec<_> = schema1.fields().collect();
         let fields2: Vec<_> = schema2.fields().collect();
 
@@ -130,10 +132,18 @@ impl SearchEngine {
             return false;
         }
 
-        // 检查每个字段名是否都存在
-        for (_field, entry) in schema2.fields() {
-            if schema1.get_field(entry.name()).is_err() {
-                return false;
+        for (_field, entry2) in schema2.fields() {
+            match schema1.get_field(entry2.name()) {
+                Err(_) => return false,
+                Ok(f1) => {
+                    // 不仅检查字段名，还比较字段类型变体（TEXT vs STRING vs I64 等）
+                    let entry1 = schema1.get_field_entry(f1);
+                    if std::mem::discriminant(entry1.field_type())
+                        != std::mem::discriminant(entry2.field_type())
+                    {
+                        return false;
+                    }
+                }
             }
         }
 

@@ -581,3 +581,91 @@ async fn get_current_git_commit(local_path: &std::path::Path) -> anyhow::Result<
     let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
     Ok(commit)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{Frontmatter, TocItem};
+    use std::collections::HashMap;
+    use std::time::{Duration, SystemTime};
+    use tempfile::NamedTempFile;
+
+    /// 构造测试用 Note（指定 mtime）
+    fn make_note_with_mtime(path: &str, mtime: SystemTime) -> Note {
+        Note {
+            path: path.to_string(),
+            title: path.to_string(),
+            content_html: String::new(),
+            content_text: String::new(),
+            backlinks: Vec::new(),
+            tags: Vec::new(),
+            toc: Vec::<TocItem>::new(),
+            mtime,
+            frontmatter: Frontmatter(serde_yml::Value::Null),
+            outgoing_links: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_should_update_note_new_file() {
+        // 文件路径不在 existing_notes 中，视为新文件，应更新
+        let existing: HashMap<String, Note> = HashMap::new();
+        let f = NamedTempFile::new().unwrap();
+        assert!(
+            should_update_note("new/note.md", f.path(), &existing),
+            "新文件应需要更新"
+        );
+    }
+
+    #[test]
+    fn test_should_update_note_same_mtime() {
+        // 文件 mtime 与 existing_notes 中记录完全一致，不需要更新
+        let f = NamedTempFile::new().unwrap();
+        let actual_mtime = std::fs::metadata(f.path()).unwrap().modified().unwrap();
+
+        let mut existing = HashMap::new();
+        existing.insert("test.md".to_string(), make_note_with_mtime("test.md", actual_mtime));
+
+        assert!(
+            !should_update_note("test.md", f.path(), &existing),
+            "mtime 相同时不应更新"
+        );
+    }
+
+    #[test]
+    fn test_should_update_note_older_mtime() {
+        // existing_notes 中存储的 mtime 比实际文件更旧，应更新
+        let f = NamedTempFile::new().unwrap();
+        let actual_mtime = std::fs::metadata(f.path()).unwrap().modified().unwrap();
+
+        // 记录中的 mtime 比文件早 1 秒
+        let old_mtime = actual_mtime
+            .checked_sub(Duration::from_secs(1))
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+
+        let mut existing = HashMap::new();
+        existing.insert("test.md".to_string(), make_note_with_mtime("test.md", old_mtime));
+
+        assert!(
+            should_update_note("test.md", f.path(), &existing),
+            "文件 mtime 比记录新时应更新"
+        );
+    }
+
+    #[test]
+    fn test_should_update_note_nonexistent_path() {
+        // 磁盘上不存在的路径，should_update_note 无法获取 metadata，默认返回 true
+        let mut existing = HashMap::new();
+        existing.insert(
+            "ghost.md".to_string(),
+            make_note_with_mtime("ghost.md", SystemTime::now()),
+        );
+
+        // 传入一个不存在的路径
+        let nonexistent = std::path::Path::new("/nonexistent/path/ghost.md");
+        assert!(
+            should_update_note("ghost.md", nonexistent, &existing),
+            "无法获取 metadata 时应默认需要更新"
+        );
+    }
+}

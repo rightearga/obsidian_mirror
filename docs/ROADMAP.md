@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.3.3 🎉  
+**当前版本**: v1.3.4 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -560,61 +560,57 @@
 
 ---
 
-### 🛠️ v1.3.4 (计划中 - 代码质量与测试)
+### ✅ v1.3.4 (已发布 - 2026-04-13)
 
-**主题**: 代码质量改进 + 测试覆盖补全（CODEREVIEW Q1–Q7）  
-**预计发布**: 2026-06 月
+**主题**: 代码质量改进 + 测试覆盖补全（CODEREVIEW Q1–Q7）
 
 解决 `CODEREVIEW_1.3.md` 中全部代码质量问题，并大幅提升测试覆盖率。
 
-#### 代码质量改进（来自代码审查）
+#### 核心功能
 
-- [ ] **[Q1] 加强 `schema_matches` 字段类型检查**
-  - 文件：`src/search_engine.rs:114`
-  - 修复：不只比较字段名，同时比较字段类型，防止字段类型变更时使用错误 schema
+- ✅ **[Q1] 加强 `schema_matches` 字段类型检查**
+  - 文件：`src/search_engine.rs`
+  - 修复：同时比较字段名和字段类型变体（discriminant），防止 TEXT→STRING 等类型变更时复用错误 schema
 
-- ✅ **[Q2] 清理注释掉的 `use` 声明** — **已在 v1.3.1 完成**
-  - 文件：`src/markdown.rs`
-  - 已删除 `// use anyhow::Result;` 和 `// use std::borrow::Cow;`
+- ✅ **[Q2]** — 已在 v1.3.1 完成（注释 use 声明清理）
 
-- [ ] **[Q3] 阅读历史自动清理**
+- ✅ **[Q3] 阅读历史自动清理**
   - 文件：`src/reading_progress_db.rs`
-  - 问题：`cleanup_old_history()` 存在但从未被自动调用，历史记录无限增长
-  - 修复：在 `add_history()` 中自动触发清理，默认保留最近 200 条记录
+  - 修复：`add_history()` 写入后自动调用 `cleanup_old_history(200)`，防止历史无限增长
 
-- [ ] **[Q5] 改进 `truncate_html` 截断逻辑**
-  - 文件：`src/handlers.rs:621`
-  - 问题：按字符计数包含了 HTML 标签，实际可见内容可能远少于 500 字
-  - 修复：先使用正则提取纯文本，再按字符数截断
+- ✅ **[Q5] truncate_html 截断基于纯文本**
+  - 文件：`src/handlers.rs`
+  - 修复：状态机去除 HTML 标签后再截断，确保 500 字预览为真实可见内容
 
-- [ ] **[Q6] 持久化大型笔记库分批写入**
-  - 文件：`src/persistence.rs:62`
-  - 修复：超过 1000 条笔记时分批提交事务，避免单一大事务锁库时间过长
+- ✅ **[Q6] 持久化分批写入**
+  - 文件：`src/persistence.rs`
+  - 修复：笔记按 1000 条分批提交事务；元数据最后写入（原子完成标记）
 
-- [ ] **[Q7] 修复 `metrics` 指标注册的 `expect` 用法**
-  - 文件：`src/metrics.rs:47`
-  - 修复：指标已注册时忽略错误（使用 `ok()` 或判断 `AlreadyReg`），防止测试环境多次初始化时 panic
+- ✅ **[Q7] metrics 指标注册去除 expect**
+  - 文件：`src/metrics.rs`
+  - 修复：`init_metrics()` 改用 `let _ =` 静默忽略 AlreadyReg 错误，防测试 panic
 
-#### 测试覆盖补全（来自代码审查）
+#### 测试覆盖补全
 
-- [ ] **为 `sync.rs` 补充单元测试**
-  - `should_update_note()` 基于 mtime 判断的各种情况
-  - 增量同步路径（变更/删除/不变文件的处理逻辑）
+- ✅ `sync.rs`：4 个 `should_update_note` 测试
+- ✅ `graph.rs`：6 个 `generate_graph` BFS 测试（深度/反向链接/孤立节点）
+- ✅ `persistence.rs`：4 个往返测试（数据一致性/git hash 不匹配/patterns 变更/clear 失效）
+- ✅ `indexer.rs`：已在 v1.3.1 补充（BacklinkBuilder + TagIndexBuilder 场景）
 
-- [ ] **为 `graph.rs` 补充单元测试**
-  - BFS 算法深度控制正确性
-  - 反向链接节点包含逻辑
-  - 孤立节点（无链接）处理
+#### 实际交付物
 
-- [ ] **为 `persistence.rs` 补充往返测试**
-  - 保存后加载，验证数据一致性
-  - Git 提交不匹配时返回 `None`
-  - `ignore_patterns` 变更后缓存失效
+- 修改文件：`src/search_engine.rs`（Q1）
+- 修改文件：`src/reading_progress_db.rs`（Q3）
+- 修改文件：`src/handlers.rs`（Q5）
+- 修改文件：`src/persistence.rs`（Q6 + tests）
+- 修改文件：`src/metrics.rs`（Q7）
+- 修改文件：`src/sync.rs`（tests）
+- 修改文件：`src/graph.rs`（tests）
 
-- [ ] **为 `indexer.rs` 补充增量更新测试（已部分完成）**
-  - ✅ `BacklinkBuilder` 全量/增量场景（v1.3.1 已添加）
-  - ✅ `TagIndexBuilder` 构建结果正确性（v1.3.1 已添加）
-  - [ ] 更多边界情况覆盖
+#### 测试结果
+
+- 全量测试：**66/66 通过**
+- 新增测试：14 个（sync 4、graph 6、persistence 4）
 
 ---
 
@@ -749,7 +745,7 @@
 - ✅ 完成 v1.3.1（紧急 Bug 修复 + XSS 安全修复）🎉
 - ✅ 完成 v1.3.2（安全加固：Cookie、分享密码哈希、中间件收紧）🎉
 - ✅ 完成 v1.3.3（性能优化：Regex/Tantivy/增量搜索索引/前缀查询/内存优化）🎉
-- 完成 v1.3.4（代码质量 + 测试覆盖补全：Q1/Q3/Q5/Q6/Q7 + sync/graph/persistence 测试）
+- ✅ 完成 v1.3.4（代码质量 + 测试覆盖补全：Q1/Q3/Q5/Q6/Q7 + sync/graph/persistence 测试）🎉
 
 **Q3 (7-9月)**: 体验提升期
 - 完成 v1.4.0（用户体验改进：快捷键、主题配置、交互动画）

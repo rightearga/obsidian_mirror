@@ -44,21 +44,15 @@ lazy_static! {
 }
 
 /// 初始化 Prometheus 指标
+///
+/// 指标已注册时静默忽略（如测试环境多次调用），防止 panic。
 pub fn init_metrics() {
-    REGISTRY.register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
-        .expect("Failed to register HTTP_REQUESTS_TOTAL");
-    
-    REGISTRY.register(Box::new(SYNC_TOTAL.clone()))
-        .expect("Failed to register SYNC_TOTAL");
-    
-    REGISTRY.register(Box::new(SEARCH_REQUESTS_TOTAL.clone()))
-        .expect("Failed to register SEARCH_REQUESTS_TOTAL");
-    
-    REGISTRY.register(Box::new(NOTES_COUNT.clone()))
-        .expect("Failed to register NOTES_COUNT");
-    
-    REGISTRY.register(Box::new(HTTP_REQUEST_DURATION.clone()))
-        .expect("Failed to register HTTP_REQUEST_DURATION");
+    // 指标已注册（AlreadyReg）时忽略错误，防止测试环境多次初始化时 panic
+    let _ = REGISTRY.register(Box::new(HTTP_REQUESTS_TOTAL.clone()));
+    let _ = REGISTRY.register(Box::new(SYNC_TOTAL.clone()));
+    let _ = REGISTRY.register(Box::new(SEARCH_REQUESTS_TOTAL.clone()));
+    let _ = REGISTRY.register(Box::new(NOTES_COUNT.clone()));
+    let _ = REGISTRY.register(Box::new(HTTP_REQUEST_DURATION.clone()));
 }
 
 /// GET /metrics - Prometheus 指标端点

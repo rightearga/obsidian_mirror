@@ -624,22 +624,32 @@ pub async fn preview_handler(
     }))
 }
 
-/// 截取 HTML 内容到指定字符数
-/// 
-/// 安全地截取字符串，考虑 UTF-8 字符边界
-/// 简化处理：直接截取字符，不考虑 HTML 标签完整性
-/// （对于预览足够了，避免复杂的 HTML 解析）
+/// 从 HTML 中提取纯文本并截取到指定字符数
+///
+/// 先去除 HTML 标签，确保截断基于可见字符数而非原始 HTML 长度，
+/// 避免大量标签占用字符配额导致预览内容过少。
 fn truncate_html(html: &str, max_chars: usize) -> String {
-    // 使用字符迭代器来正确处理 UTF-8 多字节字符
-    let char_count = html.chars().count();
-    
-    if char_count <= max_chars {
-        return html.to_string();
+    // 简单状态机去除 HTML 标签，提取可见文本
+    let mut text = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => {
+                in_tag = false;
+                text.push(' '); // 标签位置插入空格，避免文字粘连
+            }
+            _ if !in_tag => text.push(c),
+            _ => {}
+        }
     }
-    
-    // 安全地截取指定数量的字符
-    let truncated: String = html.chars().take(max_chars).collect();
-    
-    // 添加省略号
+    // 合并多余空白
+    let text: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    if text.chars().count() <= max_chars {
+        return text;
+    }
+
+    let truncated: String = text.chars().take(max_chars).collect();
     format!("{}...", truncated)
 }
