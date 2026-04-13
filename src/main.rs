@@ -237,7 +237,12 @@ fn load_config(config_path: &str) -> AppConfig {
 /// 初始化搜索引擎
 fn init_search_engine(config: &AppConfig) -> anyhow::Result<Arc<SearchEngine>> {
     info!("🔍 初始化搜索引擎...");
-    let index_dir = config.local_path.join(".search_index");
+    // 搜索索引放在 index.db 的同级目录下，而不是 local_path 内部，
+    // 避免 git clone/重建 local_path 时 Tantivy 的 IndexReader 持续报警
+    let index_dir = config.database.index_db_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join(".search_index");
     info!("  └─ 索引目录: {}", index_dir.display());
     
     let search_engine = Arc::new(SearchEngine::new(&index_dir)?);
