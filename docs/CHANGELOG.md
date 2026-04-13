@@ -6,6 +6,19 @@
 
 ---
 
+## [v1.4.8] — 2026-04-13
+
+代码质量全面提升：clippy 零警告 + 10 个新测试（search_engine + handlers 集成测试）。
+
+### Changed
+- **clippy 零警告**：`cargo clippy --fix` 自动修复 33 处（`needless_borrows`、`collapsible_if`、`map_or`、`or_insert_with`、`clone_on_copy`、`push_str` 等）；另 2 处 `too_many_arguments` 用 `#[allow]` 显式抑制
+
+### Added
+- **search_engine.rs 单元测试**（7 个）：基本搜索、空索引、标签过滤、文件夹过滤、修改时间排序、`num_docs()`、`schema_matches` 字段类型检测
+- **handlers.rs 集成测试**（3 个，actix_web::test）：`/health` 结构验证、`/api/titles` 空库格式、`/orphans` 空库 HTML 响应
+
+---
+
 ## [v1.4.7] — 2026-04-13
 
 搜索性能优化 + 搜索结果增强 + share_db 前缀查询。

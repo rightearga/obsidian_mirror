@@ -81,11 +81,10 @@ pub fn find_first_file(nodes: &[SidebarNode]) -> Option<&SidebarNode> {
         if node.path.is_some() {
             return Some(node);
         }
-        if !node.children.is_empty() {
-            if let Some(found) = find_first_file(&node.children) {
+        if !node.children.is_empty()
+            && let Some(found) = find_first_file(&node.children) {
                 return Some(found);
             }
-        }
     }
     None
 }

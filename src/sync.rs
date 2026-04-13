@@ -467,7 +467,7 @@ fn process_markdown_files(
     
     files.par_iter().for_each(|path| {
         // 计算相对路径 - 确保 UTF-8 正确处理
-        let relative_path = match pathdiff::diff_paths(&path, &local_path) {
+        let relative_path = match pathdiff::diff_paths(path, &local_path) {
             Some(diff) => diff,
             None => path.strip_prefix(&local_path).unwrap_or(path).to_path_buf(),
         };
@@ -529,11 +529,10 @@ fn should_update_note(
 ) -> bool {
     if let Some(existing_note) = existing_notes.get(relative_path) {
         // 检查文件修改时间
-        if let Ok(metadata) = std::fs::metadata(&path) {
-            if let Ok(mtime) = metadata.modified() {
+        if let Ok(metadata) = std::fs::metadata(path)
+            && let Ok(mtime) = metadata.modified() {
                 return mtime > existing_note.mtime;
             }
-        }
     }
     true // 新文件或无法判断时，默认需要更新
 }
@@ -544,7 +543,7 @@ fn process_single_note(
     relative_path: &str,
 ) -> Option<(Note, Vec<String>)> {
     // 读取文件内容
-    let content = match std::fs::read_to_string(&path) {
+    let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
             error!("❌ 读取文件失败: {:?} - 错误: {:?}", path, e);
@@ -552,7 +551,7 @@ fn process_single_note(
         }
     };
     
-    let metadata = match std::fs::metadata(&path) {
+    let metadata = match std::fs::metadata(path) {
         Ok(m) => m,
         Err(e) => {
             error!("❌ 获取文件元数据失败: {:?} - 错误: {:?}", path, e);
@@ -597,7 +596,7 @@ async fn get_current_git_commit(local_path: &std::path::Path) -> anyhow::Result<
     
     let output = Command::new("git")
         .current_dir(local_path)
-        .args(&["rev-parse", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .output()
         .await?;
     

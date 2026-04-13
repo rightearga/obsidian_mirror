@@ -16,12 +16,12 @@ pub fn extract_tags(content: &str, frontmatter: &serde_yml::Value) -> Vec<String
     // 1. 从 frontmatter 中提取标签
     if let serde_yml::Value::Mapping(map) = frontmatter {
         // 尝试获取 "tags" 字段
-        if let Some(tags_value) = map.get(&serde_yml::Value::String("tags".to_string())) {
+        if let Some(tags_value) = map.get(serde_yml::Value::String("tags".to_string())) {
             extract_tags_from_yaml_value(tags_value, &mut tags);
         }
 
         // 也尝试 "tag" 字段（单数形式）
-        if let Some(tag_value) = map.get(&serde_yml::Value::String("tag".to_string())) {
+        if let Some(tag_value) = map.get(serde_yml::Value::String("tag".to_string())) {
             extract_tags_from_yaml_value(tag_value, &mut tags);
         }
     }

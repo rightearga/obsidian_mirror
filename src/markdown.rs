@@ -203,7 +203,7 @@ impl MarkdownProcessor {
         let mut heading_counter = 0;
 
         // 使用双遍解析：第一遍提取 TOC，第二遍生成 HTML
-        let events: Vec<_> = Parser::new_ext(&final_markdown, options.clone()).collect();
+        let events: Vec<_> = Parser::new_ext(&final_markdown, options).collect();
 
         // 第一遍：提取标题生成 TOC
         let mut i = 0;
@@ -318,7 +318,7 @@ impl MarkdownProcessor {
                             html_output
                                 .push_str(&format!(" class=\"language-{}\"", code_block_lang));
                         }
-                        html_output.push_str(">");
+                        html_output.push('>');
                         let escaped = code_block_content
                             .replace('&', "&amp;")
                             .replace('<', "&lt;")

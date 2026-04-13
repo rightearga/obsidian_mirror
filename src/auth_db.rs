@@ -37,12 +37,11 @@ impl AuthDatabase {
     /// 打开或创建数据库（自动创建父目录）
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         // 确保父目录存在，防止 OS error 3（路径不存在）
-        if let Some(parent) = path.as_ref().parent() {
-            if !parent.as_os_str().is_empty() {
+        if let Some(parent) = path.as_ref().parent()
+            && !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("无法创建认证数据库目录: {}", parent.display()))?;
             }
-        }
         let db = Database::create(path.as_ref()).context("无法创建/打开用户数据库")?;
 
         // 初始化表结构

@@ -90,7 +90,7 @@ impl GitClient {
             warn!("  ├─ Git pull 失败，尝试 stash 后重新拉取...");
             Command::new("git")
                 .current_dir(local_path)
-                .args(&["stash"])
+                .args(["stash"])
                 .status()
                 .await?;
 
@@ -151,7 +151,7 @@ impl GitClient {
     async fn get_current_commit(local_path: &Path) -> Result<String> {
         let output = Command::new("git")
             .current_dir(local_path)
-            .args(&["rev-parse", "HEAD"])
+            .args(["rev-parse", "HEAD"])
             .output()
             .await
             .context("Failed to get current commit")?;
@@ -173,7 +173,7 @@ impl GitClient {
         // 获取修改和新增的文件（禁用文件名转义，使用原始 UTF-8）
         let output = Command::new("git")
             .current_dir(local_path)
-            .args(&["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=AM", old_commit, new_commit])
+            .args(["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=AM", old_commit, new_commit])
             .output()
             .await
             .context("Failed to get changed files")?;
@@ -192,7 +192,7 @@ impl GitClient {
         // 获取删除的文件（禁用文件名转义，使用原始 UTF-8）
         let output = Command::new("git")
             .current_dir(local_path)
-            .args(&["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=D", old_commit, new_commit])
+            .args(["-c", "core.quotePath=false", "diff", "--name-only", "--diff-filter=D", old_commit, new_commit])
             .output()
             .await
             .context("Failed to get deleted files")?;

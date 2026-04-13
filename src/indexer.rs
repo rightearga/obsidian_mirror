@@ -53,16 +53,15 @@ impl FileIndexBuilder {
             let path = entry.path();
 
             // 只索引非 Markdown 文件
-            if path.is_file() && !path.extension().map_or(false, |ext| ext == "md") {
-                if let Some(filename) = path.file_name() {
+            if path.is_file() && path.extension().is_none_or(|ext| ext != "md")
+                && let Some(filename) = path.file_name() {
                     let filename_str = filename.to_string_lossy().to_string();
-                    let relative_path = pathdiff::diff_paths(&path, local_path)
+                    let relative_path = pathdiff::diff_paths(path, local_path)
                         .unwrap_or(path.to_path_buf())
                         .to_string_lossy()
                         .replace("\\", "/");
                     file_index.insert(filename_str, relative_path);
                 }
-            }
         }
 
         info!("  └─ 资源文件索引构建完成，共 {} 个文件", file_index.len());
@@ -114,7 +113,7 @@ impl TagIndexBuilder {
             for tag in &note.tags {
                 tag_index
                     .entry(tag.clone())
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(note.title.clone());
             }
         }

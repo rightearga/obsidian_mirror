@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.7 🎉  
+**当前版本**: v1.4.8 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -941,25 +941,25 @@
 
 ---
 
-### ✨ v1.4.8 (计划中 - 代码质量)
+### ✅ v1.4.8 (已发布 - 2026-04-13)
 
 **主题**: clippy 零警告 + 核心模块测试补全  
 **预计发布**: 2026-05 月
 
 #### Clippy 全量修复
 
-- [ ] **处理所有约 30 个 clippy 警告**
+- ✅ **处理所有约 33 个 clippy 警告**（零 warning）
   - 文件：`src/git.rs`、`src/sync.rs`、`src/search_engine.rs`、`src/handlers.rs`、`src/scanner.rs` 等
   - 涉及类型：`collapsible_if`、`unnecessary_map_or`、`needless_borrows_for_generic_args`、`derivable_impls`、`collapsible_str_replace` 等
   - 目标：`cargo clippy` 零 warning（新旧代码全覆盖）
 
 #### 测试补全
 
-- [ ] **search_engine.rs 单元测试**
+- ✅ **search_engine.rs 单元测试**（7 个）
   - 覆盖：基本搜索、标签过滤、文件夹过滤、日期范围过滤、`schema_matches` 类型检测
   - 使用 `tempfile::TempDir` 隔离测试环境
 
-- [ ] **handlers.rs 基础集成测试**
+- ✅ **handlers.rs 基础集成测试**（3 个）
   - 覆盖：`/health` 响应结构验证、`/api/titles` 返回格式、`/orphans` 空库场景
 
 ---

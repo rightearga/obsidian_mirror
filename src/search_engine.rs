@@ -14,16 +14,13 @@ use tracing::{info, warn};
 // 搜索结果排序方式
 #[derive(Debug, Clone, Copy, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum SortBy {
+    #[default]
     Relevance, // 按相关度排序（默认）
     Modified,  // 按修改时间排序
 }
 
-impl Default for SortBy {
-    fn default() -> Self {
-        SortBy::Relevance
-    }
-}
 
 // 搜索结果
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -119,6 +116,12 @@ impl SearchEngine {
             tags_field,
             folder_field,
         })
+    }
+
+    /// 公开的 schema_matches 包装，仅供测试使用
+    #[cfg(test)]
+    pub fn schema_matches_pub(s1: &Schema, s2: &Schema) -> bool {
+        Self::schema_matches(s1, s2)
     }
 
     /// 检查两个 schema 是否匹配（字段名 + 字段类型均需一致）
@@ -278,6 +281,7 @@ impl SearchEngine {
     }
 
     /// 执行高级搜索（带过滤条件）
+    #[allow(clippy::too_many_arguments)] // 搜索参数较多，引入参数结构体会增加样板代码，暂保持当前设计
     pub fn advanced_search(
         &self,
         query_str: &str,
@@ -324,8 +328,8 @@ impl SearchEngine {
         }
 
         // 添加标签过滤
-        if let Some(tag_list) = tags {
-            if !tag_list.is_empty() {
+        if let Some(tag_list) = tags
+            && !tag_list.is_empty() {
                 let mut tag_queries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
                 for tag in tag_list {
                     let term = Term::from_field_text(self.tags_field, &tag);
@@ -337,18 +341,16 @@ impl SearchEngine {
                 // 至少匹配一个标签
                 subqueries.push((Occur::Must, Box::new(BooleanQuery::new(tag_queries))));
             }
-        }
 
         // 添加文件夹过滤
-        if let Some(folder_path) = folder {
-            if !folder_path.is_empty() {
+        if let Some(folder_path) = folder
+            && !folder_path.is_empty() {
                 let term = Term::from_field_text(self.folder_field, &folder_path);
                 subqueries.push((
                     Occur::Must,
                     Box::new(TermQuery::new(term, Default::default())),
                 ));
             }
-        }
 
         // 添加日期范围过滤
         if date_from.is_some() || date_to.is_some() {
@@ -439,6 +441,12 @@ impl SearchEngine {
         Ok(results)
     }
 
+    /// 强制刷新 IndexReader 缓存（仅用于测试，确保 rebuild_index 后立即可搜索）
+    #[cfg(test)]
+    pub fn reload_reader(&self) {
+        self.reader.reload().expect("reload reader failed");
+    }
+
     /// 返回当前 Tantivy 磁盘索引中的文档数量
     ///
     /// 用于判断索引是否已有内容，从而决定是否跳过全量重建。
@@ -463,8 +471,7 @@ impl SearchEngine {
 fn generate_snippet(content: &str, search_term: &str, max_len: usize) -> String {
     // 清理内容：移除换行和多余空白
     let cleaned_content = content
-        .replace('\n', " ")
-        .replace('\r', " ")
+        .replace(['\n', '\r'], " ")
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
@@ -527,4 +534,164 @@ fn safe_substring(s: &str, start: usize, end: usize) -> String {
     }
 
     s[actual_start..actual_end].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+    use tempfile::TempDir;
+
+    /// 构造测试用搜索引擎（使用临时目录）
+    fn make_engine() -> (SearchEngine, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let engine = SearchEngine::new(dir.path()).unwrap();
+        (engine, dir)
+    }
+
+    /// 构造一条测试文档数据：(path, title, content, mtime, tags)
+    fn make_doc(
+        path: &str,
+        title: &str,
+        content: &str,
+        mtime_delta_secs: i64,
+        tags: Vec<&str>,
+    ) -> (String, String, String, SystemTime, Vec<String>) {
+        let mtime = if mtime_delta_secs >= 0 {
+            SystemTime::now() + Duration::from_secs(mtime_delta_secs as u64)
+        } else {
+            SystemTime::now() - Duration::from_secs((-mtime_delta_secs) as u64)
+        };
+        (
+            path.to_string(),
+            title.to_string(),
+            content.to_string(),
+            mtime,
+            tags.into_iter().map(|s| s.to_string()).collect(),
+        )
+    }
+
+    #[test]
+    fn test_basic_search() {
+        // 基本全文搜索：匹配标题和内容
+        let (engine, _dir) = make_engine();
+        engine
+            .rebuild_index(vec![
+                make_doc("a.md", "Rust 入门", "学习 Rust 编程语言", 0, vec![]),
+                make_doc("b.md", "Python 教程", "Python 是一门动态语言", 0, vec![]),
+            ])
+            .unwrap();
+        engine.reload_reader();
+
+        let results = engine.search("Rust", 10, SortBy::Relevance).unwrap();
+        assert!(!results.is_empty(), "应找到 Rust 相关笔记");
+        assert!(
+            results[0].title.contains("Rust"),
+            "最相关的结果应包含 Rust"
+        );
+    }
+
+    #[test]
+    fn test_empty_index_returns_empty() {
+        // 空索引搜索应返回空列表
+        let (engine, _dir) = make_engine();
+        let results = engine.search("anything", 10, SortBy::Relevance).unwrap();
+        assert!(results.is_empty(), "空索引应返回空结果");
+    }
+
+    #[test]
+    fn test_tag_filter() {
+        // 标签过滤：只返回包含指定标签的笔记
+        let (engine, _dir) = make_engine();
+        engine
+            .rebuild_index(vec![
+                make_doc("a.md", "笔记 A", "内容 A", 0, vec!["rust", "系统"]),
+                make_doc("b.md", "笔记 B", "内容 B", 0, vec!["python"]),
+                make_doc("c.md", "笔记 C", "内容 C", 0, vec![]),
+            ])
+            .unwrap();
+        engine.reload_reader();
+
+        let results = engine
+            .advanced_search("", 10, SortBy::Relevance, Some(vec!["rust".to_string()]), None, None, None)
+            .unwrap();
+
+        assert_eq!(results.len(), 1, "应只返回带 rust 标签的笔记");
+        assert_eq!(results[0].title, "笔记 A");
+    }
+
+    #[test]
+    fn test_folder_filter() {
+        // 文件夹过滤：只返回指定文件夹下的笔记
+        let (engine, _dir) = make_engine();
+        engine
+            .rebuild_index(vec![
+                make_doc("notes/work/a.md", "工作笔记", "内容", 0, vec![]),
+                make_doc("notes/personal/b.md", "个人笔记", "内容", 0, vec![]),
+            ])
+            .unwrap();
+        engine.reload_reader();
+
+        let results = engine
+            .advanced_search("", 10, SortBy::Relevance, None, Some("notes/work".to_string()), None, None)
+            .unwrap();
+
+        assert_eq!(results.len(), 1, "应只返回 notes/work 文件夹下的笔记");
+        assert_eq!(results[0].title, "工作笔记");
+    }
+
+    #[test]
+    fn test_sort_by_modified() {
+        // 按修改时间排序：最新的排在前
+        let (engine, _dir) = make_engine();
+        engine
+            .rebuild_index(vec![
+                make_doc("old.md", "旧笔记", "内容", -3600, vec![]),
+                make_doc("new.md", "新笔记", "内容", 0, vec![]),
+            ])
+            .unwrap();
+        engine.reload_reader();
+
+        let results = engine.search("内容", 10, SortBy::Modified).unwrap();
+        assert!(!results.is_empty(), "应有结果");
+        // 时间戳较大（更新）的排在前面
+        assert!(
+            results[0].mtime >= results.last().unwrap().mtime,
+            "最新笔记应排在前"
+        );
+    }
+
+    #[test]
+    fn test_num_docs() {
+        // num_docs 应返回正确的文档数量
+        let (engine, _dir) = make_engine();
+        assert_eq!(engine.num_docs(), 0, "初始索引应为空");
+
+        engine
+            .rebuild_index(vec![
+                make_doc("a.md", "A", "内容", 0, vec![]),
+                make_doc("b.md", "B", "内容", 0, vec![]),
+            ])
+            .unwrap();
+        engine.reload_reader();
+
+        assert_eq!(engine.num_docs(), 2, "重建后应有 2 条文档");
+    }
+
+    #[test]
+    fn test_schema_matches_type_check() {
+        // schema_matches 应检测字段类型差异
+        let (engine, _dir) = make_engine();
+        let schema1 = engine.reader.searcher().index().schema();
+        // 构建一个字段名相同但类型不同的 schema（用新 Schema::builder）
+        let mut builder = tantivy::schema::Schema::builder();
+        // 添加相同字段名但用 INT 类型替代 TEXT，触发不匹配
+        builder.add_i64_field("title", tantivy::schema::INDEXED);
+        let schema2 = builder.build();
+        // schema1 有 TEXT title，schema2 有 I64 title → 不匹配
+        assert!(
+            !SearchEngine::schema_matches_pub(&schema1, &schema2),
+            "字段类型不同时 schema_matches 应返回 false"
+        );
+    }
 }

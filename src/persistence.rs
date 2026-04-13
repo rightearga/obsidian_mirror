@@ -52,6 +52,7 @@ impl IndexPersistence {
     /// 保存所有索引到磁盘
     ///
     /// 笔记数量超过 1000 时按批次提交，避免单一大事务长期锁库。
+    #[allow(clippy::too_many_arguments)] // 索引数据类型各不相同，引入统一结构体会增加不必要的间接层
     /// 元数据（git commit hash）最后写入，作为"原子完成标记"：
     /// 若中途崩溃，元数据未写入，下次启动会安全地触发全量重建。
     pub fn save_indexes(

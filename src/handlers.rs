@@ -228,13 +228,12 @@ pub async fn index_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
     }
 
     // 2. Redirect to first file
-    if let Some(first_node) = find_first_file(&sidebar) {
-         if let Some(path) = &first_node.path {
+    if let Some(first_node) = find_first_file(&sidebar)
+         && let Some(path) = &first_node.path {
              return HttpResponse::Found()
                 .append_header(("Location", format!("/doc/{}", path)))
                 .finish();
          }
-    }
     
     // 3. Render Index Template if empty
     let empty_backlinks: Vec<String> = Vec::new();
@@ -639,8 +638,8 @@ pub async fn preview_handler(
         }
     };
     
-    if let Some(key) = note_key {
-        if let Some(note) = notes.get(&key) {
+    if let Some(key) = note_key
+        && let Some(note) = notes.get(&key) {
             // 截取内容前 500 个字符作为预览
             let preview_content = truncate_html(&note.content_html, 500);
             
@@ -652,7 +651,6 @@ pub async fn preview_handler(
             
             return HttpResponse::Ok().json(preview);
         }
-    }
     
     // 未找到笔记
     HttpResponse::NotFound().json(json!({
@@ -1013,5 +1011,118 @@ pub async fn config_reload_handler(
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
             "error": format!("重载后同步失败: {}", e)
         })),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    /// 创建最小化的测试用 AppState
+    async fn make_test_state() -> Arc<AppState> {
+        use crate::config::{AppConfig, DatabaseConfig, SecurityConfig, WebhookConfig};
+        use crate::search_engine::SearchEngine;
+        use crate::share_db::ShareDatabase;
+        use crate::reading_progress_db::ReadingProgressDatabase;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("share.db");
+        let rp_path = tmp.path().join("rp.db");
+        let idx_path = tmp.path().join(".search_index");
+
+        let config = AppConfig {
+            repo_url: String::new(),
+            local_path: PathBuf::from("./vault_data"),
+            listen_addr: "127.0.0.1:8080".into(),
+            workers: 1,
+            ignore_patterns: vec![],
+            database: DatabaseConfig {
+                index_db_path: tmp.path().join("index.db"),
+                auth_db_path: tmp.path().join("auth.db"),
+                share_db_path: db_path.clone(),
+                reading_progress_db_path: rp_path.clone(),
+            },
+            security: SecurityConfig::default(),
+            sync_interval_minutes: 0,
+            webhook: WebhookConfig::default(),
+        };
+
+        let search_engine = Arc::new(SearchEngine::new(&idx_path).unwrap());
+        let share_db = Arc::new(ShareDatabase::open(&db_path).unwrap());
+        let rp_db = Arc::new(ReadingProgressDatabase::open(&rp_path).unwrap());
+
+        // TempDir must stay alive; leak it for the test lifetime
+        std::mem::forget(tmp);
+
+        Arc::new(AppState::new(config, search_engine, share_db, rp_db))
+    }
+
+    #[actix_web::test]
+    async fn test_health_response_structure() {
+        // /health 返回 JSON，包含 status / version / notes_count 字段
+        let state = make_test_state().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .service(health_handler),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/health").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "/health 应返回 2xx");
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["status"], "healthy", "status 应为 healthy");
+        assert!(body["version"].is_string(), "version 应存在");
+        assert!(body["notes_count"].is_number(), "notes_count 应存在");
+        assert!(body["sync_status"].is_string(), "sync_status 应存在");
+    }
+
+    #[actix_web::test]
+    async fn test_titles_api_empty() {
+        // /api/titles 空库时返回空数组
+        let state = make_test_state().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .service(titles_api_handler),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/api/titles").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success());
+
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert!(body["titles"].is_array(), "应有 titles 数组");
+        assert!(body["tags"].is_array(), "应有 tags 数组");
+        assert_eq!(body["titles"].as_array().unwrap().len(), 0, "空库 titles 应为空");
+    }
+
+    #[actix_web::test]
+    async fn test_orphans_empty_library() {
+        // /orphans 空库时列表为空
+        let state = make_test_state().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .service(orphans_handler),
+        )
+        .await;
+
+        let req = test::TestRequest::get().uri("/orphans").to_request();
+        let resp = test::call_service(&app, req).await;
+        assert!(resp.status().is_success(), "/orphans 应返回 2xx");
+        // 响应是 HTML，空库时应包含"共 0 篇孤立笔记"或"太棒了"的提示
+        let body = String::from_utf8(test::read_body(resp).await.to_vec()).unwrap();
+        assert!(
+            body.contains("孤立笔记") || body.contains("孤"),
+            "/orphans 页面应包含相关内容"
+        );
     }
 }

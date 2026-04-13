@@ -324,7 +324,7 @@ async fn perform_initial_sync(app_state: &Arc<AppState>) {
     if app_state.config.local_path.exists() {
         info!("✅ 本地路径存在，开始初始同步...");
         
-        match perform_sync(&app_state).await {
+        match perform_sync(app_state).await {
             Ok(_) => {
                 info!("✅ 初始同步完成");
             }
@@ -528,7 +528,7 @@ async fn get_git_commit(local_path: &std::path::Path) -> anyhow::Result<String> 
     
     let output = Command::new("git")
         .current_dir(local_path)
-        .args(&["rev-parse", "HEAD"])
+        .args(["rev-parse", "HEAD"])
         .output()
         .await?;
     

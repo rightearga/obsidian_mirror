@@ -87,18 +87,16 @@ impl ShareLink {
     /// 检查分享链接是否有效
     pub fn is_valid(&self) -> bool {
         // 检查是否过期
-        if let Some(expires_at) = self.expires_at {
-            if SystemTime::now() > expires_at {
+        if let Some(expires_at) = self.expires_at
+            && SystemTime::now() > expires_at {
                 return false;
             }
-        }
 
         // 检查访问次数限制
-        if let Some(max_visits) = self.max_visits {
-            if self.visit_count >= max_visits {
+        if let Some(max_visits) = self.max_visits
+            && self.visit_count >= max_visits {
                 return false;
             }
-        }
 
         true
     }
@@ -132,12 +130,11 @@ impl ShareDatabase {
     /// 打开或创建数据库（自动创建父目录）
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         // 确保父目录存在
-        if let Some(parent) = path.as_ref().parent() {
-            if !parent.as_os_str().is_empty() {
+        if let Some(parent) = path.as_ref().parent()
+            && !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("无法创建分享链接数据库目录: {}", parent.display()))?;
             }
-        }
         let db = Database::create(path.as_ref())
             .with_context(|| format!("无法打开分享链接数据库: {}", path.as_ref().display()))?;
 
