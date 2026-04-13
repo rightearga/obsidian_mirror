@@ -36,3 +36,7 @@ settings.local.json
 # obsidian_mirror 配置文件（包含敏感信息）
 config.ron
 .gitconfig
+
+my-note/
+
+**/.search_index/
