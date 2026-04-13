@@ -6,6 +6,19 @@
 
 ---
 
+## [v1.4.7] — 2026-04-13
+
+搜索性能优化 + 搜索结果增强 + share_db 前缀查询。
+
+### Added
+- **搜索结果显示路径/标签/修改时间**：`SearchResult` 新增 `tags: Vec<String>` 字段；搜索卡片展示文件夹路径（去文件名）、最多 3 个标签 chip、相对修改时间（"3天前"格式）
+
+### Changed
+- **重启跳过搜索索引重建**：持久化命中 + `NoChange` 场景下，若 Tantivy 磁盘索引已有内容则直接复用，不再全量重建；首次空库时仍正常重建
+- **share_db 前缀查询**：主表键改为 `{creator}:{token}`；新增 `TOKEN_LOOKUP_TABLE` 反查表实现 O(1) token 查找；`get_user_shares` 改用 `redb::range()` 前缀查询，彻底消除全表扫描；旧有分享链接数据失效（需重新创建）
+
+---
+
 ## [v1.4.6] — 2026-04-13
 
 安全修复：Cookie 动态 Secure 配置、Webhook HMAC-SHA256 真实实现、Mermaid 调试日志清理。

@@ -32,7 +32,8 @@ pub struct SearchResult {
     pub path: String,
     pub snippet: String,
     pub score: f32,
-    pub mtime: i64, // Unix 时间戳（秒）
+    pub mtime: i64,         // Unix 时间戳（秒）
+    pub tags: Vec<String>,  // 笔记标签列表（用于搜索结果卡片展示）
 }
 
 // 搜索引擎
@@ -384,6 +385,7 @@ impl SearchEngine {
             let mut path = String::new();
             let mut content = String::new();
             let mut mtime = 0i64;
+            let mut tags = Vec::new();
 
             for (field, value) in doc.field_values() {
                 if field == self.title_field {
@@ -402,6 +404,11 @@ impl SearchEngine {
                     if let Some(time) = value.as_i64() {
                         mtime = time;
                     }
+                } else if field == self.tags_field {
+                    // 标签字段支持多值，每个标签单独存储
+                    if let Some(text) = value.as_str() {
+                        tags.push(text.to_string());
+                    }
                 }
             }
 
@@ -414,6 +421,7 @@ impl SearchEngine {
                 snippet,
                 score,
                 mtime,
+                tags,
             });
         }
 
@@ -429,6 +437,14 @@ impl SearchEngine {
         }
 
         Ok(results)
+    }
+
+    /// 返回当前 Tantivy 磁盘索引中的文档数量
+    ///
+    /// 用于判断索引是否已有内容，从而决定是否跳过全量重建。
+    /// 返回 0 表示索引为空（需要重建）；> 0 表示索引有内容，可以直接复用。
+    pub fn num_docs(&self) -> u64 {
+        self.reader.searcher().num_docs()
     }
 
     /// 执行简单搜索（保持向后兼容）

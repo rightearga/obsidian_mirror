@@ -403,7 +403,6 @@ async function performModalSearch(query) {
         }
 
         const results = await response.json();
-        console.log('搜索结果:', results);
         displayModalSearchResults(results, query);
     } catch (error) {
         console.error('搜索错误:', error);
@@ -435,14 +434,32 @@ function displayModalSearchResults(results, query) {
         const titleHtml = highlightText(result.title, queryLower);
         const snippetHtml = highlightText(result.snippet, queryLower);
 
+        // 路径：显示文件夹部分（去掉文件名后缀）
+        const pathParts = (result.path || '').split('/');
+        const fileName = pathParts.pop().replace(/\.md$/, '');
+        const folderPath = pathParts.join(' / ');
+
+        // 标签：最多显示 3 个
+        const tags = (result.tags || []).slice(0, 3);
+        const tagsHtml = tags.length > 0
+            ? `<span class="result-tags">${tags.map(t => `<span class="result-tag">#${escapeHtml(t)}</span>`).join('')}</span>`
+            : '';
+
+        // 修改时间：相对时间
+        const mtimeHtml = result.mtime
+            ? `<span class="result-mtime">${formatRelativeTime(result.mtime)}</span>`
+            : '';
+
         html += `
-            <a href="/doc/${encodeURIComponent(result.path)}" 
-               class="search-modal-result-item" 
+            <a href="/doc/${encodeURIComponent(result.path)}"
+               class="search-modal-result-item"
                data-index="${index}"
                onmouseenter="highlightModalSearchResult(${index})"
                onclick="closeSearchModal()">
                 <div class="search-modal-result-title">${titleHtml}</div>
+                ${folderPath ? `<div class="result-path">${escapeHtml(folderPath)}</div>` : ''}
                 <div class="search-modal-result-snippet">${snippetHtml}</div>
+                <div class="result-meta">${tagsHtml}${mtimeHtml}</div>
             </a>
         `;
     });
@@ -467,6 +484,24 @@ function highlightText(text, query) {
     const regex = new RegExp(`(${escapeRegex(query)})`, 'gi');
     
     return escapedText.replace(regex, '<span class="highlight">$1</span>');
+}
+
+/**
+ * 将 Unix 时间戳（秒）转换为相对时间字符串
+ * 如：刚刚 / 5分钟前 / 3小时前 / 2天前 / 2026-04-01
+ */
+function formatRelativeTime(timestampSec) {
+    if (!timestampSec) return '';
+    const now = Math.floor(Date.now() / 1000);
+    const diff = now - timestampSec;
+
+    if (diff < 60)  return '刚刚';
+    if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
+    if (diff < 86400 * 30) return `${Math.floor(diff / 86400)}天前`;
+
+    const d = new Date(timestampSec * 1000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 /**

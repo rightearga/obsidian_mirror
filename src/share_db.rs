@@ -13,10 +13,13 @@ use uuid::Uuid;
 /// 分享链接密码的 bcrypt 哈希成本，用于保护密码不被数据库泄露所暴露
 const PASSWORD_BCRYPT_COST: u32 = bcrypt::DEFAULT_COST;
 
-/// 分享链接表定义
-/// Key: share_token (String)
-/// Value: ShareLink (序列化为 JSON)
+/// 分享链接主表：Key = "{creator}:{token}"，Value = ShareLink JSON
+/// 按创建者前缀排列，支持 O(k) 按用户前缀查询（k = 用户分享数量）
 const SHARE_LINKS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("share_links");
+
+/// Token 反查表：Key = "{token}"，Value = "{creator}"
+/// 支持 O(1) 按 token 查找分享链接（反向索引）
+const TOKEN_LOOKUP_TABLE: TableDefinition<&str, &str> = TableDefinition::new("token_lookup");
 
 /// 分享链接数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,72 +146,86 @@ impl ShareDatabase {
         Ok(Self { db })
     }
 
+    /// 构建主表复合键：`{creator}:{token}`
+    fn composite_key(creator: &str, token: &str) -> String {
+        format!("{}:{}", creator, token)
+    }
+
     /// 创建新的分享链接
+    ///
+    /// 同时写入主表（`{creator}:{token}`）和反查表（`{token}` → creator），
+    /// 支持 O(k) 用户分享列表查询和 O(1) token 反查。
     pub fn create_share(&self, share_link: &ShareLink) -> Result<()> {
+        let composite = Self::composite_key(&share_link.creator, &share_link.token);
+        let json = serde_json::to_string(share_link)?;
+
         let write_txn = self.db.begin_write()?;
         {
-            let mut table = write_txn.open_table(SHARE_LINKS_TABLE)?;
-            let json = serde_json::to_string(share_link)?;
-            table.insert(share_link.token.as_str(), json.as_str())?;
+            let mut main_table = write_txn.open_table(SHARE_LINKS_TABLE)?;
+            main_table.insert(composite.as_str(), json.as_str())?;
+
+            let mut lookup_table = write_txn.open_table(TOKEN_LOOKUP_TABLE)?;
+            lookup_table.insert(share_link.token.as_str(), share_link.creator.as_str())?;
         }
         write_txn.commit()?;
 
-        debug!(
-            "✅ 创建分享链接: {} -> {}",
-            share_link.token, share_link.note_path
-        );
-
+        debug!("✅ 创建分享链接: {} -> {}", share_link.token, share_link.note_path);
         Ok(())
     }
 
-    /// 通过 token 获取分享链接
+    /// 通过 token 获取分享链接（O(1)：先查反查表得到 creator，再查主表）
     pub fn get_share(&self, token: &str) -> Result<Option<ShareLink>> {
         let read_txn = self.db.begin_read()?;
+
+        // 从反查表获取 creator
+        let creator = {
+            let lookup = read_txn.open_table(TOKEN_LOOKUP_TABLE)?;
+            match lookup.get(token)? {
+                Some(v) => v.value().to_string(),
+                None => return Ok(None),
+            }
+        };
+
+        // 用复合键查主表
+        let composite = Self::composite_key(&creator, token);
         let table = read_txn.open_table(SHARE_LINKS_TABLE)?;
-
-        let result = table.get(token)?;
-
-        if let Some(json_value) = result {
-            let json = json_value.value();
-            let share_link: ShareLink = serde_json::from_str(json)?;
-            Ok(Some(share_link))
-        } else {
-            Ok(None)
+        match table.get(composite.as_str())? {
+            Some(v) => {
+                let share_link: ShareLink = serde_json::from_str(v.value())?;
+                Ok(Some(share_link))
+            }
+            None => Ok(None),
         }
     }
 
-    /// 获取用户创建的所有分享链接
+    /// 获取用户创建的所有分享链接（O(k)：按前缀范围查询，避免全表扫描）
     pub fn get_user_shares(&self, username: &str) -> Result<Vec<ShareLink>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(SHARE_LINKS_TABLE)?;
 
+        // key 格式："{creator}:{token}"，':' (ASCII 58) 和 ';' (ASCII 59) 的差用于前缀范围
+        let lower = format!("{}:", username);
+        let upper = format!("{};", username);
         let mut shares = Vec::new();
 
-        for item in table.iter()? {
+        for item in table.range(lower.as_str()..upper.as_str())? {
             let (_, json_value) = item?;
-            let json = json_value.value();
-            let share_link: ShareLink = serde_json::from_str(json)?;
-
-            if share_link.creator == username {
-                shares.push(share_link);
-            }
+            let share_link: ShareLink = serde_json::from_str(json_value.value())?;
+            shares.push(share_link);
         }
 
         Ok(shares)
     }
 
-    /// 获取指定笔记的所有分享链接
+    /// 获取指定笔记的所有分享链接（全表扫描，笔记维度查询频次低）
     pub fn get_note_shares(&self, note_path: &str) -> Result<Vec<ShareLink>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(SHARE_LINKS_TABLE)?;
 
         let mut shares = Vec::new();
-
         for item in table.iter()? {
             let (_, json_value) = item?;
-            let json = json_value.value();
-            let share_link: ShareLink = serde_json::from_str(json)?;
-
+            let share_link: ShareLink = serde_json::from_str(json_value.value())?;
             if share_link.note_path == note_path {
                 shares.push(share_link);
             }
@@ -219,32 +236,48 @@ impl ShareDatabase {
 
     /// 更新分享链接（用于增加访问次数）
     pub fn update_share(&self, share_link: &ShareLink) -> Result<()> {
+        let composite = Self::composite_key(&share_link.creator, &share_link.token);
+        let json = serde_json::to_string(share_link)?;
+
         let write_txn = self.db.begin_write()?;
         {
             let mut table = write_txn.open_table(SHARE_LINKS_TABLE)?;
-            let json = serde_json::to_string(share_link)?;
-            table.insert(share_link.token.as_str(), json.as_str())?;
+            table.insert(composite.as_str(), json.as_str())?;
         }
         write_txn.commit()?;
 
         debug!("✅ 更新分享链接: {}", share_link.token);
-
         Ok(())
     }
 
-    /// 删除分享链接
+    /// 删除分享链接（同时从主表和反查表删除）
     pub fn delete_share(&self, token: &str) -> Result<bool> {
+        // 先查 creator（用于构建主表复合键）
+        let creator = {
+            let read_txn = self.db.begin_read()?;
+            let lookup = read_txn.open_table(TOKEN_LOOKUP_TABLE)?;
+            match lookup.get(token)? {
+                Some(v) => v.value().to_string(),
+                None => return Ok(false), // 不存在
+            }
+        };
+
+        let composite = Self::composite_key(&creator, token);
         let write_txn = self.db.begin_write()?;
         let removed = {
-            let mut table = write_txn.open_table(SHARE_LINKS_TABLE)?;
-            table.remove(token)?.is_some()
+            let mut main_table = write_txn.open_table(SHARE_LINKS_TABLE)?;
+            let removed = main_table.remove(composite.as_str())?.is_some();
+
+            let mut lookup_table = write_txn.open_table(TOKEN_LOOKUP_TABLE)?;
+            lookup_table.remove(token)?;
+
+            removed
         };
         write_txn.commit()?;
 
         if removed {
             debug!("✅ 删除分享链接: {}", token);
         }
-
         Ok(removed)
     }
 
@@ -252,23 +285,22 @@ impl ShareDatabase {
     pub fn cleanup_expired(&self) -> Result<usize> {
         let mut expired_tokens = Vec::new();
 
-        // 收集过期的 token
+        // 收集过期的 token（全表扫描）
         {
             let read_txn = self.db.begin_read()?;
             let table = read_txn.open_table(SHARE_LINKS_TABLE)?;
 
             for item in table.iter()? {
-                let (token_value, json_value) = item?;
-                let json = json_value.value();
-                let share_link: ShareLink = serde_json::from_str(json)?;
+                let (_, json_value) = item?;
+                let share_link: ShareLink = serde_json::from_str(json_value.value())?;
 
                 if !share_link.is_valid() {
-                    expired_tokens.push(token_value.value().to_string());
+                    expired_tokens.push(share_link.token.clone());
                 }
             }
         }
 
-        // 删除过期的分享链接
+        // 删除过期的分享链接（主表 + 反查表）
         let count = expired_tokens.len();
         for token in expired_tokens {
             self.delete_share(&token)?;

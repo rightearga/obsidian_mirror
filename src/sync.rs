@@ -142,20 +142,25 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                                 drop(file_index_write);
                                 info!("✅ 资源文件索引重建完成，共 {} 个文件", file_count);
                                 
-                                // 重建搜索索引
-                                info!("🔎 重建搜索索引");
-                                let notes_read = data.notes.read().await;
-                                let index_data = SearchIndexDataExtractor::extract(&notes_read);
-                                drop(notes_read);
-                                
-                                let search_engine = data.search_engine.clone();
-                                tokio::task::spawn_blocking(move || {
-                                    if let Err(e) = search_engine.rebuild_index(index_data.into_iter()) {
-                                        error!("  └─ 重建搜索索引失败: {:?}", e);
-                                    } else {
-                                        info!("  └─ 搜索索引重建完成");
-                                    }
-                                });
+                                // 搜索索引：Tantivy 磁盘索引已有内容则直接复用，避免重启每次重建
+                                let existing_docs = data.search_engine.num_docs();
+                                if existing_docs > 0 {
+                                    info!("🔎 Tantivy 磁盘索引已存在（{} 条文档），跳过重建，直接复用", existing_docs);
+                                } else {
+                                    info!("🔎 Tantivy 磁盘索引为空，重建搜索索引");
+                                    let notes_read = data.notes.read().await;
+                                    let index_data = SearchIndexDataExtractor::extract(&notes_read);
+                                    drop(notes_read);
+
+                                    let search_engine = data.search_engine.clone();
+                                    tokio::task::spawn_blocking(move || {
+                                        if let Err(e) = search_engine.rebuild_index(index_data.into_iter()) {
+                                            error!("  └─ 重建搜索索引失败: {:?}", e);
+                                        } else {
+                                            info!("  └─ 搜索索引重建完成");
+                                        }
+                                    });
+                                }
                                 
                                 let total_time = sync_start.elapsed();
                                 let note_count = data.notes.read().await.len();

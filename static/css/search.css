@@ -394,6 +394,46 @@
     color: var(--text-color);
 }
 
+/* ---- 搜索结果元信息（路径/标签/时间）— v1.4.7 ---- */
+.result-path {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-bottom: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.result-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    flex-wrap: wrap;
+}
+
+.result-tags {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.result-tag {
+    font-size: 10px;
+    color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 10%, transparent);
+    padding: 1px 6px;
+    border-radius: 10px;
+    white-space: nowrap;
+}
+
+.result-mtime {
+    font-size: 11px;
+    color: var(--text-faint);
+    margin-left: auto;
+    white-space: nowrap;
+}
+
 .search-modal-loading {
     padding: 40px 20px;
     text-align: center;
