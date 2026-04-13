@@ -884,6 +884,116 @@
 
 ---
 
+### ✨ v1.4.6 (计划中 - 紧急修复与安全加固)
+
+**主题**: Cookie 动态 Secure + Webhook HMAC + 调试日志清理  
+**预计发布**: 2026-04 月
+
+#### 安全修复
+
+- [ ] **Cookie Secure 动态判断**
+  - 文件：`src/auth_handlers.rs`、`src/config.rs`
+  - 问题：v1.3.2 硬编码 `.secure(true)`，HTTP 下（内网/开发）浏览器静默丢弃 Cookie，导致登录失效
+  - 修复：`config.ron` 新增 `force_https_cookie: bool`（默认 `false`）；仅在该选项为 `true` 时设置 `Secure` 标志
+  - 说明：生产环境通过反向代理（Nginx/Caddy）启用 HTTPS 时，手动将该选项设为 `true`
+
+- [ ] **Webhook HMAC-SHA256 真实实现**
+  - 文件：`src/handlers.rs`、`Cargo.toml`
+  - 问题：当前 GitHub 签名验证为字符串直接比较，无消息体完整性保证
+  - 修复：添加 `hmac = "0.12"` + `sha2 = "0.3"` 依赖，实现标准 HMAC-SHA256 验证；GitLab 令牌保持原有逻辑
+
+#### 代码清理
+
+- [ ] **graph.js 调试日志清理**
+  - 文件：`static/js/graph.js`
+  - 问题：graph.js 中遗留数十条 `console.log` 调试输出，影响性能和控制台可读性
+  - 修复：删除所有非 error 级别的 `console.log`，仅保留 `console.error` 用于异常处理
+
+- [ ] **sync.rs / 其他文件潜在警告确认修复**
+  - 检查并修复 `incremental_search_data` 等编译器警告
+
+---
+
+### ✨ v1.4.7 (计划中 - 搜索与性能优化)
+
+**主题**: 重启不重建搜索索引 + share_db 前缀查询 + 搜索结果增强  
+**预计发布**: 2026-05 月
+
+#### 搜索性能
+
+- [ ] **重启后跳过搜索索引重建**
+  - 文件：`src/sync.rs`、`src/search_engine.rs`
+  - 问题：`NoChange` + 持久化命中时，Tantivy 磁盘索引仍然有效，但当前代码仍全量重建，浪费时间
+  - 修复：检测「持久化命中且无 Git 变更」场景，直接复用磁盘上的 Tantivy 索引，跳过 `rebuild_index`
+  - 依赖：配合 v1.4.9 的 `content_text` 移除（移除后 content 不在 Note 中，无法重建，更需要此机制）
+
+- [ ] **搜索结果显示路径 / 标签 / 修改时间**
+  - 文件：`static/js/search.js`、`static/css/search.css`
+  - 问题：v1.4.2 延期项，搜索结果卡片目前只显示标题和摘要
+  - 修复：在卡片中补充文件相对路径、笔记标签列表（最多 3 个）、最后修改时间
+
+#### 数据库优化
+
+- [ ] **share_db 前缀查询（P4 遗留修复）**
+  - 文件：`src/share_db.rs`
+  - 问题：`get_user_shares` 全表扫描，用户分享多时性能下降
+  - 修复：将主键从 `{token}` 改为 `{creator}:{token}`，配合 `link_to_creator` 辅助表实现 O(1) token 反查
+  - 说明：旧有分享数据失效（接受），重启后自动重建
+
+---
+
+### ✨ v1.4.8 (计划中 - 代码质量)
+
+**主题**: clippy 零警告 + 核心模块测试补全  
+**预计发布**: 2026-05 月
+
+#### Clippy 全量修复
+
+- [ ] **处理所有约 30 个 clippy 警告**
+  - 文件：`src/git.rs`、`src/sync.rs`、`src/search_engine.rs`、`src/handlers.rs`、`src/scanner.rs` 等
+  - 涉及类型：`collapsible_if`、`unnecessary_map_or`、`needless_borrows_for_generic_args`、`derivable_impls`、`collapsible_str_replace` 等
+  - 目标：`cargo clippy` 零 warning（新旧代码全覆盖）
+
+#### 测试补全
+
+- [ ] **search_engine.rs 单元测试**
+  - 覆盖：基本搜索、标签过滤、文件夹过滤、日期范围过滤、`schema_matches` 类型检测
+  - 使用 `tempfile::TempDir` 隔离测试环境
+
+- [ ] **handlers.rs 基础集成测试**
+  - 覆盖：`/health` 响应结构验证、`/api/titles` 返回格式、`/orphans` 空库场景
+
+---
+
+### ✨ v1.4.9 (计划中 - 架构优化)
+
+**主题**: 移除 `Note.content_text`，内存占用减半  
+**预计发布**: 2026-06 月
+
+#### content_text 完整移除（CODEREVIEW P5 阶段一）
+
+- [ ] **从 `Note` 结构体中移除 `content_text` 字段**
+  - 文件：`src/domain.rs`
+  - 当前状态：每个笔记同时保存原始 Markdown（`content_text`）和渲染 HTML（`content_html`），大型库内存翻倍
+  - 修复：直接删除字段，CURRENT_VERSION 升至 3，强制缓存重建
+
+- [ ] **同步管道重构：content 仅在构建期传递**
+  - 文件：`src/sync.rs`、`src/indexer.rs`
+  - `ProcessedNote` 类型增加 `Option<String>` content 字段（新处理的笔记携带，缓存复用的为 None）
+  - 全量同步：content 从处理结果直接传给 SearchEngine，不存入 Note
+  - 增量同步：仅更新变更文件，未变更文件依赖 Tantivy 磁盘索引（配合 v1.4.7）
+
+- [ ] **更新 `graph.rs`（已完成，确认无残留依赖）**
+  - v1.4.3 已将 `extract_links_from_note` 改用 `outgoing_links`，理论上无 content_text 依赖
+  - 验证全量测试通过
+
+- [ ] **文档全面更新**
+  - `CLAUDE.md`：更新 Note 结构体说明、同步管道描述
+  - `docs/CODEREVIEW_1.3.md`：P5 状态改为 ✅ 完整修复
+  - `.claude/project.md`：版本号 + 模块状态
+
+---
+
 ## 📦 功能分类
 
 ### 🚨 紧急修复（v1.3.1 / v1.3.2）
@@ -912,11 +1022,15 @@
 1. **分享/历史查询前缀索引** (v1.3.3 ✅) — 已完成
 2. **代码质量改进 Q1-Q7** (v1.3.4 ✅) — 已完成
 3. **测试覆盖补全** (v1.3.4 ✅) — 已完成
-4. **Obsidian 语法扩展**（math / callout / highlight）(v1.4.1)
-5. **搜索建议与笔记发现** (v1.4.2) — 实时补全、孤立笔记、随机跳转
-6. **关系图谱增强** (v1.4.3) — 全库图谱、分组着色、多布局
-7. **PWA + 无障碍** (v1.4.4) — 离线安装、手势导航、ARIA
-8. **运维扩展** (v1.4.5) — 自动同步、Webhook、配置热重载
+4. **Obsidian 语法扩展**（math / callout / highlight）(v1.4.1 ✅) — 已完成
+5. **搜索建议与笔记发现** (v1.4.2 ✅) — 已完成
+6. **关系图谱增强** (v1.4.3 ✅) — 已完成
+7. **PWA + 无障碍** (v1.4.4 ✅) — 已完成
+8. **运维扩展** (v1.4.5 ✅) — 已完成
+9. **Cookie 动态 Secure + Webhook HMAC + 日志清理** (v1.4.6)
+10. **搜索性能 + share_db 前缀查询** (v1.4.7)
+11. **clippy 零警告 + 测试补全** (v1.4.8)
+12. **content_text 移除 + 内存优化** (v1.4.9)
 
 ### 💡 低优先级（探索性，v1.5.0+）
 
@@ -925,9 +1039,7 @@
 1. **笔记聚类分析**（v1.5.0+）
    - 基于共享标签或互相链接的笔记自动聚类
    - 知识图谱洞察报告（中心节点、桥接节点、孤岛检测）
-2. **`Note.content_text` 完整移除**（v1.5.0）
-   - 重构同步管道，搜索索引构建后不再驻留原始 Markdown
-   - 大型库内存占用减半（见 CODEREVIEW P5 阶段一）
+2. **`Note.content_text` 完整移除** — **已提前到 v1.4.9**
 3. **SSE 实时同步通知**（v1.5.0+）
    - 服务端推送（Server-Sent Events），同步完成后浏览器自动刷新
 4. **WASM 加速**（探索中）
@@ -1009,6 +1121,10 @@
 - ✅ 完成 v1.4.3（图谱增强：全库图谱、节点着色、布局模式、搜索导出）🎉
 - ✅ 完成 v1.4.4（PWA + 无障碍：离线安装、手势、ARIA）🎉
 - ✅ 完成 v1.4.5（运维扩展：自动同步、Webhook、配置热重载、Glob 忽略、指标扩展）🎉
+- 完成 v1.4.6（安全修复：Cookie 动态 Secure、Webhook HMAC、graph.js 调试清理）
+- 完成 v1.4.7（搜索优化：重启不重建索引、share_db 前缀查询、搜索结果增强）
+- 完成 v1.4.8（代码质量：clippy 零警告、search_engine 测试、handlers 集成测试）
+- 完成 v1.4.9（架构优化：content_text 移除、内存减半、CURRENT_VERSION 升至 3）
 
 ### 核心价值主张
 
@@ -1147,5 +1263,5 @@
 
 ---
 
-**最后更新**: 2026-04-13（细化 v1.4.x 子版本计划）  
+**最后更新**: 2026-04-13（补充 v1.4.6-v1.4.9 规划：安全/性能/质量/架构）  
 **维护者**: Obsidian Mirror 开发团队
