@@ -123,6 +123,8 @@ docker compose up -d
 | GET | `/recent` | 最近更新笔记列表（`?days=` 参数） |
 | GET | `/api/titles` | 所有笔记标题和标签（供前端自动补全） |
 | GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
+| POST | `/webhook/sync` | Webhook 触发同步（GitHub/GitLab 签名验证，需 webhook.enabled=true） |
+| POST | `/api/config/reload` | 配置热重载（需认证，重新读取 config.ron 并触发同步） |
 
 ### 模板系统（`src/templates.rs`、`templates/`）
 

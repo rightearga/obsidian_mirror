@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use prometheus::{
-    IntCounter, IntGauge, Histogram, HistogramOpts, Registry, TextEncoder, Encoder,
+    Histogram, HistogramOpts, IntCounter, IntGauge, Registry, TextEncoder, Encoder,
 };
 use actix_web::{get, web, HttpResponse, Responder};
 use std::sync::Arc;
@@ -41,6 +41,20 @@ lazy_static! {
             "HTTP request latencies in seconds"
         ).buckets(vec![0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0])
     ).expect("metric can be created");
+
+    /// 同步操作耗时直方图（秒）
+    pub static ref SYNC_DURATION_SECONDS: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "sync_duration_seconds",
+            "Git sync operation duration in seconds"
+        ).buckets(vec![0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0])
+    ).expect("metric can be created");
+
+    /// 上次同步完成的 Unix 时间戳（秒）
+    pub static ref SYNC_LAST_TIMESTAMP_SECONDS: IntGauge = IntGauge::new(
+        "sync_last_timestamp_seconds",
+        "Unix timestamp of the last completed sync operation"
+    ).expect("metric can be created");
 }
 
 /// 初始化 Prometheus 指标
@@ -53,6 +67,8 @@ pub fn init_metrics() {
     let _ = REGISTRY.register(Box::new(SEARCH_REQUESTS_TOTAL.clone()));
     let _ = REGISTRY.register(Box::new(NOTES_COUNT.clone()));
     let _ = REGISTRY.register(Box::new(HTTP_REQUEST_DURATION.clone()));
+    let _ = REGISTRY.register(Box::new(SYNC_DURATION_SECONDS.clone()));
+    let _ = REGISTRY.register(Box::new(SYNC_LAST_TIMESTAMP_SECONDS.clone()));
 }
 
 /// GET /metrics - Prometheus 指标端点

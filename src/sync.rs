@@ -1,6 +1,7 @@
 // 数据同步逻辑
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use tracing::{info, warn, error};
 
@@ -29,10 +30,16 @@ use crate::persistence::IndexPersistence;
 /// 8. 重建侧边栏树
 /// 9. 增量更新搜索索引
 pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
+    use crate::state::sync_status;
+    use crate::metrics::{SYNC_TOTAL, SYNC_DURATION_SECONDS, SYNC_LAST_TIMESTAMP_SECONDS};
+
     info!("========================================");
     info!("🔄 开始数据同步");
     info!("========================================");
     let sync_start = std::time::Instant::now();
+
+    // 标记同步状态为 running
+    data.sync_status.store(sync_status::RUNNING, Ordering::Relaxed);
 
     // ✅ 步骤 0: 在 Git 同步前，先尝试加载持久化数据（如果内存为空）
     let notes_count_before = data.notes.read().await.len();
@@ -416,10 +423,25 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     info!("✨ 同步完成！");
     info!("  ├─ 笔记总数: {}", note_count);
     info!("  ├─ 总耗时: {:.2}s", total_time.as_secs_f64());
-    info!("  └─ 平均速度: {:.0} 笔记/秒", 
+    info!("  └─ 平均速度: {:.0} 笔记/秒",
           note_count as f64 / total_time.as_secs_f64().max(0.001));
     info!("========================================");
-    
+
+    // 记录同步完成时间和耗时（供 /health 端点和 Prometheus 使用）
+    let now_ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let duration_ms = total_time.as_millis() as u64;
+    data.last_sync_at.store(now_ts, Ordering::Relaxed);
+    data.last_sync_duration_ms.store(duration_ms, Ordering::Relaxed);
+    data.sync_status.store(sync_status::IDLE, Ordering::Relaxed);
+
+    // 更新 Prometheus 指标
+    SYNC_TOTAL.inc();
+    SYNC_DURATION_SECONDS.observe(total_time.as_secs_f64());
+    SYNC_LAST_TIMESTAMP_SECONDS.set(now_ts);
+
     Ok(())
 }
 

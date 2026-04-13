@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::AppState,
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, global_graph_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, global_graph_handler, webhook_sync_handler, config_reload_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -56,7 +56,34 @@ async fn main() -> anyhow::Result<()> {
     
     // 执行初始同步
     perform_initial_sync(&app_state).await;
-    
+
+    // 启动定时自动同步任务（若 sync_interval_minutes > 0）
+    if config.sync_interval_minutes > 0 {
+        let interval_minutes = config.sync_interval_minutes;
+        let state_for_timer = app_state.clone();
+        tokio::spawn(async move {
+            use tokio::time::{interval, Duration};
+            let mut ticker = interval(Duration::from_secs(interval_minutes as u64 * 60));
+            ticker.tick().await; // 跳过第一次立即触发（启动时已执行初始同步）
+            loop {
+                ticker.tick().await;
+                // 尝试获取同步锁，若已在同步中则跳过
+                match state_for_timer.sync_lock.try_lock() {
+                    Ok(_guard) => {
+                        info!("⏰ 定时同步开始（间隔 {} 分钟）", interval_minutes);
+                        if let Err(e) = perform_sync(&state_for_timer).await {
+                            tracing::error!("定时同步失败: {:?}", e);
+                        }
+                    }
+                    Err(_) => {
+                        info!("⏰ 定时同步跳过：另一个同步任务正在进行");
+                    }
+                }
+            }
+        });
+        info!("✅ 定时同步任务已启动（间隔 {} 分钟）", config.sync_interval_minutes);
+    }
+
     // 启动 HTTP 服务器
     let result = start_http_server(app_state, config, auth_system).await;
     
@@ -185,6 +212,8 @@ fn load_config(config_path: &str) -> AppConfig {
                 ignore_patterns: vec![],
                 database: Default::default(),
                 security: Default::default(),
+                sync_interval_minutes: 0,
+                webhook: Default::default(),
             }
         }
     }
@@ -362,6 +391,10 @@ async fn start_http_server(
             .service(recent_page_handler)
             .service(titles_api_handler)
             .service(global_graph_handler)
+            // Webhook 触发同步（需在 config.webhook.enabled=true 时才有效）
+            .route("/webhook/sync", web::post().to(webhook_sync_handler))
+            // 配置热重载（需认证）
+            .route("/api/config/reload", web::post().to(config_reload_handler))
             // 分享链接相关路由
             .route("/api/share/create", web::post().to(create_share_handler))
             .route("/api/share/list", web::get().to(list_shares_handler))

@@ -1,5 +1,6 @@
 // 应用状态定义
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicI64, AtomicU64, AtomicU8};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 
@@ -32,6 +33,19 @@ pub struct AppState {
     pub reading_progress_db: Arc<ReadingProgressDatabase>,
     /// 同步互斥锁：防止并发 /sync 请求导致 Tantivy IndexWriter 冲突和数据竞争
     pub sync_lock: Mutex<()>,
+    /// 上次同步完成时间（Unix 时间戳秒），0 表示从未同步
+    pub last_sync_at: AtomicI64,
+    /// 上次同步耗时（毫秒），0 表示从未同步
+    pub last_sync_duration_ms: AtomicU64,
+    /// 同步状态：0 = idle，1 = running，2 = failed
+    pub sync_status: AtomicU8,
+}
+
+/// 同步状态常量
+pub mod sync_status {
+    pub const IDLE: u8    = 0;
+    pub const RUNNING: u8 = 1;
+    pub const FAILED: u8  = 2;
 }
 
 impl AppState {
@@ -54,6 +68,9 @@ impl AppState {
             share_db,
             reading_progress_db,
             sync_lock: Mutex::new(()),
+            last_sync_at: AtomicI64::new(0),
+            last_sync_duration_ms: AtomicU64::new(0),
+            sync_status: AtomicU8::new(sync_status::IDLE),
         }
     }
 }

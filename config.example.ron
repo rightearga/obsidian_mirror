@@ -40,18 +40,30 @@
     security: (
         // 是否启用用户认证（默认 false）
         auth_enabled: true,
-        
+
         // JWT 密钥（请修改为随机字符串！至少 32 个字符）
         // 可以使用以下命令生成: openssl rand -base64 32
         jwt_secret: "CHANGE_THIS_TO_A_RANDOM_SECRET_KEY_AT_LEAST_32_CHARS",
-        
+
         // Token 有效期（小时，默认 24）
         token_lifetime_hours: 24,
-        
+
         // 默认管理员用户名（仅用于首次初始化）
         default_admin_username: "admin",
-        
+
         // 默认管理员密码（仅用于首次初始化，请立即修改！）
         default_admin_password: "admin",
+    ),
+
+    // 自动同步间隔（分钟），0 = 禁用定时同步（默认 0）
+    // 启用后会在后台定期执行 git pull 并更新索引
+    sync_interval_minutes: 0,
+
+    // Webhook 触发同步（可选，默认禁用）
+    // 启用后可通过 GitHub/GitLab Push Event 自动触发同步
+    webhook: (
+        enabled: false,
+        // 共享密钥：用于验证 GitHub X-Hub-Signature-256 或 GitLab X-Gitlab-Token
+        secret: "CHANGE_THIS_WEBHOOK_SECRET",
     ),
 )

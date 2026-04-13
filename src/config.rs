@@ -19,6 +19,26 @@ pub struct AppConfig {
     // 安全认证配置
     #[serde(default)]
     pub security: SecurityConfig,
+
+    /// 定时自动同步间隔（分钟），0 = 禁用
+    #[serde(default)]
+    pub sync_interval_minutes: u32,
+
+    /// Webhook 触发同步配置
+    #[serde(default)]
+    pub webhook: WebhookConfig,
+}
+
+/// Webhook 配置
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct WebhookConfig {
+    /// 是否启用 Webhook 触发同步端点
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Webhook 共享密钥（用于验证 GitHub/GitLab 推送签名）
+    #[serde(default)]
+    pub secret: String,
 }
 
 /// 数据库配置

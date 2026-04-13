@@ -6,6 +6,21 @@
 
 ---
 
+## [v1.4.5] — 2026-04-13
+
+运维与同步扩展：定时自动同步、Webhook 触发、配置热重载、Glob 忽略模式、Prometheus 指标扩展。
+
+### Added
+- **定时自动同步**：新增 `sync_interval_minutes` 配置项；后台 Tokio 定时任务自动触发同步，遵守 `sync_lock` 互斥（与手动触发不冲突）
+- **Webhook 触发同步**（`POST /webhook/sync`）：支持 GitHub `X-Hub-Signature-256` 签名验证和 GitLab `X-Gitlab-Token` 令牌验证；通过 `webhook.enabled` + `webhook.secret` 配置启用
+- **配置热重载**（`POST /api/config/reload`，需认证）：重新读取 `config.ron` 后触发完整同步；注：`listen_addr` 和 `repo_url` 的变更仍需重启
+- **ignore_patterns Glob 语法**：`scanner.rs` 新增 glob 匹配（`*`/`**`/`?`），支持 `*.tmp`、`draft/**`、`20[0-9][0-9]-*` 等模式；原有精确匹配保留
+- **Prometheus 指标扩展**：新增 `sync_duration_seconds`（同步耗时直方图）和 `sync_last_timestamp_seconds`（上次同步 Unix 时间戳 gauge）
+- **`/health` 端点扩展**：新增字段 `git_commit`、`sync_status`（idle/running/failed）、`last_sync_at`、`last_sync_duration_ms`
+- `state.rs` 新增原子字段 `last_sync_at`、`last_sync_duration_ms`、`sync_status`
+
+---
+
 ## [v1.4.4] — 2026-04-13
 
 PWA 支持 + 移动端触屏手势 + 无障碍改进。

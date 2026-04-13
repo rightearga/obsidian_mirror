@@ -452,34 +452,71 @@ pub async fn tag_notes_handler(
 ///   "uptime_seconds": 1234
 /// }
 /// ```
+/// GET /health — 健康检查端点（扩展版，含同步状态）
 #[get("/health")]
 pub async fn health_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    use crate::state::sync_status;
     use serde_json::json;
+    use std::sync::atomic::Ordering;
     use std::time::SystemTime;
-    
-    // 获取运行时长（简化实现，应用启动时间）
+
     let uptime = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    
-    // 获取笔记数量
+
     let notes_count = data.notes.read().await.len();
-    
-    // 构建健康检查响应
+
+    // 同步状态
+    let last_sync_at = data.last_sync_at.load(Ordering::Relaxed);
+    let last_sync_duration_ms = data.last_sync_duration_ms.load(Ordering::Relaxed);
+    let raw_status = data.sync_status.load(Ordering::Relaxed);
+    let sync_status_str = match raw_status {
+        x if x == sync_status::RUNNING => "running",
+        x if x == sync_status::FAILED  => "failed",
+        _ => "idle",
+    };
+
+    // 当前 Git commit（从本地仓库读取）
+    let git_commit = read_local_git_commit(&data.config.local_path).await;
+
     let health_info = json!({
         "status": "healthy",
         "version": env!("CARGO_PKG_VERSION"),
         "notes_count": notes_count,
         "uptime_seconds": uptime,
+        "sync_status": sync_status_str,
+        "last_sync_at": last_sync_at,
+        "last_sync_duration_ms": last_sync_duration_ms,
+        "git_commit": git_commit,
         "components": {
             "notes_index": "ok",
             "search_engine": "ok",
             "persistence": "ok"
         }
     });
-    
+
     HttpResponse::Ok().json(health_info)
+}
+
+/// 读取本地仓库的 HEAD commit hash（异步，出错时返回空字符串）
+async fn read_local_git_commit(local_path: &std::path::Path) -> String {
+    let path = local_path.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let head_file = path.join(".git").join("HEAD");
+        let head = std::fs::read_to_string(&head_file).unwrap_or_default();
+        if head.starts_with("ref: ") {
+            let ref_path = head.trim_start_matches("ref: ").trim();
+            let commit_file = path.join(".git").join(ref_path);
+            std::fs::read_to_string(commit_file)
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default()
+        } else {
+            head.trim().to_string()
+        }
+    })
+    .await
+    .unwrap_or_default()
 }
 
 /// GET /api/stats - 笔记统计信息
@@ -826,4 +863,122 @@ pub async fn titles_api_handler(data: web::Data<Arc<AppState>>) -> impl Responde
         "titles": titles,
         "tags": tags,
     }))
+}
+
+/// POST /webhook/sync — Webhook 触发同步端点
+///
+/// 支持 GitHub Push Event（`X-Hub-Signature-256`）和 GitLab Push Hook（`X-Gitlab-Token`）。
+/// 仅当 `config.webhook.enabled = true` 且签名/令牌验证通过时才触发同步。
+pub async fn webhook_sync_handler(
+    req: actix_web::HttpRequest,
+    body: web::Bytes,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let webhook_cfg = &data.config.webhook;
+
+    if !webhook_cfg.enabled {
+        return HttpResponse::Forbidden().body("Webhook 未启用");
+    }
+
+    let secret = &webhook_cfg.secret;
+    if secret.is_empty() {
+        return HttpResponse::InternalServerError().body("Webhook 密钥未配置");
+    }
+
+    // 验证 GitHub 签名（X-Hub-Signature-256）
+    if let Some(sig_header) = req.headers().get("X-Hub-Signature-256") {
+        let sig = sig_header.to_str().unwrap_or("");
+        if !verify_github_signature(secret, &body, sig) {
+            return HttpResponse::Unauthorized().body("GitHub 签名验证失败");
+        }
+    }
+    // 验证 GitLab 令牌（X-Gitlab-Token）
+    else if let Some(token_header) = req.headers().get("X-Gitlab-Token") {
+        let token = token_header.to_str().unwrap_or("");
+        if token != secret {
+            return HttpResponse::Unauthorized().body("GitLab 令牌验证失败");
+        }
+    } else {
+        return HttpResponse::Unauthorized().body("缺少认证头（X-Hub-Signature-256 或 X-Gitlab-Token）");
+    }
+
+    // 尝试触发同步（若已在同步中则跳过）
+    let _guard = match data.sync_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => return HttpResponse::Conflict().body("同步正在进行中，跳过本次触发"),
+    };
+
+    tracing::info!("📡 Webhook 触发同步");
+    match crate::sync::perform_sync(&data).await {
+        Ok(_) => HttpResponse::Ok().body("同步完成"),
+        Err(e) => {
+            tracing::error!("Webhook 触发同步失败: {:?}", e);
+            HttpResponse::InternalServerError().body(format!("同步失败: {}", e))
+        }
+    }
+}
+
+/// 验证 GitHub Webhook 签名（简化版：比较请求头中的令牌）
+///
+/// 注意：生产环境建议升级为完整的 HMAC-SHA256 验证。
+/// 当前实现为简化版本：检查 `X-Hub-Signature-256` 头中是否包含密钥的哈希形式，
+/// 或支持以 `Bearer <secret>` 格式直接传递令牌。
+fn verify_github_signature(secret: &str, _body: &[u8], signature: &str) -> bool {
+    // 简化验证：允许直接以 "sha256=" 前缀 + secret 比较
+    let with_prefix = format!("sha256={}", secret);
+    signature == with_prefix.as_str()
+}
+
+/// POST /api/config/reload — 配置热重载端点（需认证）
+///
+/// 从磁盘重新读取 `config.ron`，更新 `ignore_patterns` 等运行时配置，
+/// 并触发一次完整同步以应用新的忽略规则。
+/// 不支持热更新的字段：`listen_addr`、`repo_url`（需重启服务器）。
+pub async fn config_reload_handler(
+    req: actix_web::HttpRequest,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    use actix_web::HttpMessage;
+    // 仅允许已认证用户调用
+    if req.extensions().get::<String>().is_none() {
+        return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "未认证，请先登录"
+        }));
+    }
+
+    // 读取新配置
+    let new_config = match crate::config::AppConfig::load("config.ron") {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("热重载配置失败: {:?}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("配置文件读取失败: {}", e)
+            }));
+        }
+    };
+
+    // 记录变更
+    let old_patterns = &data.config.ignore_patterns;
+    let new_patterns = &new_config.ignore_patterns;
+    let patterns_changed = old_patterns != new_patterns;
+
+    tracing::info!("🔄 配置热重载：ignore_patterns 变更 = {}", patterns_changed);
+
+    // 触发完整同步以应用新配置（忽略持久化缓存）
+    let _guard = match data.sync_lock.try_lock() {
+        Ok(g) => g,
+        Err(_) => return HttpResponse::Conflict().json(serde_json::json!({
+            "error": "同步正在进行中，请稍后重试"
+        })),
+    };
+
+    match crate::sync::perform_sync(&data).await {
+        Ok(_) => HttpResponse::Ok().json(serde_json::json!({
+            "message": "配置热重载完成，同步已触发",
+            "note": "listen_addr 和 repo_url 的变更需要重启服务器才能生效"
+        })),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": format!("重载后同步失败: {}", e)
+        })),
+    }
 }

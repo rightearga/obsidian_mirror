@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.4 🎉  
+**当前版本**: v1.4.5 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -847,41 +847,40 @@
 
 ---
 
-### ✨ v1.4.5 (计划中 - 运维与同步扩展)
+### ✅ v1.4.5 (已发布 - 2026-04-13)
 
-**主题**: 自动同步 + Webhook + 配置增强  
-**预计发布**: 2026-12 月
+**主题**: 自动同步 + Webhook + 配置增强
 
 #### 自动同步
 
-- [ ] **定时自动同步**
-  - 新增配置项 `sync_interval_minutes: u32`（0 = 禁用，默认 0）
-  - 后台 Tokio 定时任务按间隔自动调用 `perform_sync`，遵守 `sync_lock` 互斥
-  - `/health` 新增字段：`last_sync_at`、`next_sync_at`、`sync_status`
-- [ ] **Webhook 触发同步**
-  - 新增 `POST /webhook/sync` 端点（需配置共享密钥）
-  - 支持 GitHub Push Event 签名验证（`X-Hub-Signature-256`）
-  - 支持 GitLab Push Hook 令牌验证（`X-Gitlab-Token`）
-  - 配置项：`webhook_secret: "..."` + `webhook_enabled: bool`
+- ✅ **定时自动同步**：`sync_interval_minutes` 配置；Tokio 定时任务遵守 `sync_lock` 互斥
+- ✅ **Webhook 触发同步**（`POST /webhook/sync`）：GitHub HMAC 签名验证 + GitLab 令牌验证；`webhook.enabled/secret` 配置
 
 #### 配置扩展
 
-- [ ] **配置热重载**
-  - 新增 `POST /api/config/reload` 端点（需认证）
-  - 重新读取 `config.ron`，更新 `ignore_patterns` 等运行时配置
-  - 触发持久化缓存失效并重新同步
-  - 不支持热更新：`listen_addr`（需重启）、`repo_url`（需重启）
-- [ ] **ignore_patterns Glob 语法**
-  - 当前仅支持名称匹配，扩展为 glob（`*.tmp`、`draft/**`、`20[0-9][0-9]-*`）
+- ✅ **配置热重载**（`POST /api/config/reload`）：重新读取 config.ron 后触发同步；注 listen_addr/repo_url 需重启
+- ✅ **ignore_patterns Glob 语法**：`scanner.rs` 支持 `*`/`**`/`?`（5 个新测试）
 
 #### 监控增强
 
-- [ ] **Prometheus 指标扩展**
-  - `sync_duration_seconds` 同步耗时直方图（histogram）
-  - `sync_last_timestamp_seconds` 上次同步 Unix 时间戳（gauge）
-  - `notes_total_by_tag` 各标签笔记数（gauge，label=tag_name）
-- [ ] **`/health` 端点扩展**
-  - 新增：`git_commit`、`last_sync_at`、`last_sync_duration_ms`、`sync_status`（idle / running / failed）
+- ✅ **Prometheus 指标扩展**：`sync_duration_seconds` 直方图 + `sync_last_timestamp_seconds` gauge
+- ⚠ **`notes_total_by_tag`**：需 GaugeVec（带标签），延至后续版本
+- ✅ **`/health` 端点扩展**：新增 `git_commit`、`sync_status`、`last_sync_at`、`last_sync_duration_ms`
+
+#### 实际交付物
+
+- 修改文件：`src/config.rs`（sync_interval_minutes + WebhookConfig）
+- 修改文件：`src/state.rs`（last_sync_at/sync_status/last_sync_duration_ms 原子字段）
+- 修改文件：`src/metrics.rs`（sync_duration_seconds + sync_last_timestamp_seconds）
+- 修改文件：`src/sync.rs`（记录同步状态和指标）
+- 修改文件：`src/scanner.rs`（glob 支持 + 5 个测试）
+- 修改文件：`src/handlers.rs`（health 扩展 + webhook + config reload）
+- 修改文件：`src/main.rs`（定时任务 + 路由注册）
+- 修改文件：`config.example.ron`（新配置项说明）
+
+#### 测试结果
+
+- 全量测试：**79/79 通过**（+5 scanner glob 测试）
 
 ---
 
@@ -1009,7 +1008,7 @@
 **Q4 (10-12月)**: 深度功能期
 - ✅ 完成 v1.4.3（图谱增强：全库图谱、节点着色、布局模式、搜索导出）🎉
 - ✅ 完成 v1.4.4（PWA + 无障碍：离线安装、手势、ARIA）🎉
-- 完成 v1.4.5（运维扩展：自动同步、Webhook、配置热重载）
+- ✅ 完成 v1.4.5（运维扩展：自动同步、Webhook、配置热重载、Glob 忽略、指标扩展）🎉
 
 ### 核心价值主张
 
