@@ -441,8 +441,7 @@ impl SearchEngine {
         Ok(results)
     }
 
-    /// 强制刷新 IndexReader 缓存（仅用于测试，确保 rebuild_index 后立即可搜索）
-    #[cfg(test)]
+    /// 强制刷新 IndexReader 缓存（测试/基准测试使用，确保 rebuild_index 后立即可搜索）
     pub fn reload_reader(&self) {
         self.reader.reload().expect("reload reader failed");
     }
