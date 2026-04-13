@@ -53,6 +53,12 @@ docker compose up -d
         token_lifetime_hours: 24,
         default_admin_username: "admin",
         default_admin_password: "admin",
+        force_https_cookie: false,     // v1.4.6：仅 HTTPS 时设为 true
+    ),
+    sync_interval_minutes: 0,          // v1.4.5：定时同步（0=禁用）
+    webhook: (
+        enabled: false,
+        secret: "CHANGE_THIS",
     ),
 )
 ```
@@ -70,8 +76,10 @@ docker compose up -d
 3. **并行 Markdown 处理**（`src/sync.rs: process_markdown_files`）——使用 Rayon 线程池，对每个文件调用 `MarkdownProcessor::process`
 4. **索引构建**（`src/indexer.rs`）——链接索引、反向链接（基于 `Note.outgoing_links` 全量重建）、标签索引、资源文件索引（图片/PDF）
 5. **侧边栏重建**（`src/sidebar.rs`）——生成 `SidebarNode` 树形结构
-6. **Tantivy 搜索索引更新**（`src/search_engine.rs`）——全文检索 + CJK 中文分词；`IncrementalUpdate` 时调用 `update_documents` 增量更新，`InitialClone` 时全量重建
+6. **Tantivy 搜索索引更新**（`src/search_engine.rs`）——全文检索 + CJK 中文分词；`IncrementalUpdate` 时调用 `update_documents`（只传变更文件内容），`InitialClone` 时全量重建；`NoChange` + 持久化命中且 Tantivy 有内容时跳过重建
 7. **持久化**（`src/persistence.rs`）——将索引以 Git commit hash 为键保存到 `redb`；笔记按 1000 条分批写入，metadata 最后提交；下次启动若 commit 未变则直接恢复
+
+**注：** v1.4.9 起 `Note.content_text` 已移除，原始 Markdown 内容在处理期直接传给 Tantivy 后丢弃，不再驻留内存。搜索索引由 Tantivy 磁盘索引维持。`ProcessedNote = (path, Note, outgoing_links, Option<content>)`，`Option<String>` 为 `Some` 表示新处理，`None` 表示缓存复用。
 
 ### 应用状态（`src/state.rs`）
 
@@ -141,14 +149,14 @@ docker compose up -d
 
 ### 持久化（`src/persistence.rs`）
 
-使用 **redb**（嵌入式键值存储）。`IndexPersistence` 用 **postcard**（二进制格式）序列化所有内存索引。启动时若已保存的 Git commit hash 与当前 HEAD 匹配，则直接恢复索引（跳过全量重处理）。以下情况会使缓存失效：Git commit 变更、`ignore_patterns` 变更、`CURRENT_VERSION`（当前为 **2**）升级。
+使用 **redb**（嵌入式键值存储）。`IndexPersistence` 用 **postcard**（二进制格式）序列化所有内存索引。启动时若已保存的 Git commit hash 与当前 HEAD 匹配，则直接恢复索引（跳过全量重处理）。以下情况会使缓存失效：Git commit 变更、`ignore_patterns` 变更、`CURRENT_VERSION`（当前为 **3**）升级。
 
 写入策略：笔记按 1000 条/事务分批提交，metadata 最后写入（作为原子完成标记）；中途崩溃时 metadata 未写入，下次启动安全触发全量重建。
 
 ### 关键依赖
 
 - **actix-web 4** — HTTP 服务器与路由
-- **tantivy** — 全文搜索索引（存储于 `{local_path}/.search_index/`）
+- **tantivy** — 全文搜索索引（v1.4.5 起存储于 `{index_db_path.parent()}/.search_index/`，独立于 `local_path`）
 - **jieba-rs** — 中文分词器
 - **redb** — 嵌入式数据库，用于持久化索引、认证、分享链接、阅读进度
 - **askama** — 编译期 HTML 模板

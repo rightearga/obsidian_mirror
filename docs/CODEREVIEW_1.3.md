@@ -3,7 +3,7 @@
 **审查日期：** 2026-04-13  
 **审查版本：** v1.3.0  
 **审查范围：** `src/` 全部 27 个 `.rs` 文件  
-**最后更新：** 2026-04-13（修复状态同步至 v1.3.4）
+**最后更新：** 2026-04-13（修复状态同步至 v1.4.9）
 
 ---
 
@@ -22,7 +22,7 @@
 | P1 | 性能 | 🟠 中 | ✅ 已修复 | v1.3.3 |
 | P2 | 性能 | 🟠 中 | ✅ 已修复 | v1.3.3 |
 | P3 | 性能 | 🟠 中 | ✅ 已修复 | v1.3.3 |
-| P4 | 性能 | 🟡 低 | ⚠️ 部分修复 | v1.3.3 |
+| P4 | 性能 | 🟡 低 | ✅ 已修复 | v1.4.7 |
 | P5 | 性能 | 🟡 低 | ✅ 已修复 | v1.4.9 |
 | Q1 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.4 |
 | Q2 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.1 |
@@ -32,7 +32,7 @@
 | Q6 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.4 |
 | Q7 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.4 |
 
-**修复统计：** 16/20 已修复，2/20 部分修复，2/20 延期/已知风险
+**修复统计：** 18/20 已修复，0/20 部分修复，2/20 延期/已知风险（B3 单进程 TOCTOU、Q4 FileIndexBuilder 持久化）
 
 ---
 
@@ -265,18 +265,18 @@ let is_public = public_paths.iter().any(|p| path.starts_with(p));
 
 ---
 
-### ⚠️ P4 - `get_user_shares` 和 `get_user_history` 全表扫描（部分修复 v1.3.3）
+### ✅ P4 - `get_user_shares` 和 `get_user_history` 全表扫描（已修复 v1.4.7）
 
 **文件：** `src/share_db.rs:156-172`，`src/reading_progress_db.rs:196-221`  
 **严重性：** 低
 
 两个方法都遍历整个表并在内存中过滤。
 
-> **⚠️ 部分修复（v1.3.3）**
+> **✅ 完整修复**
 >
-> `src/reading_progress_db.rs` `get_user_progress` 和 `get_user_history` 已改用 redb `range()` 前缀查询（键格式 `{username}:{rest}`，范围 `"user:"..="user;"`），消除全表扫描。
+> `src/reading_progress_db.rs`（v1.3.3）：`get_user_progress` 和 `get_user_history` 已改用 redb `range()` 前缀查询（键格式 `{username}:{rest}`，范围 `"user:"..="user;"`），消除全表扫描。
 >
-> `src/share_db.rs` `get_user_shares` 保持全表扫描：`ShareLink` 主键为纯 UUID token（供分享链接访问使用），不含用户名前缀，无法直接使用前缀范围查询。由于用户分享数量通常极少（< 100），全表扫描对实际性能影响可忽略。若未来有大量分享需求，可引入独立的 `user_shares` 二级索引表。
+> `src/share_db.rs`（v1.4.7）：主键改为 `{creator}:{token}` 复合键；新增 `TOKEN_LOOKUP_TABLE` 反查表实现 O(1) token 反查；`get_user_shares` 改用 `range()` 前缀查询，彻底消除全表扫描。
 
 ---
 
@@ -463,15 +463,14 @@ REGISTRY.register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
 | P2 - 近期修复 | P2 | 每次搜索创建新 Tantivy reader | search_engine.rs | ✅ v1.3.3 |
 | P3 - 版本迭代 | P3 | 搜索索引增量更新支持 | sync.rs, search_engine.rs | ✅ v1.3.3 |
 | P3 - 版本迭代 | P4 | reading_progress 全表扫描 | reading_progress_db.rs | ✅ v1.3.3 |
-| P3 - 版本迭代 | P5 | graph.rs content_text 解析 | graph.rs | ✅ v1.3.3 |
+| P3 - 版本迭代 | P4 (share) | share_db 全表扫描 | share_db.rs | ✅ v1.4.7 |
+| P3 - 版本迭代 | P5 | Note.content_text 内存占用 | domain.rs, sync.rs | ✅ v1.4.9 |
 | P3 - 版本迭代 | Q1 | schema_matches 检查字段类型 | search_engine.rs | ✅ v1.3.4 |
 | P3 - 版本迭代 | Q2 | 注释掉的 use 声明 | markdown.rs | ✅ v1.3.1 |
 | P3 - 版本迭代 | Q3 | 历史记录自动清理 | reading_progress_db.rs | ✅ v1.3.4 |
 | P3 - 版本迭代 | Q5 | truncate_html 截断包含 HTML 标签 | handlers.rs | ✅ v1.3.4 |
 | P3 - 版本迭代 | Q6 | 持久化大型笔记库分批写入 | persistence.rs | ✅ v1.3.4 |
 | P3 - 版本迭代 | Q7 | metrics expect 用法 | metrics.rs | ✅ v1.3.4 |
-| 延期 | P4(share) | share_db 全表扫描 | share_db.rs | ⚠️ 用户分享极少，可接受 |
-| 延期 | P5(content) | Note.content_text 内存占用 | domain.rs, sync.rs | ⚠️ 架构改动较大，后续版本 |
 | 延期 | Q4 | FileIndexBuilder 持久化 | indexer.rs | ⬜ 重建速度快，优先级低 |
 | 延期 | B3 | TOCTOU 问题 | sync.rs | ⬜ 单进程设计，风险可接受 |
 
@@ -485,7 +484,7 @@ REGISTRY.register(Box::new(HTTP_REQUESTS_TOTAL.clone()))
 
 2. **持久化缓存**（`persistence.rs`）：以 Git commit hash + ignore_patterns 为缓存键，重启后秒级恢复无需重新解析，方案可靠。v1.3.4 进一步改进为分批写入 + 元数据最后提交的原子写入设计。
 
-3. **模块化拆分**（`indexer.rs`）：`FileIndexBuilder`、`BacklinkBuilder`、`TagIndexBuilder`、`SearchIndexDataExtractor` 职责单一，易于测试和修改。
+3. **模块化拆分**（`indexer.rs`）：`FileIndexBuilder`、`BacklinkBuilder`、`TagIndexBuilder`、`extract_search_data()` 职责单一，易于测试和修改。（v1.4.9：`SearchIndexDataExtractor` 已移除，content 直接从 `ProcessedNote` 传递）
 
 4. **错误处理**：全面使用 `anyhow::Result` 和 `?` 操作符，错误链清晰，无大量 `unwrap`（少数 `lazy_static!` 初始化除外）。
 
