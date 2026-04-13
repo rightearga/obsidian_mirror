@@ -160,12 +160,16 @@ git config --file .gitconfig user.email "your@email.com"
         "草稿",
         ".obsidian"
     ],
-    persistence_db_path: "./index.db",
+    database: (
+        index_db_path: "./index.db",
+        auth_db_path: "./auth.db",
+        share_db_path: "./share.db",
+        reading_progress_db_path: "./reading_progress.db",
+    ),
     security: (
         auth_enabled: true,
         jwt_secret: "YOUR_RANDOM_SECRET_KEY_HERE",
         token_lifetime_hours: 24,
-        auth_db_path: "./auth.db",
         default_admin_username: "admin",
         default_admin_password: "admin123",
     ),
@@ -178,14 +182,17 @@ git config --file .gitconfig user.email "your@email.com"
 - `listen_addr`: Web 服务器监听地址和端口
 - `workers`: 工作线程数（默认为 CPU 核心数）
 - `ignore_patterns`: 忽略的文件夹/文件名（不区分大小写）
-- `persistence_db_path`: 索引持久化数据库路径（默认 `./index.db`）
+- `database`: 数据库路径配置（均有默认值，可省略）
+  - `index_db_path`: 索引持久化数据库（默认 `./index.db`）
+  - `auth_db_path`: 用户认证数据库（默认 `./auth.db`）
+  - `share_db_path`: 分享链接数据库（默认 `./share.db`）
+  - `reading_progress_db_path`: 阅读进度数据库（默认 `./reading_progress.db`）
 - `security`: 认证配置
   - `auth_enabled`: 是否启用用户认证
-  - `jwt_secret`: JWT 密钥（务必修改）
-  - `token_lifetime_hours`: 令牌有效期（小时）
-  - `auth_db_path`: 用户数据库路径
-  - `default_admin_username`: 默认管理员用户名
-  - `default_admin_password`: 默认管理员密码
+  - `jwt_secret`: JWT 密钥（务必修改，建议 `openssl rand -base64 32` 生成）
+  - `token_lifetime_hours`: 令牌有效期（小时，默认 24）
+  - `default_admin_username`: 默认管理员用户名（仅首次初始化使用）
+  - `default_admin_password`: 默认管理员密码（首次登录后请立即修改）
 
 ### 构建
 
@@ -312,25 +319,43 @@ fn main() {
 ```
 obsidian_mirror/
 ├── src/
-│   ├── main.rs          # 主服务器和路由
-│   ├── config.rs        # 配置加载
-│   ├── git.rs           # Git 同步逻辑
-│   ├── scanner.rs       # 文件扫描器
-│   ├── markdown.rs      # Markdown 处理
-│   └── domain.rs        # 数据模型
-├── templates/           # HTML 模板
-│   ├── layout.html      # 基础布局
-│   ├── page.html        # 笔记页面
-│   └── index.html       # 空白首页
-├── static/              # 静态资源
-│   └── style.css        # 样式表
-├── config.ron           # 配置文件（需手动创建）
-├── config.example.ron   # 配置文件模板
-├── Dockerfile           # Docker 镜像构建文件
-├── docker-compose.yml   # Docker Compose 配置
-├── .dockerignore        # Docker 构建忽略文件
-├── Cargo.toml           # Rust 依赖配置
-└── README.md            # 本文件
+│   ├── main.rs                      # 服务器启动、路由注册、日志初始化
+│   ├── lib.rs                       # 模块导出
+│   ├── config.rs                    # 配置加载（RON 格式）
+│   ├── domain.rs                    # 核心数据结构（Note、SidebarNode 等）
+│   ├── state.rs                     # 全局应用状态（AppState）
+│   ├── sync.rs                      # 同步管道（Git → 扫描 → 处理 → 索引）
+│   ├── git.rs                       # Git 客户端（clone/pull/diff）
+│   ├── scanner.rs                   # 文件扫描（遍历 .md 文件）
+│   ├── markdown.rs                  # Markdown 处理（WikiLink、图片、TOC）
+│   ├── indexer.rs                   # 索引构建（链接、反向链接、标签、文件）
+│   ├── search_engine.rs             # Tantivy 全文搜索引擎
+│   ├── persistence.rs               # 索引持久化（redb + postcard）
+│   ├── handlers.rs                  # 通用 HTTP 处理器
+│   ├── auth.rs / auth_db.rs         # JWT 认证 + 用户数据库
+│   ├── auth_middleware.rs / auth_handlers.rs  # 认证中间件和接口
+│   ├── share_db.rs / share_handlers.rs        # 分享链接
+│   ├── reading_progress_db.rs / reading_progress_handlers.rs  # 阅读进度
+│   ├── sidebar.rs / graph.rs / tags.rs        # 侧边栏、图谱、标签工具
+│   ├── templates.rs                 # Askama 模板结构体定义
+│   ├── metrics.rs                   # Prometheus 指标
+│   └── error.rs                     # 统一错误类型
+├── templates/                       # Askama HTML 模板（编译期渲染）
+│   ├── layout.html                  # 基础布局（所有页面继承）
+│   ├── page.html                    # 笔记页面
+│   ├── index.html                   # 空知识库首页
+│   ├── login.html / change_password.html
+│   ├── tags_list.html / tag_notes.html
+│   └── share.html
+├── static/
+│   ├── css/                         # 模块化样式（variables、layout、markdown 等）
+│   └── js/                          # 模块化脚本（search、graph、toc、i18n 等）
+├── docs/
+│   ├── ROADMAP.md                   # 版本规划
+│   └── CHANGELOG.md                 # 变更历史
+├── config.example.ron               # 配置文件模板
+├── Dockerfile / docker-compose.yml
+└── Cargo.toml
 ```
 
 ## 开发
@@ -442,9 +467,12 @@ docker-compose logs -f obsidian_mirror
 **阅读进度端点**：
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/reading-progress/save` | 保存阅读进度 |
-| GET | `/api/reading-progress/{note_path}` | 获取笔记阅读进度 |
-| GET | `/api/reading-progress/history` | 获取阅读历史 |
+| POST | `/api/reading/progress` | 保存阅读进度 |
+| GET | `/api/reading/progress` | 获取所有笔记进度列表 |
+| GET | `/api/reading/progress/{note_path}` | 获取指定笔记阅读进度 |
+| DELETE | `/api/reading/progress/{note_path}` | 删除指定笔记阅读进度 |
+| POST | `/api/reading/history` | 添加阅读历史记录 |
+| GET | `/api/reading/history` | 获取阅读历史列表 |
 
 ## 注意事项
 
@@ -481,150 +509,7 @@ docker-compose logs -f obsidian_mirror
 
 ## 更新日志
 
-### v1.3.0 (2026-02-01) 🎉
-**主题**: 高级搜索功能
-
-**新增功能**：
-- ✨ **高级搜索过滤**: 按标签、文件夹、日期范围过滤搜索结果
-  - 标签过滤：支持多个标签（逗号分隔），OR 逻辑匹配
-  - 文件夹过滤：按文件夹路径精确筛选
-  - 日期过滤：按修改时间范围筛选（开始日期-结束日期）
-  - 可折叠的高级过滤面板，不占用空间
-- ✨ **搜索结果排序**: 按相关度或最新修改时间排序
-- ✨ **实时过滤**: 输入即刻生效，无需点击搜索按钮
-- ✨ **清除过滤**: 一键清除所有过滤条件
-- ✨ **分享链接生成**: 创建带过期时间的笔记分享链接
-  - 支持自定义过期时间（1小时-30天）
-  - 分享链接管理界面
-  - 访问统计和历史记录
-- ✨ **阅读进度跟踪**: 自动记录和恢复阅读位置
-  - 实时保存滚动位置
-  - 刷新页面自动恢复
-  - 阅读历史记录
-
-**后端改进**：
-- 索引优化：标签和文件夹字段加入搜索索引
-- 查询组合：使用 Tantivy BooleanQuery 组合多个条件
-- 日期范围查询：RangeQuery 实现时间范围过滤
-- API 扩展：新增 tags、folder、date_from、date_to 参数
-- 数据库配置统一：集中管理 4 个数据库路径
-- 分享链接和阅读进度数据库（redb 持久化）
-
-**前端改进**：
-- 高级过滤面板 UI（+128 行 CSS）
-- 过滤交互逻辑（+122 行 JavaScript）
-- 日期选择器、标签输入框、文件夹路径输入
-- 响应式设计，支持深色/浅色主题
-- 分享链接管理界面
-- 阅读进度自动保存和恢复
-
-**技术亮点**：
-- 标签字段支持多值索引
-- 文件夹路径自动提取
-- Unix 时间戳精确匹配
-- 保持向后兼容
-- redb 嵌入式数据库轻量高效
-
-### v1.2.0 (2026-01-31) 🎉
-**主题**: 体验优化
-
-**新增功能**：
-- ✨ **多语言支持**: 中文/English 切换，自动保存语言偏好，全局生效
-- ✨ **笔记预览**: 悬浮卡片预览链接内容，快速查看不跳转，前 200 字预览
-- ✨ **设置面板**: 统一的用户偏好设置（语言、字体、主题等）
-
-**移动端优化**：
-- ✨ **TOC 右侧滑入**: 移动端 TOC 改为右侧滑入侧边栏，操作更直观
-- ✨ **状态栏完善**: 移动端显示完整状态信息（字数、行数、时间）
-- ✨ 紧凑布局优化：字体、图标、间距调整适配小屏幕
-
-**桌面端优化**：
-- ✨ **TOC 收起/展开**: 桌面端 TOC 可一键收起/展开，节省空间
-- ✨ **内容自适应**: 移除固定宽度限制，内容区自动适配屏幕宽度
-- ✨ 表格溢出处理：防止表格与目录重叠
-
-**用户体验**：
-- ✨ 设置页面统一管理用户偏好
-- ✨ 移除内容宽度设置项（改为自适应）
-- ✨ 同步状态调试日志（排查同步问题）
-
-**Bug 修复**：
-- 🐛 修复移动端 TOC 侧边栏不显示问题
-- 🐛 修复 ignore_patterns 配置变更不生效
-- 🐛 修复表格溢出导致布局问题
-
-### v1.1.0 (2026-01-31)
-**主题**: 功能增强
-
-**新增功能**：
-- ✨ **最近访问笔记**: localStorage 本地存储，最多 10 条记录，相对时间显示
-- ✨ **收藏夹功能**: 星标收藏，侧边栏管理，快速访问重要笔记
-- ✨ **笔记统计面板**: 3 个统计卡片（笔记总数、标签数量、最近更新）
-- ✨ **标签持久化修复**: 修复标签索引持久化缺失导致的数据丢失问题
-
-**用户体验**：
-- ✨ 侧边栏新增统计、最近访问、收藏夹三个面板
-- ✨ 笔记页面添加收藏按钮（星标图标）
-- ✨ Toast 提示消息（收藏/取消收藏反馈）
-- ✨ 完整的移动端响应式适配
-
-**Bug 修复**：
-- 🐛 修复标签索引持久化缺失问题
-- 🐛 修正标签按钮图标（改为标签图标）
-
-### v1.0.0 (2026-01-31) 🎉
-**主题**: 生产就绪
-
-**核心功能**：
-- ✨ **增量同步优化**: Git diff 检测变更，仅处理修改的文件，性能提升 10-100 倍
-- ✨ **索引持久化**: postcard + redb 持久化笔记索引，重启恢复速度提升 30-120 倍
-- ✨ **用户认证**: JWT 令牌认证，bcrypt 密码加密，修改密码功能
-
-**界面优化**：
-- ✨ **侧边栏增强**: 默认 320px 宽度，可拖动调整大小（200-600px），宽度记忆
-- ✨ **滚动条统一**: 所有滚动区域统一样式，自动适配 Dark 主题
-
-**运维功能**：
-- ✨ **健康检查**: `/health` 端点，适配 Docker/Kubernetes
-- ✨ **指标暴露**: `/metrics` Prometheus 格式指标
-- ✨ **日志管理**: 分级文件输出，每日轮转
-- ✨ **优雅关闭**: 捕获信号，保存状态，等待请求完成
-
-**质量保证**：
-- ✨ **单元测试**: 37 个测试覆盖核心逻辑（100% 通过）
-- ✨ **错误处理**: 自定义 AppError 类型，统一错误处理
-
-### v0.10.0 (2026-01-29)
-- ✨ 实现关系图谱可视化（Vis.js）
-- ✨ 支持 1-3 层深度关系展示
-- ✨ 交互式节点（点击跳转、拖拽移动）
-- ✨ 物理引擎动画效果
-
-### v0.9.0 (2026-01-29)
-- ✨ 添加笔记目录（TOC）自动生成
-- ✨ 浮动 TOC 支持（右侧固定）
-- ✨ 滚动高亮当前章节
-- ✨ 添加面包屑导航
-- ✨ 代码模块化（独立 JS/CSS 文件）
-
-### v0.8.0 (2026-01-29)
-- ✨ **全文搜索**: Tantivy 引擎，中文分词，关键词高亮
-- ✨ **标签系统**: Frontmatter 和 hashtag 标签，标签云可视化
-- ✨ **搜索历史**: 记录搜索历史
-- ✨ 快捷键支持（Ctrl+K / Cmd+K）
-- ✨ 性能优化：后台异步索引构建
-
-### v0.7.1 (2026-01-29)
-- ✨ 界面文本全面中文化
-- ✨ 移动端和桌面端侧边栏滚动位置记忆
-- 🐛 修复移动端侧边栏交互问题
-- 🐛 修复侧边栏多行文本对齐和缩进问题
-
-### v0.7.0
-- ✨ 添加图片和附件支持
-- ✨ 支持 WikiLinks 图片语法 `![[图片.png]]`
-- ✨ 支持 Markdown 图片相对路径
-- ✨ 完整的移动端响应式设计
+完整的版本变更历史请查看 [docs/CHANGELOG.md](docs/CHANGELOG.md)。
 
 ## 常见问题
 
