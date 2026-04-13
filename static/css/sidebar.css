@@ -455,3 +455,32 @@ body.sidebar-collapsed .sidebar-resizer {
 .sidebar-tree::-webkit-scrollbar-thumb:hover {
     background-color: var(--text-muted);
 }
+
+/* ---- 笔记发现面板（v1.4.2） ---- */
+.discovery-panel {
+    display: flex;
+    gap: 4px;
+    padding: 6px 10px 8px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+
+.discovery-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border-radius: 5px;
+    background: var(--button-bg);
+    color: var(--text-muted);
+    font-size: 12px;
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+}
+
+.discovery-btn:hover {
+    background: var(--button-hover-bg);
+    color: var(--text-color);
+    text-decoration: none;
+}

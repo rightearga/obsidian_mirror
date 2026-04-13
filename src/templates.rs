@@ -56,3 +56,27 @@ pub struct ShareTemplate<'a> {
     pub created_at: &'a str,
     pub visit_count: u32,
 }
+
+/// 孤立笔记列表模板（无出链且无入链的笔记）
+#[derive(Template)]
+#[template(path = "orphans.html")]
+pub struct OrphansTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+    /// (笔记标题, 相对路径) 列表
+    pub orphans: &'a [(String, String)],
+}
+
+/// 最近更新笔记列表模板（按修改时间降序）
+#[derive(Template)]
+#[template(path = "recent_notes_page.html")]
+pub struct RecentNotesPageTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+    /// (笔记标题, 相对路径, mtime Unix 时间戳) 列表
+    pub notes: &'a [(String, String, i64)],
+    /// 展示范围（天数）
+    pub days: u64,
+}

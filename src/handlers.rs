@@ -653,3 +653,147 @@ fn truncate_html(html: &str, max_chars: usize) -> String {
     let truncated: String = text.chars().take(max_chars).collect();
     format!("{}...", truncated)
 }
+
+/// GET /orphans — 孤立笔记页面（无任何出链且无入链的笔记列表）
+///
+/// 孤立笔记定义：`outgoing_links` 为空 且 在 `backlinks` 中无对应入链
+#[get("/orphans")]
+pub async fn orphans_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    use crate::templates::OrphansTemplate;
+
+    let notes = data.notes.read().await;
+    let backlinks = data.backlinks.read().await;
+    let sidebar = data.sidebar.read().await;
+    let flat_sidebar = crate::sidebar::flatten_sidebar(&sidebar);
+
+    // 孤立笔记：无出链 且 无人链接到它
+    let mut orphan_list: Vec<(String, String)> = notes
+        .values()
+        .filter(|note| {
+            note.outgoing_links.is_empty() && !backlinks.contains_key(&note.title)
+        })
+        .map(|note| (note.title.clone(), note.path.clone()))
+        .collect();
+    orphan_list.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let empty_backlinks: Vec<String> = Vec::new();
+    let tmpl = OrphansTemplate {
+        title: "孤立笔记",
+        sidebar: &flat_sidebar,
+        backlinks: &empty_backlinks,
+        orphans: &orphan_list,
+    };
+
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+        Err(e) => HttpResponse::InternalServerError().body(format!("模板渲染错误: {}", e)),
+    }
+}
+
+/// GET /random — 随机跳转到一篇笔记
+///
+/// 从当前笔记列表中随机选择一篇并重定向到 `/doc/{path}`
+#[get("/random")]
+pub async fn random_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    let notes = data.notes.read().await;
+
+    if notes.is_empty() {
+        return HttpResponse::ServiceUnavailable().body("笔记库尚未加载，请稍后再试");
+    }
+
+    // 使用当前时间戳作为随机种子（无需额外依赖）
+    let idx = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos() as usize)
+        .unwrap_or(0)
+        % notes.len();
+
+    let path = notes.values().nth(idx).map(|n| n.path.clone());
+    drop(notes);
+
+    match path {
+        Some(p) => {
+            let encoded = percent_encoding::utf8_percent_encode(&p, percent_encoding::NON_ALPHANUMERIC).to_string();
+            HttpResponse::Found()
+                .append_header(("Location", format!("/doc/{}", encoded)))
+                .finish()
+        }
+        None => HttpResponse::ServiceUnavailable().body("无法选择随机笔记"),
+    }
+}
+
+/// GET /recent — 最近更新笔记页面（按修改时间降序）
+///
+/// 查询参数 `days`（可选，默认 30）：展示最近 N 天内修改的笔记
+#[derive(Debug, serde::Deserialize)]
+pub struct RecentQuery {
+    #[serde(default = "default_recent_days")]
+    pub days: u64,
+}
+
+fn default_recent_days() -> u64 {
+    30
+}
+
+#[get("/recent")]
+pub async fn recent_page_handler(
+    query: web::Query<RecentQuery>,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    use crate::templates::RecentNotesPageTemplate;
+    use std::time::{SystemTime, UNIX_EPOCH, Duration};
+
+    let days = query.days.clamp(1, 365);
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(days * 24 * 3600))
+        .unwrap_or(UNIX_EPOCH);
+
+    let notes = data.notes.read().await;
+    let sidebar = data.sidebar.read().await;
+    let flat_sidebar = crate::sidebar::flatten_sidebar(&sidebar);
+
+    // 收集在 cutoff 之后修改的笔记，按修改时间降序
+    let mut recent: Vec<(String, String, i64)> = notes
+        .values()
+        .filter(|n| n.mtime > cutoff)
+        .map(|n| {
+            let mtime_ts = n.mtime
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            (n.title.clone(), n.path.clone(), mtime_ts)
+        })
+        .collect();
+    recent.sort_by(|a, b| b.2.cmp(&a.2)); // 降序
+
+    let empty_backlinks: Vec<String> = Vec::new();
+    let tmpl = RecentNotesPageTemplate {
+        title: &format!("最近 {} 天更新的笔记", days),
+        sidebar: &flat_sidebar,
+        backlinks: &empty_backlinks,
+        notes: &recent,
+        days,
+    };
+
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+        Err(e) => HttpResponse::InternalServerError().body(format!("模板渲染错误: {}", e)),
+    }
+}
+
+/// GET /api/titles — 返回所有笔记标题和标签，供前端自动补全使用
+///
+/// 前端在首次搜索框聚焦时获取，缓存于 sessionStorage 中。
+#[get("/api/titles")]
+pub async fn titles_api_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    let notes = data.notes.read().await;
+    let tag_index = data.tag_index.read().await;
+
+    let titles: Vec<&str> = notes.values().map(|n| n.title.as_str()).collect();
+    let tags: Vec<&str> = tag_index.keys().map(|t| t.as_str()).collect();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "titles": titles,
+        "tags": tags,
+    }))
+}

@@ -3,7 +3,9 @@
 // ==========================================
 
 const SEARCH_HISTORY_KEY = 'obsidian_mirror_search_history';
-const MAX_HISTORY_SIZE = 10; // 最多保存 10 条历史记录
+const MAX_HISTORY_SIZE = 20; // 最多保存 20 条历史记录
+const TITLES_CACHE_KEY = 'obsidian_mirror_titles_cache';
+const TITLES_CACHE_TTL = 5 * 60 * 1000; // 标题缓存 5 分钟（毫秒）
 
 // 搜索状态
 let searchTimeout = null;
@@ -83,12 +85,16 @@ function displaySearchHistory() {
     
     history.forEach((query, index) => {
         html += `
-            <div class="search-history-item" data-index="${index}" onclick="selectHistoryItem('${escapeHtml(query)}')">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"></circle>
-                    <polyline points="12 6 12 12 16 14"></polyline>
-                </svg>
-                <span class="search-history-text">${escapeHtml(query)}</span>
+            <div class="search-history-item" data-index="${index}">
+                <div class="search-history-main" onclick="selectHistoryItem('${escapeHtml(query).replace(/'/g, "\\'")}')">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polyline points="12 6 12 12 16 14"></polyline>
+                    </svg>
+                    <span class="search-history-text">${escapeHtml(query)}</span>
+                </div>
+                <button class="search-history-delete" title="删除此记录"
+                        onclick="deleteHistoryItem(${index})" aria-label="删除">×</button>
             </div>
         `;
     });
@@ -103,6 +109,124 @@ function displaySearchHistory() {
 function clearSearchHistoryUI() {
     clearSearchHistory();
     displaySearchHistory();
+}
+
+/**
+ * 删除单条搜索历史记录
+ */
+function deleteHistoryItem(index) {
+    try {
+        let history = getSearchHistory();
+        history.splice(index, 1);
+        localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(history));
+    } catch (e) {
+        console.warn('删除历史记录失败:', e);
+    }
+    displaySearchHistory();
+}
+
+// ===== 搜索自动补全 =====
+
+/**
+ * 获取缓存的标题和标签数据（带 TTL）
+ */
+async function getCachedTitles() {
+    try {
+        const cached = sessionStorage.getItem(TITLES_CACHE_KEY);
+        if (cached) {
+            const { data, time } = JSON.parse(cached);
+            if (Date.now() - time < TITLES_CACHE_TTL) {
+                return data;
+            }
+        }
+    } catch (e) { /* 忽略缓存错误 */ }
+
+    // 从服务器获取
+    try {
+        const res = await fetch('/api/titles');
+        if (res.ok) {
+            const data = await res.json();
+            sessionStorage.setItem(TITLES_CACHE_KEY, JSON.stringify({ data, time: Date.now() }));
+            return data;
+        }
+    } catch (e) {
+        console.warn('获取标题列表失败:', e);
+    }
+    return { titles: [], tags: [] };
+}
+
+/**
+ * 显示搜索自动补全建议
+ */
+async function showSearchSuggestions(query) {
+    if (!query || query.length < 1) {
+        displaySearchHistory();
+        return;
+    }
+
+    const { titles, tags } = await getCachedTitles();
+    const lowerQ = query.toLowerCase();
+
+    // 标题匹配（前缀优先，再包含）
+    const matchedTitles = titles
+        .filter(t => t.toLowerCase().includes(lowerQ))
+        .sort((a, b) => {
+            const aStart = a.toLowerCase().startsWith(lowerQ) ? 0 : 1;
+            const bStart = b.toLowerCase().startsWith(lowerQ) ? 0 : 1;
+            return aStart - bStart || a.localeCompare(b);
+        })
+        .slice(0, 5);
+
+    // 标签匹配（带 # 前缀时触发）
+    const matchedTags = query.startsWith('#')
+        ? tags.filter(t => t.toLowerCase().includes(lowerQ.slice(1))).slice(0, 4)
+        : tags.filter(t => t.toLowerCase().includes(lowerQ)).slice(0, 3);
+
+    if (matchedTitles.length === 0 && matchedTags.length === 0) return;
+
+    let html = '<div class="search-suggestions">';
+    if (matchedTitles.length > 0) {
+        html += '<div class="suggestion-section-title">笔记</div>';
+        matchedTitles.forEach(title => {
+            const safeTitle = escapeHtml(title);
+            html += `<div class="search-suggestion-item" onclick="selectSuggestion('${safeTitle.replace(/'/g, "\\'")}')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <span class="suggestion-text">${safeTitle}</span>
+            </div>`;
+        });
+    }
+    if (matchedTags.length > 0) {
+        html += '<div class="suggestion-section-title">标签</div>';
+        matchedTags.forEach(tag => {
+            const safeTag = escapeHtml(tag);
+            html += `<div class="search-suggestion-item" onclick="selectSuggestion('#${safeTag.replace(/'/g, "\\'")}')">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/>
+                    <line x1="7" y1="7" x2="7.01" y2="7"/>
+                </svg>
+                <span class="suggestion-text">#${safeTag}</span>
+            </div>`;
+        });
+    }
+    html += '</div>';
+
+    if (searchModalResults) {
+        searchModalResults.innerHTML = html;
+    }
+}
+
+/**
+ * 选择自动补全建议
+ */
+function selectSuggestion(value) {
+    if (searchModalInput) {
+        searchModalInput.value = value;
+        searchModalInput.focus();
+        performModalSearch(value);
+    }
 }
 
 /**
@@ -409,6 +533,9 @@ function initSearchModal() {
             if (searchTimeout) {
                 clearTimeout(searchTimeout);
             }
+
+            // 短延迟时先显示自动补全建议，300ms 后再发起正式搜索
+            showSearchSuggestions(query);
 
             searchTimeout = setTimeout(() => {
                 performModalSearch(query);

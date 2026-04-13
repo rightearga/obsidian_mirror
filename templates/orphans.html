@@ -1,0 +1,34 @@
+{% extends "layout.html" %}
+
+{% block content %}
+    <div class="page-header">
+        <h1>🔗 孤立笔记</h1>
+        <p class="page-subtitle">以下笔记没有任何出链，也没有其他笔记链接到它们，可能需要整合到知识图谱中。</p>
+    </div>
+
+    {% if orphans.is_empty() %}
+        <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <p>太棒了！所有笔记都已相互连接。</p>
+        </div>
+    {% else %}
+        <p class="orphan-count">共 <strong>{{ orphans.len() }}</strong> 篇孤立笔记</p>
+        <ul class="note-list">
+            {% for (title, path) in orphans %}
+            <li class="note-list-item">
+                <a href="/doc/{{ path|urlencode }}" class="note-list-link">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    {{ title }}
+                </a>
+                <span class="note-list-path">{{ path }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+{% endblock %}

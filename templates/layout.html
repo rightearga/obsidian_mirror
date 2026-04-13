@@ -146,7 +146,36 @@
                         <!-- 通过 JavaScript 动态填充 -->
                     </div>
                 </div>
-                
+
+                <!-- 笔记发现面板（v1.4.2） -->
+                <div class="discovery-panel">
+                    <a href="/random" class="discovery-btn" title="随机跳转到一篇笔记（快捷键 r）">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="16 3 21 3 21 8"/>
+                            <line x1="4" y1="20" x2="21" y2="3"/>
+                            <polyline points="21 16 21 21 16 21"/>
+                            <line x1="15" y1="15" x2="21" y2="21"/>
+                        </svg>
+                        <span data-i18n="discovery.random">随机漫游</span>
+                    </a>
+                    <a href="/orphans" class="discovery-btn" title="查看孤立笔记（无链接）">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="18" cy="18" r="3"/>
+                            <circle cx="6" cy="6" r="3"/>
+                            <path d="M13 6h3a2 2 0 0 1 2 2v7"/>
+                            <line x1="6" y1="9" x2="6" y2="21"/>
+                        </svg>
+                        <span data-i18n="discovery.orphans">孤立笔记</span>
+                    </a>
+                    <a href="/recent" class="discovery-btn" title="查看最近更新的笔记">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <span data-i18n="discovery.recent">最近更新</span>
+                    </a>
+                </div>
+
                 <!-- 最近访问笔记面板 -->
                 <div class="recent-notes-panel" id="recent-notes-panel">
                     <div class="recent-notes-header" onclick="RecentNotes.toggle()">

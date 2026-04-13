@@ -118,6 +118,10 @@ docker compose up -d
 | GET/POST | `/share/{token}` | 公开分享页面 |
 | POST | `/api/share/create` | 创建分享链接 |
 | GET | `/api/auth/login` | JWT 登录 |
+| GET | `/orphans` | 孤立笔记列表（无出链且无入链） |
+| GET | `/random` | 随机跳转到一篇笔记（重定向） |
+| GET | `/recent` | 最近更新笔记列表（`?days=` 参数） |
+| GET | `/api/titles` | 所有笔记标题和标签（供前端自动补全） |
 
 ### 模板系统（`src/templates.rs`、`templates/`）
 

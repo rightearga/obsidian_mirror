@@ -192,6 +192,10 @@
                             <span data-i18n="keyboard.toggle_toc">切换目录（TOC）展开/收起</span>
                         </div>
                         <div class="key-row">
+                            <div class="key-combo"><kbd>r</kbd></div>
+                            <span data-i18n="keyboard.random_note">随机跳转到一篇笔记</span>
+                        </div>
+                        <div class="key-row">
                             <div class="key-combo"><kbd>Ctrl</kbd>+<kbd>K</kbd></div>
                             <span data-i18n="keyboard.open_search">打开搜索</span>
                         </div>
@@ -317,6 +321,12 @@
             // ---- TOC ----
             case 't':
                 toggleTocPanel();
+                e.preventDefault();
+                break;
+
+            // ---- 随机笔记 ----
+            case 'r':
+                window.location.href = '/random';
                 e.preventDefault();
                 break;
 

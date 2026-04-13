@@ -579,3 +579,198 @@ kbd {
 .search-filter-clear svg {
     flex-shrink: 0;
 }
+
+/* ---- 搜索历史单条删除（v1.4.2） ---- */
+.search-history-item {
+    display: flex;
+    align-items: center;
+}
+
+.search-history-main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    border-radius: 6px;
+    transition: background 0.1s, color 0.1s;
+}
+
+.search-history-main:hover {
+    background: var(--button-bg);
+    color: var(--text-color);
+}
+
+.search-history-delete {
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: none;
+    color: var(--text-faint);
+    font-size: 16px;
+    cursor: pointer;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.1s, background 0.1s;
+    margin-right: 6px;
+    flex-shrink: 0;
+}
+
+.search-history-item:hover .search-history-delete {
+    opacity: 1;
+}
+
+.search-history-delete:hover {
+    background: var(--button-hover-bg);
+    color: var(--text-color);
+}
+
+/* ---- 自动补全建议（v1.4.2） ---- */
+.search-suggestions {
+    padding: 4px 0;
+}
+
+.suggestion-section-title {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: 4px 14px 2px;
+}
+
+.search-suggestion-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: background 0.1s, color 0.1s;
+}
+
+.search-suggestion-item:hover {
+    background: var(--button-bg);
+    color: var(--text-color);
+}
+
+.suggestion-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ---- 公共笔记列表页样式（/orphans, /recent 等） ---- */
+.page-header {
+    margin-bottom: 24px;
+}
+
+.page-header h1 {
+    margin-bottom: 8px;
+}
+
+.page-subtitle {
+    color: var(--text-muted);
+    font-size: 0.92em;
+    margin: 0;
+}
+
+.note-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.note-list-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.1s;
+}
+
+.note-list-item:last-child {
+    border-bottom: none;
+}
+
+.note-list-item:hover {
+    background: var(--button-bg);
+}
+
+.note-list-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--link-color);
+    font-size: 0.95em;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.note-list-link:hover {
+    text-decoration: none;
+}
+
+.note-list-path,
+.note-list-time {
+    font-size: 11px;
+    color: var(--text-faint);
+    white-space: nowrap;
+}
+
+.orphan-count,
+.recent-count {
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    font-size: 0.9em;
+}
+
+.recent-filter {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.filter-btn {
+    padding: 3px 10px;
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+    background: var(--button-bg);
+    color: var(--text-muted);
+    font-size: 12px;
+    text-decoration: none;
+    transition: background 0.1s, border-color 0.1s, color 0.1s;
+}
+
+.filter-btn:hover,
+.filter-btn.active {
+    background: color-mix(in srgb, var(--primary-color) 15%, transparent);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 48px 0;
+    color: var(--text-muted);
+    text-align: center;
+}

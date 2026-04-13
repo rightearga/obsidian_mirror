@@ -1,0 +1,52 @@
+{% extends "layout.html" %}
+
+{% block content %}
+    <div class="page-header">
+        <h1>🕐 最近更新</h1>
+        <p class="page-subtitle">以下笔记在最近 {{ days }} 天内有过更新，按修改时间降序排列。</p>
+        <div class="recent-filter">
+            <span>显示范围：</span>
+            <a href="/recent?days=7"  class="filter-btn {% if days == 7  %}active{% endif %}">7 天</a>
+            <a href="/recent?days=30" class="filter-btn {% if days == 30 %}active{% endif %}">30 天</a>
+            <a href="/recent?days=90" class="filter-btn {% if days == 90 %}active{% endif %}">90 天</a>
+        </div>
+    </div>
+
+    {% if notes.is_empty() %}
+        <div class="empty-state">
+            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:0.3">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <p>最近 {{ days }} 天内没有更新的笔记。</p>
+        </div>
+    {% else %}
+        <p class="recent-count">共 <strong>{{ notes.len() }}</strong> 篇笔记</p>
+        <ul class="note-list">
+            {% for (title, path, mtime) in notes %}
+            <li class="note-list-item">
+                <a href="/doc/{{ path|urlencode }}" class="note-list-link">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    {{ title }}
+                </a>
+                <span class="note-list-time" data-timestamp="{{ mtime }}">{{ mtime }}</span>
+            </li>
+            {% endfor %}
+        </ul>
+        <script>
+        // 将 Unix 时间戳转换为本地可读时间
+        document.querySelectorAll('.note-list-time[data-timestamp]').forEach(el => {
+            const ts = parseInt(el.getAttribute('data-timestamp'), 10);
+            if (!isNaN(ts)) {
+                el.textContent = new Date(ts * 1000).toLocaleString('zh-CN', {
+                    year: 'numeric', month: '2-digit', day: '2-digit',
+                    hour: '2-digit', minute: '2-digit'
+                });
+            }
+        });
+        </script>
+    {% endif %}
+{% endblock %}
