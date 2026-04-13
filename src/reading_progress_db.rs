@@ -132,8 +132,15 @@ pub struct ReadingProgressDatabase {
 }
 
 impl ReadingProgressDatabase {
-    /// 打开或创建数据库
+    /// 打开或创建数据库（自动创建父目录）
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
+        // 确保父目录存在
+        if let Some(parent) = path.as_ref().parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("无法创建阅读进度数据库目录: {}", parent.display()))?;
+            }
+        }
         let db = Database::create(path.as_ref())
             .with_context(|| format!("无法打开阅读进度数据库: {}", path.as_ref().display()))?;
 
