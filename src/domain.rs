@@ -98,6 +98,9 @@ pub struct GraphNode {
     pub id: String,    // 节点 ID（通常是笔记路径）
     pub label: String, // 节点显示标签（笔记标题）
     pub title: String, // 悬停提示
+    /// 笔记所属标签列表（用于节点颜色分组，取第一个标签决定颜色）
+    #[serde(default)]
+    pub tags: Vec<String>,
 }
 
 /// 图谱边（连接）

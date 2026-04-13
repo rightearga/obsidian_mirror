@@ -781,6 +781,36 @@ pub async fn recent_page_handler(
     }
 }
 
+/// GET /api/graph/global — 返回全库关系图谱数据
+///
+/// 包含所有笔记及其链接关系，用于全库图谱视图。
+/// 节点数超过 500 时自动降采样（仅保留有连接的节点）。
+///
+/// 查询参数：
+/// - `hide_isolated`（可选，默认 false）：是否隐藏孤立节点
+#[derive(Debug, serde::Deserialize)]
+pub struct GlobalGraphQuery {
+    #[serde(default)]
+    pub hide_isolated: bool,
+}
+
+#[get("/api/graph/global")]
+pub async fn global_graph_handler(
+    query: web::Query<GlobalGraphQuery>,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let notes = data.notes.read().await;
+    let link_index = data.link_index.read().await;
+
+    let graph_data = crate::graph::generate_global_graph(
+        &notes,
+        &link_index,
+        query.hide_isolated,
+    );
+
+    HttpResponse::Ok().json(graph_data)
+}
+
 /// GET /api/titles — 返回所有笔记标题和标签，供前端自动补全使用
 ///
 /// 前端在首次搜索框聚焦时获取，缓存于 sessionStorage 中。

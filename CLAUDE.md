@@ -122,6 +122,7 @@ docker compose up -d
 | GET | `/random` | 随机跳转到一篇笔记（重定向） |
 | GET | `/recent` | 最近更新笔记列表（`?days=` 参数） |
 | GET | `/api/titles` | 所有笔记标题和标签（供前端自动补全） |
+| GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
 
 ### 模板系统（`src/templates.rs`、`templates/`）
 

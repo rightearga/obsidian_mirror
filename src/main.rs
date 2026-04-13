@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::AppState,
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, global_graph_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -361,6 +361,7 @@ async fn start_http_server(
             .service(random_handler)
             .service(recent_page_handler)
             .service(titles_api_handler)
+            .service(global_graph_handler)
             // 分享链接相关路由
             .route("/api/share/create", web::post().to(create_share_handler))
             .route("/api/share/list", web::get().to(list_shares_handler))

@@ -41,13 +41,20 @@ pub fn generate_graph(
         }
     };
 
-    // 添加中心节点
+    // 找到中心节点的标签
+    let center_tags = notes
+        .get(&current_path)
+        .map(|n| n.tags.clone())
+        .unwrap_or_default();
+
+    // 添加中心节点（携带标签信息，用于前端节点颜色分组）
     graph_nodes.insert(
         current_path.clone(),
         GraphNode {
             id: current_path.clone(),
             label: current_note_title.to_string(),
             title: current_note_title.to_string(),
+            tags: center_tags,
         },
     );
     visited.insert(current_path.clone());
@@ -73,12 +80,17 @@ pub fn generate_graph(
             if let Some(linked_path) = link_index.get(&linked_title) {
                 // 添加节点（如果还未添加）
                 if !graph_nodes.contains_key(linked_path) {
+                    let linked_tags = notes
+                        .get(linked_path)
+                        .map(|n| n.tags.clone())
+                        .unwrap_or_default();
                     graph_nodes.insert(
                         linked_path.clone(),
                         GraphNode {
                             id: linked_path.clone(),
                             label: linked_title.clone(),
                             title: linked_title.clone(),
+                            tags: linked_tags,
                         },
                     );
                 }
@@ -106,13 +118,14 @@ pub fn generate_graph(
 
         let linked_titles = extract_links_from_note(note);
         if linked_titles.contains(current_note_title) {
-            // 添加反向链接节点
+            // 添加反向链接节点（携带标签）
             graph_nodes.insert(
                 path.clone(),
                 GraphNode {
                     id: path.clone(),
                     label: note.title.clone(),
                     title: note.title.clone(),
+                    tags: note.tags.clone(),
                 },
             );
 
@@ -129,6 +142,78 @@ pub fn generate_graph(
     GraphData {
         nodes,
         edges: graph_edges,
+    }
+}
+
+/// 生成全库关系图谱数据
+///
+/// 包含笔记库中所有笔记及其链接关系。
+/// 当节点数超过 500 时自动降采样，仅保留有至少一条链接的笔记。
+///
+/// # 参数
+/// * `notes` - 所有笔记的映射
+/// * `link_index` - 标题到路径的映射（用于快速查找目标笔记路径）
+/// * `hide_isolated` - 是否隐藏孤立节点（无入链也无出链）
+pub fn generate_global_graph(
+    notes: &HashMap<String, Note>,
+    link_index: &HashMap<String, String>,
+    hide_isolated: bool,
+) -> GraphData {
+    const MAX_NODES: usize = 500;
+
+    let mut graph_nodes: HashMap<String, GraphNode> = HashMap::new();
+    let mut graph_edges: Vec<GraphEdge> = Vec::new();
+    let mut connected: HashSet<String> = HashSet::new();
+
+    // 第一遍：构建所有边，并标记有连接的节点
+    for note in notes.values() {
+        for linked_title in &note.outgoing_links {
+            if let Some(linked_path) = link_index.get(linked_title)
+                && notes.contains_key(linked_path)
+            {
+                connected.insert(note.path.clone());
+                connected.insert(linked_path.clone());
+                graph_edges.push(GraphEdge {
+                    from: note.path.clone(),
+                    to: linked_path.clone(),
+                });
+            }
+        }
+    }
+
+    // 确定是否需要降采样（节点超 500 时只保留有链接的节点）
+    let total = notes.len();
+    let should_downsample = total > MAX_NODES;
+
+    // 第二遍：构建节点列表
+    for note in notes.values() {
+        let is_isolated = !connected.contains(&note.path);
+
+        // 需要隐藏孤立节点，或降采样时跳过孤立节点
+        if (hide_isolated || should_downsample) && is_isolated {
+            continue;
+        }
+
+        graph_nodes.insert(
+            note.path.clone(),
+            GraphNode {
+                id: note.path.clone(),
+                label: note.title.clone(),
+                title: note.title.clone(),
+                tags: note.tags.clone(),
+            },
+        );
+    }
+
+    // 过滤掉引用了已被移除节点的边
+    let edges = graph_edges
+        .into_iter()
+        .filter(|e| graph_nodes.contains_key(&e.from) && graph_nodes.contains_key(&e.to))
+        .collect();
+
+    GraphData {
+        nodes: graph_nodes.into_values().collect(),
+        edges,
     }
 }
 
@@ -255,5 +340,65 @@ mod tests {
 
         assert_eq!(graph.nodes.len(), 1, "孤立中心笔记图谱应只有 1 个节点");
         assert!(graph.edges.is_empty(), "孤立中心笔记图谱不应有边");
+    }
+
+    #[test]
+    fn test_global_graph_includes_all_notes() {
+        // 全局图谱应包含所有笔记（不隐藏孤立节点时）
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec![]), ("Solo", vec![])]);
+
+        let graph = generate_global_graph(&notes, &link_index, false);
+        let labels: Vec<&str> = graph.nodes.iter().map(|n| n.label.as_str()).collect();
+
+        assert!(labels.contains(&"A"), "A 应在全局图谱中");
+        assert!(labels.contains(&"B"), "B 应在全局图谱中");
+        assert!(labels.contains(&"Solo"), "孤立节点 Solo 应在全局图谱中（未隐藏孤立节点）");
+    }
+
+    #[test]
+    fn test_global_graph_hide_isolated() {
+        // hide_isolated=true 时，孤立节点不应出现
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec![]), ("Solo", vec![])]);
+
+        let graph = generate_global_graph(&notes, &link_index, true);
+        let labels: Vec<&str> = graph.nodes.iter().map(|n| n.label.as_str()).collect();
+
+        assert!(labels.contains(&"A"), "A 应在图谱中（有出链）");
+        assert!(labels.contains(&"B"), "B 应在图谱中（有入链）");
+        assert!(!labels.contains(&"Solo"), "孤立节点 Solo 应被隐藏");
+    }
+
+    #[test]
+    fn test_global_graph_contains_edges() {
+        // 全局图谱应包含所有链接边
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec!["C"]), ("C", vec![])]);
+
+        let graph = generate_global_graph(&notes, &link_index, false);
+        assert!(graph.edges.len() >= 2, "全局图谱应包含 A→B 和 B→C 的边");
+    }
+
+    #[test]
+    fn test_graph_node_carries_tags() {
+        // 图谱节点应携带标签信息
+        let mut notes = HashMap::new();
+        let mut link_index = HashMap::new();
+        let mut note_a = make_note("A", vec!["B"]);
+        note_a.tags = vec!["rust".to_string()];
+        let note_b = make_note("B", vec![]);
+        link_index.insert("A".to_string(), note_a.path.clone());
+        link_index.insert("B".to_string(), note_b.path.clone());
+        notes.insert(note_a.path.clone(), note_a);
+        notes.insert(note_b.path.clone(), note_b);
+
+        let graph = generate_global_graph(&notes, &link_index, false);
+        let a_node = graph.nodes.iter().find(|n| n.label == "A");
+        assert!(a_node.is_some(), "A 节点应存在");
+        assert!(
+            a_node.unwrap().tags.contains(&"rust".to_string()),
+            "A 节点应携带 rust 标签"
+        );
     }
 }

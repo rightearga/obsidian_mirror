@@ -197,6 +197,142 @@
     font-size: 14px;
 }
 
+/* ---- v1.4.3 新增：图谱增强控件 ---- */
+
+/* 模式切换（局部/全局） */
+.graph-mode-toggle {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-secondary);
+    border-radius: 5px;
+    padding: 2px;
+}
+
+.graph-mode-btn {
+    padding: 3px 10px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s;
+    white-space: nowrap;
+}
+
+.graph-mode-btn.active {
+    background: var(--primary-color);
+    color: #fff;
+}
+
+/* 图谱内搜索框 */
+.graph-search-box {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+}
+
+/* 图标按钮（导出、筛选等） */
+.graph-icon-btn {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 5px;
+    background: var(--button-bg);
+    color: var(--text-muted);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.1s;
+}
+
+.graph-icon-btn:hover {
+    background: var(--button-hover-bg);
+    color: var(--text-color);
+}
+
+/* 筛选面板 */
+.graph-filter-panel {
+    display: none;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    gap: 10px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.graph-filter-panel.show {
+    display: flex;
+}
+
+.graph-filter-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.graph-filter-row input[type="text"] {
+    padding: 3px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-color);
+    color: var(--text-color);
+    font-size: 12px;
+    width: 120px;
+}
+
+/* 图谱主体区域（图谱 + 图例） */
+.graph-modal-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.graph-modal-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+/* 标签颜色图例 */
+.graph-legend {
+    width: 130px;
+    padding: 8px 6px;
+    border-left: 1px solid var(--border-color);
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.graph-legend:empty {
+    display: none;
+}
+
+.graph-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.graph-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
 /* 响应式设计 */
 @media (max-width: 768px) {
     .page-header {
