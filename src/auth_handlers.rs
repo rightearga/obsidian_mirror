@@ -46,6 +46,7 @@ pub async fn login_handler(
     form: web::Json<LoginRequest>,
     auth_db: web::Data<Arc<AuthDatabase>>,
     jwt_manager: web::Data<Arc<JwtManager>>,
+    app_state: web::Data<Arc<crate::state::AppState>>,
 ) -> impl Responder {
     // 获取用户
     let user = match auth_db.get_user(&form.username) {
@@ -92,13 +93,15 @@ pub async fn login_handler(
                         Duration::hours(24)
                     };
 
-                    // 安全属性：HttpOnly 防止 JS 读取；Secure 防止 HTTP 明文传输；
-                    // SameSite::Lax 防止 CSRF 同时允许顶层导航跳转后携带 Cookie
+                    // 安全属性：HttpOnly 防止 JS 读取；
+                    // Secure 仅在 force_https_cookie=true（生产 HTTPS）时启用，
+                    // HTTP（内网/开发）下设为 false 避免 Cookie 被浏览器静默丢弃
+                    let secure = app_state.config.security.force_https_cookie;
                     let cookie = Cookie::build("auth_token", token.clone())
                         .path("/")
                         .max_age(max_age)
                         .http_only(true)
-                        .secure(true)
+                        .secure(secure)
                         .same_site(SameSite::Lax)
                         .finish();
 
@@ -137,13 +140,16 @@ pub async fn login_handler(
 }
 
 /// 登出处理器
-pub async fn logout_handler() -> impl Responder {
-    // 删除 Cookie（属性必须与设置时完全一致，浏览器才能正确清除）
+pub async fn logout_handler(
+    app_state: web::Data<Arc<crate::state::AppState>>,
+) -> impl Responder {
+    // 删除 Cookie（Secure 标志必须与登录时一致，浏览器才能正确清除）
+    let secure = app_state.config.security.force_https_cookie;
     let cookie = Cookie::build("auth_token", "")
         .path("/")
         .max_age(Duration::seconds(0))
         .http_only(true)
-        .secure(true)
+        .secure(secure)
         .same_site(SameSite::Lax)
         .finish();
 

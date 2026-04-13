@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.5 🎉  
+**当前版本**: v1.4.6 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -884,33 +884,32 @@
 
 ---
 
-### ✨ v1.4.6 (计划中 - 紧急修复与安全加固)
+### ✅ v1.4.6 (已发布 - 2026-04-13)
 
-**主题**: Cookie 动态 Secure + Webhook HMAC + 调试日志清理  
-**预计发布**: 2026-04 月
+**主题**: Cookie 动态 Secure + Webhook HMAC + 调试日志清理
 
 #### 安全修复
 
-- [ ] **Cookie Secure 动态判断**
+- ✅ **Cookie Secure 动态判断**
   - 文件：`src/auth_handlers.rs`、`src/config.rs`
   - 问题：v1.3.2 硬编码 `.secure(true)`，HTTP 下（内网/开发）浏览器静默丢弃 Cookie，导致登录失效
   - 修复：`config.ron` 新增 `force_https_cookie: bool`（默认 `false`）；仅在该选项为 `true` 时设置 `Secure` 标志
   - 说明：生产环境通过反向代理（Nginx/Caddy）启用 HTTPS 时，手动将该选项设为 `true`
 
-- [ ] **Webhook HMAC-SHA256 真实实现**
+- ✅ **Webhook HMAC-SHA256 真实实现**
   - 文件：`src/handlers.rs`、`Cargo.toml`
   - 问题：当前 GitHub 签名验证为字符串直接比较，无消息体完整性保证
   - 修复：添加 `hmac = "0.12"` + `sha2 = "0.3"` 依赖，实现标准 HMAC-SHA256 验证；GitLab 令牌保持原有逻辑
 
 #### 代码清理
 
-- [ ] **graph.js 调试日志清理**
+- ✅ **graph.js / mermaid-init.js 调试日志清理**
   - 文件：`static/js/graph.js`
   - 问题：graph.js 中遗留数十条 `console.log` 调试输出，影响性能和控制台可读性
   - 修复：删除所有非 error 级别的 `console.log`，仅保留 `console.error` 用于异常处理
 
-- [ ] **sync.rs / 其他文件潜在警告确认修复**
-  - 检查并修复 `incremental_search_data` 等编译器警告
+- ✅ **sync.rs / 其他文件潜在警告确认修复**
+  - 编译通过，无新增警告
 
 ---
 

@@ -79,7 +79,6 @@ const MermaidManager = {
         // 渲染页面中所有 Mermaid 图表
         this.renderAll();
 
-        console.log('✅ Mermaid 初始化完成');
     },
 
     // 获取当前主题
@@ -214,7 +213,6 @@ const MermaidManager = {
             return; // 没有图表，不需要渲染
         }
 
-        console.log(`🎨 开始渲染 ${mermaidElements.length} 个 Mermaid 图表`);
 
         for (let i = 0; i < mermaidElements.length; i++) {
             const element = mermaidElements[i];
@@ -259,7 +257,6 @@ const MermaidManager = {
             }
         }
 
-        console.log('✅ Mermaid 图表渲染完成');
     },
 
     // 解码 HTML 实体
@@ -317,7 +314,6 @@ const MermaidManager = {
                     ry: 5px !important;
                 `;
                 
-                console.log(`🔧 修复 rect: width=${width}, height=${height}`);
             }
         });
 
@@ -401,7 +397,6 @@ const MermaidManager = {
         // 查找所有边标签
         const edgeLabels = svg.querySelectorAll('g.edgeLabel');
         
-        console.log(`🔍 找到 ${edgeLabels.length} 个边标签`);
         
         edgeLabels.forEach((edgeLabel, index) => {
             const foreignObject = edgeLabel.querySelector('foreignObject');
@@ -417,7 +412,6 @@ const MermaidManager = {
             const allText = labelContainer.textContent || '';
             const trimmedText = allText.trim();
             
-            console.log(`📝 边标签 ${index}: 尺寸=${currentWidth}x${currentHeight}, 文本="${trimmedText}"`);
             
             if (!trimmedText || trimmedText.length === 0) {
                 return;
@@ -436,14 +430,12 @@ const MermaidManager = {
                 
                 foreignObject.setAttribute('width', currentWidth);
                 foreignObject.setAttribute('height', currentHeight);
-                console.log(`🔧 修复边标签 ${index} 尺寸: -> ${currentWidth}x${currentHeight}`);
             }
             
             // 关键修复：移除 g.label 的 transform，直接在 foreignObject 上设置位置
             const labelG = edgeLabel.querySelector('g.label');
             if (labelG) {
                 const transform = labelG.getAttribute('transform');
-                console.log(`📐 g.label transform: ${transform}`);
                 
                 // 解析 translate 值
                 const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
@@ -458,7 +450,6 @@ const MermaidManager = {
                     // 移除 g.label 的 transform
                     labelG.removeAttribute('transform');
                     
-                    console.log(`🔧 移除 g.label transform，设置 foreignObject x=${tx}, y=${ty}`);
                 }
             }
             
@@ -482,14 +473,12 @@ const MermaidManager = {
                 labelContainer.style.whiteSpace = 'normal';
                 labelContainer.style.wordBreak = 'break-word';
                 
-                console.log(`🎨 边标签 ${index} 样式已应用`);
             }
         });
     },
 
     // 切换主题（在用户切换明暗主题时调用）
     async switchTheme(newTheme) {
-        console.log(`🎨 切换 Mermaid 主题: ${newTheme}`);
 
         // 重新初始化 Mermaid 配置（与 init() 方法保持一致）
         const mermaidTheme = newTheme === 'dark' ? 'dark' : 'default';
@@ -560,7 +549,6 @@ const MermaidManager = {
             // 获取保存的原始图表定义
             const graphDefinition = element.getAttribute('data-mermaid-source');
             if (!graphDefinition) {
-                console.warn('⚠️ 无法获取图表原始定义，跳过重新渲染');
                 continue;
             }
             

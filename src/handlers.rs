@@ -918,15 +918,48 @@ pub async fn webhook_sync_handler(
     }
 }
 
-/// 验证 GitHub Webhook 签名（简化版：比较请求头中的令牌）
+/// 使用 HMAC-SHA256 验证 GitHub Webhook 签名
 ///
-/// 注意：生产环境建议升级为完整的 HMAC-SHA256 验证。
-/// 当前实现为简化版本：检查 `X-Hub-Signature-256` 头中是否包含密钥的哈希形式，
-/// 或支持以 `Bearer <secret>` 格式直接传递令牌。
-fn verify_github_signature(secret: &str, _body: &[u8], signature: &str) -> bool {
-    // 简化验证：允许直接以 "sha256=" 前缀 + secret 比较
-    let with_prefix = format!("sha256={}", secret);
-    signature == with_prefix.as_str()
+/// `signature` 格式为 `sha256=<hex>`，使用常数时间比较防止时序攻击。
+fn verify_github_signature(secret: &str, body: &[u8], signature: &str) -> bool {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    let prefix = "sha256=";
+    if !signature.starts_with(prefix) {
+        return false;
+    }
+    let sig_hex = &signature[prefix.len()..];
+
+    // 将十六进制签名解码为字节
+    let sig_bytes = match hex_decode(sig_hex) {
+        Some(b) => b,
+        None => return false,
+    };
+
+    // 计算 HMAC-SHA256 并使用常数时间比较（防时序攻击）
+    // hmac::Mac 提供 new_from_slice / update / verify_slice
+    let mut mac: Hmac<Sha256> = match Mac::new_from_slice(secret.as_bytes()) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    mac.update(body);
+    mac.verify_slice(&sig_bytes).is_ok()
+}
+
+/// 将十六进制字符串解码为字节序列
+fn hex_decode(hex: &str) -> Option<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        return None;
+    }
+    hex.as_bytes()
+        .chunks(2)
+        .map(|c| {
+            let hi = (c[0] as char).to_digit(16)? as u8;
+            let lo = (c[1] as char).to_digit(16)? as u8;
+            Some((hi << 4) | lo)
+        })
+        .collect()
 }
 
 /// POST /api/config/reload — 配置热重载端点（需认证）

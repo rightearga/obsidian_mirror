@@ -53,6 +53,10 @@
 
         // 默认管理员密码（仅用于首次初始化，请立即修改！）
         default_admin_password: "admin",
+
+        // 是否在 Cookie 上强制设置 Secure 标志（默认 false）
+        // 仅在通过 HTTPS 访问时设为 true；HTTP（内网/本地开发）下保持 false
+        force_https_cookie: false,
     ),
 
     // 自动同步间隔（分钟），0 = 禁用定时同步（默认 0）

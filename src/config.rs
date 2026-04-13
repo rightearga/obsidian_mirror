@@ -93,6 +93,13 @@ pub struct SecurityConfig {
     /// 默认管理员密码（仅用于首次初始化）
     #[serde(default = "default_admin_password")]
     pub default_admin_password: String,
+
+    /// 是否强制在 Cookie 上设置 Secure 标志（仅 HTTPS 环境下应启用）
+    ///
+    /// 默认 `false`：HTTP 环境下（内网/开发）Cookie 可正常工作。
+    /// 生产环境通过 Nginx/Caddy 反向代理启用 HTTPS 时，将此项设为 `true`。
+    #[serde(default)]
+    pub force_https_cookie: bool,
 }
 
 impl Default for SecurityConfig {
@@ -103,6 +110,7 @@ impl Default for SecurityConfig {
             token_lifetime_hours: default_token_lifetime(),
             default_admin_username: default_admin_username(),
             default_admin_password: default_admin_password(),
+            force_https_cookie: false,
         }
     }
 }

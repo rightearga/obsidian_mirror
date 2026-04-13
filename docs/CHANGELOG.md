@@ -6,6 +6,19 @@
 
 ---
 
+## [v1.4.6] — 2026-04-13
+
+安全修复：Cookie 动态 Secure 配置、Webhook HMAC-SHA256 真实实现、Mermaid 调试日志清理。
+
+### Fixed
+- **Cookie Secure 动态判断**：v1.3.2 硬编码 `.secure(true)` 导致 HTTP 环境下（内网/开发）登录 Cookie 被浏览器静默丢弃，认证失效。新增 `security.force_https_cookie: bool`（默认 `false`），仅在显式启用时设置 Secure 标志；HTTP 环境无需修改配置即可正常使用
+
+### Changed
+- **Webhook HMAC-SHA256 真实实现**：替换原有的字符串直接比较，使用 `hmac 0.12` + `sha2 0.10` 实现标准 HMAC-SHA256 签名验证（含常数时间比较防时序攻击）；GitLab `X-Gitlab-Token` 令牌验证逻辑不变
+- **Mermaid 调试日志清理**：`mermaid-init.js` 删除 13 处 `console.log`/`console.warn` 调试输出，仅保留 3 处 `console.error` 错误日志
+
+---
+
 ## [v1.4.5] — 2026-04-13
 
 运维与同步扩展：定时自动同步、Webhook 触发、配置热重载、Glob 忽略模式、Prometheus 指标扩展。

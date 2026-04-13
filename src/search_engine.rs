@@ -371,8 +371,8 @@ impl SearchEngine {
 
         let final_query = BooleanQuery::new(subqueries);
 
-        // 执行搜索
-        let top_docs = searcher.search(&final_query, &TopDocs::with_limit(limit))?;
+        // 执行搜索（tantivy 0.26：TopDocs 需通过 .order_by_score() 转为 Collector）
+        let top_docs = searcher.search(&final_query, &TopDocs::with_limit(limit).order_by_score())?;
 
         let mut results = Vec::new();
 
