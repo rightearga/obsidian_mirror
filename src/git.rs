@@ -30,21 +30,39 @@ impl GitClient {
                 return Self::pull_and_diff(local_path).await;
             }
 
-            // 目录存在但不是 git 仓库 —— 根据是否为空决定处理方式
-            let is_empty = std::fs::read_dir(local_path)
-                .map(|mut d| d.next().is_none())
+            // 目录存在但不是 git 仓库 —— 根据内容决定处理方式
+            //
+            // 应用启动时搜索引擎会在 local_path/.search_index/ 创建索引目录，
+            // 导致 local_path 在首次克隆前就变成"非空"目录。
+            // 判断规则：若目录内只有隐藏子目录（以 '.' 开头，如 .search_index），
+            // 则视为"应用自动创建"，安全删除后重新克隆；
+            // 若包含用户可见文件/目录则报错，避免误删数据。
+            let has_user_content = std::fs::read_dir(local_path)
+                .map(|entries| {
+                    entries
+                        .filter_map(|e| e.ok())
+                        .any(|e| {
+                            !e.file_name()
+                                .to_string_lossy()
+                                .starts_with('.')
+                        })
+                })
                 .unwrap_or(false);
 
-            if is_empty {
-                // 空目录：安全删除后重新克隆（用户手动创建了空目录是常见情形）
-                warn!("  ├─ {:?} 存在但不是 git 仓库（目录为空），自动删除后重新克隆", local_path);
-                tokio::fs::remove_dir(local_path).await
-                    .context("删除空的非 git 目录失败")?;
+            if !has_user_content {
+                // 仅有隐藏目录（如 .search_index）：安全删除整个目录后重新克隆
+                warn!(
+                    "  ├─ {:?} 存在但不是 git 仓库（仅含隐藏目录），自动清理后重新克隆",
+                    local_path
+                );
+                tokio::fs::remove_dir_all(local_path)
+                    .await
+                    .context("清理非 git 目录失败")?;
                 // fallthrough 到下方克隆逻辑
             } else {
-                // 非空目录：拒绝操作，避免误删用户数据
+                // 含用户可见内容：拒绝操作，避免误删数据
                 return Err(anyhow::anyhow!(
-                    "目录 {:?} 已存在且不是 git 仓库（目录非空）。\n\
+                    "目录 {:?} 已存在且不是 git 仓库（目录含用户文件）。\n\
                      请手动删除该目录后重启服务，程序将自动重新克隆。",
                     local_path
                 ));
