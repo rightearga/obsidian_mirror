@@ -132,23 +132,10 @@ pub fn generate_graph(
     }
 }
 
-/// 从笔记内容中提取所有链接的标题
+/// 从笔记中提取所有出链标题
+///
+/// 直接使用 Note.outgoing_links 字段（构建期已预计算），
+/// 无需重新解析 content_text，消除热路径上的正则表达式开销。
 fn extract_links_from_note(note: &Note) -> HashSet<String> {
-    let mut links = HashSet::new();
-
-    // 使用正则表达式提取 WikiLinks
-    let re = regex::Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
-
-    // 从 HTML 内容中提取（因为 content 是已经转换的 HTML）
-    // 我们需要从原始文本中提取，但 Note 结构中只有 content_text
-    for cap in re.captures_iter(&note.content_text) {
-        if let Some(target) = cap.get(1) {
-            let target_str = target.as_str().trim().to_string();
-            if !target_str.is_empty() {
-                links.insert(target_str);
-            }
-        }
-    }
-
-    links
+    note.outgoing_links.iter().cloned().collect()
 }

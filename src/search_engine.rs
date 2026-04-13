@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
-use tantivy::{doc, Index, IndexWriter, ReloadPolicy, TantivyDocument};
+use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
 use tracing::{info, warn};
 
 // 搜索结果排序方式
@@ -38,6 +38,9 @@ pub struct SearchResult {
 // 搜索引擎
 pub struct SearchEngine {
     index: Index,
+    /// 缓存的 IndexReader，避免每次搜索重复创建，节省初始化开销
+    /// ReloadPolicy::OnCommitWithDelay 确保写入提交后自动更新视图
+    reader: IndexReader,
     title_field: Field,
     content_field: Field,
     path_field: Field,
@@ -99,8 +102,15 @@ impl SearchEngine {
             Index::create_in_dir(index_dir, schema.clone())?
         };
 
+        // 初始化并缓存 IndexReader，后续搜索直接复用，避免重复创建
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()?;
+
         Ok(Self {
             index,
+            reader,
             title_field,
             content_field,
             path_field,
@@ -192,6 +202,70 @@ impl SearchEngine {
         Ok(())
     }
 
+    /// 增量更新搜索索引
+    ///
+    /// 仅删除 `deleted_paths` 对应的旧文档，并更新 `changed_notes` 对应的文档。
+    /// 适用于增量同步场景，避免全量重建 Tantivy 索引的高昂代价。
+    pub fn update_documents<I>(
+        &self,
+        changed_notes: I,
+        deleted_paths: &[String],
+    ) -> Result<()>
+    where
+        I: IntoIterator<Item = (String, String, String, SystemTime, Vec<String>)>,
+    {
+        let mut index_writer: IndexWriter = self.index.writer(50_000_000)?;
+
+        // 删除 deleted 路径对应的文档
+        for path in deleted_paths {
+            let term = tantivy::Term::from_field_text(self.path_field, path);
+            index_writer.delete_term(term);
+        }
+
+        let mut updated = 0usize;
+        for (path, title, content, mtime, tags) in changed_notes {
+            // 先删除该路径的旧文档（幂等）
+            let term = tantivy::Term::from_field_text(self.path_field, &path);
+            index_writer.delete_term(term);
+
+            // 添加新文档
+            let mtime_secs = mtime
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+
+            let folder = std::path::Path::new(&path)
+                .parent()
+                .and_then(|p| p.to_str())
+                .unwrap_or("")
+                .to_string();
+
+            let mut doc = doc!(
+                self.path_field => path,
+                self.title_field => title,
+                self.content_field => content,
+                self.mtime_field => mtime_secs,
+                self.folder_field => folder,
+            );
+
+            for tag in tags {
+                doc.add_text(self.tags_field, &tag);
+            }
+
+            index_writer.add_document(doc)?;
+            updated += 1;
+        }
+
+        index_writer.commit()?;
+        info!(
+            "  └─ 搜索索引增量更新完成：{} 条更新，{} 条删除",
+            updated,
+            deleted_paths.len()
+        );
+
+        Ok(())
+    }
+
     /// 执行高级搜索（带过滤条件）
     pub fn advanced_search(
         &self,
@@ -203,13 +277,8 @@ impl SearchEngine {
         date_from: Option<i64>,    // 日期过滤：开始时间（Unix 时间戳）
         date_to: Option<i64>,      // 日期过滤：结束时间（Unix 时间戳）
     ) -> Result<Vec<SearchResult>> {
-        let reader = self
-            .index
-            .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
-            .try_into()?;
-
-        let searcher = reader.searcher();
+        // 直接复用缓存的 reader，避免每次搜索重复初始化
+        let searcher = self.reader.searcher();
 
         // 创建查询解析器
         let query_parser =

@@ -1,7 +1,30 @@
 use pulldown_cmark::{html, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use regex::Regex;
+use lazy_static::lazy_static;
 use crate::domain::TocItem;
 use crate::tags;
+
+lazy_static! {
+    /// 匹配图片/文件类 WikiLink：![[文件路径]] 或 ![[文件路径|显示文本]]
+    static ref IMAGE_WIKI_REGEX: Regex =
+        Regex::new(r"!\[\[(.*?)(?:\|(.*?))?\]\]").unwrap();
+
+    /// 匹配普通笔记 WikiLink：[[笔记]] 或 [[笔记|别名]]
+    static ref WIKI_REGEX: Regex =
+        Regex::new(r"\[\[(.*?)(?:\|(.*?))?\]\]").unwrap();
+
+    /// 匹配标准 Markdown 图片语法：![alt](path)
+    static ref MD_IMAGE_REGEX: Regex =
+        Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
+
+    /// 匹配标准 Markdown 链接语法：[text](path)
+    static ref MD_LINK_REGEX: Regex =
+        Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
+
+    /// 匹配 YAML Frontmatter 块（支持 \r\n 和 \n）
+    static ref FRONTMATTER_REGEX: Regex =
+        Regex::new(r"(?s)^---\s*\r?\n(.*?)\r?\n---\s*\r?\n(.*)$").unwrap();
+}
 
 pub struct MarkdownProcessor;
 
@@ -20,9 +43,7 @@ impl MarkdownProcessor {
         let (content_body, frontmatter) = Self::extract_frontmatter(content);
 
         // 2. Pre-process Image/File WikiLinks (处理 ![[...]] 语法)
-        // 匹配 ![[文件路径]] 或 ![[文件路径|显示文本]]
-        let image_wiki_regex = Regex::new(r"!\[\[(.*?)(?:\|(.*?))?\]\]").unwrap();
-        let mut processed_content = image_wiki_regex
+        let mut processed_content = IMAGE_WIKI_REGEX
             .replace_all(&content_body, |caps: &regex::Captures| {
                 let target = caps.get(1).map_or("", |m| m.as_str()).trim();
                 let alt_text = caps.get(2).map_or("", |m| m.as_str()).trim();
@@ -62,8 +83,7 @@ impl MarkdownProcessor {
 
         // 3. Pre-process WikiLinks (处理普通 [[...]] 链接)
         let mut links = Vec::new();
-        let wiki_regex = Regex::new(r"\[\[(.*?)(?:\|(.*?))?\]\]").unwrap();
-        processed_content = wiki_regex
+        processed_content = WIKI_REGEX
             .replace_all(&processed_content, |caps: &regex::Captures| {
                 let target = caps.get(1).map_or("", |m| m.as_str()).trim();
                 let label = caps.get(2).map_or(target, |m| m.as_str()).trim();
@@ -97,8 +117,7 @@ impl MarkdownProcessor {
 
         // 4. 处理标准 Markdown 图片相对路径 ![alt](path)
         // 将相对路径转换为 /assets/path
-        let md_image_regex = Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").unwrap();
-        processed_content = md_image_regex
+        processed_content = MD_IMAGE_REGEX
             .replace_all(&processed_content, |caps: &regex::Captures| {
                 let alt_text = caps.get(1).map_or("", |m| m.as_str());
                 let path = caps.get(2).map_or("", |m| m.as_str()).trim();
@@ -122,8 +141,7 @@ impl MarkdownProcessor {
             .to_string();
 
         // 5. 处理标准 Markdown 链接中的文件相对路径 [text](file.pdf)
-        let md_link_regex = Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap();
-        processed_content = md_link_regex
+        processed_content = MD_LINK_REGEX
             .replace_all(&processed_content, |caps: &regex::Captures| {
                 let text = caps.get(1).map_or("", |m| m.as_str());
                 let path = caps.get(2).map_or("", |m| m.as_str()).trim();
@@ -350,11 +368,7 @@ impl MarkdownProcessor {
     }
 
     fn extract_frontmatter(content: &str) -> (String, serde_yml::Value) {
-        // More robust regex for YAML Frontmatter
-        // Handles \r\n and \n, and doesn't strict require spaces
-        let re = Regex::new(r"(?s)^---\s*\r?\n(.*?)\r?\n---\s*\r?\n(.*)$").unwrap();
-
-        if let Some(caps) = re.captures(content) {
+        if let Some(caps) = FRONTMATTER_REGEX.captures(content) {
             let yaml_text = caps.get(1).map_or("", |m| m.as_str());
             let body = caps.get(2).map_or("", |m| m.as_str());
 

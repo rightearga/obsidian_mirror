@@ -1,6 +1,13 @@
 // 标签提取和处理模块
 
+use lazy_static::lazy_static;
 use regex::Regex;
+
+lazy_static! {
+    /// 匹配行内 #标签 语法（排除 ## 标题），支持中英文、数字、下划线、连字符
+    static ref HASHTAG_REGEX: Regex =
+        Regex::new(r"(?:^|[^#\w])#([\w\u4e00-\u9fa5_-]+)").unwrap();
+}
 
 /// 从 frontmatter 和正文中提取标签
 pub fn extract_tags(content: &str, frontmatter: &serde_yml::Value) -> Vec<String> {
@@ -19,11 +26,8 @@ pub fn extract_tags(content: &str, frontmatter: &serde_yml::Value) -> Vec<String
         }
     }
 
-    // 2. 从正文中提取 #标签 语法
-    // 匹配 #标签 但不匹配 ## 标题
-    // 支持中英文字符、数字、下划线、连字符
-    let hashtag_regex = Regex::new(r"(?:^|[^#\w])#([\w\u4e00-\u9fa5_-]+)").unwrap();
-    for caps in hashtag_regex.captures_iter(content) {
+    // 2. 从正文中提取 #标签 语法（匹配 #标签 但不匹配 ## 标题）
+    for caps in HASHTAG_REGEX.captures_iter(content) {
         if let Some(tag_match) = caps.get(1) {
             let tag = tag_match.as_str().to_string();
             if !tag.is_empty() && !tags.contains(&tag) {

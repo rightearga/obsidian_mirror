@@ -179,6 +179,9 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         }
     }
 
+    // P3: 记录本次是否为增量同步（sync_result 将在下方被 move 消费）
+    let is_incremental = matches!(&sync_result, SyncResult::IncrementalUpdate { .. });
+
     // 2. 根据同步结果决定处理策略
     let (files_to_process, files_to_delete) = match sync_result {
         SyncResult::InitialClone | SyncResult::NoChange => {
@@ -303,7 +306,21 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     info!("📇 步骤 5/8: 更新索引和反向链接");
     let mut notes_write = data.notes.write().await;
     let mut link_index_write = data.link_index.write().await;
-    
+
+    // P3: 在消费 processed_notes 之前，提取搜索索引所需数据
+    // 增量同步：只更新本次处理的笔记；全量同步：之后从 notes_write 提取全量数据
+    let incremental_search_data: Vec<(String, String, String, std::time::SystemTime, Vec<String>)> =
+        processed_notes
+            .iter()
+            .map(|(path, note, _)| (
+                path.clone(),
+                note.title.clone(),
+                note.content_text.clone(),
+                note.mtime,
+                note.tags.clone(),
+            ))
+            .collect();
+
     // 更新笔记和链接索引
     IndexUpdater::update_notes_and_links(
         &mut notes_write,
@@ -334,24 +351,36 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     drop(sidebar_write);
     info!("✅ 侧边栏树重建完成");
 
-    // 8. 重建搜索索引（使用 Tantivy）
-    info!("🔎 步骤 7/8: 重建搜索索引");
-    
-    let notes_read = data.notes.read().await;
-    let index_data = SearchIndexDataExtractor::extract(&notes_read);
-    drop(notes_read);
-    
-    // 在后台线程重建索引（避免阻塞主线程）
+    // 8. 更新搜索索引（使用 Tantivy）
+    info!("🔎 步骤 7/8: 更新搜索索引");
+
     let search_engine = data.search_engine.clone();
-    tokio::task::spawn_blocking(move || {
-        if let Err(e) = search_engine.rebuild_index(index_data.into_iter()) {
-            error!("  └─ 重建搜索索引失败: {:?}", e);
-        } else {
-            info!("  └─ 搜索索引重建完成");
-        }
-    });
-    
-    info!("✅ 搜索索引重建已启动（后台进行）");
+    if is_incremental {
+        // 增量同步：仅更新变更文件，删除已删除文件，避免全量重建
+        let deleted_for_search = files_to_delete.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = search_engine.update_documents(
+                incremental_search_data.into_iter(),
+                &deleted_for_search,
+            ) {
+                error!("  └─ 增量更新搜索索引失败: {:?}", e);
+            }
+        });
+        info!("✅ 搜索索引增量更新已启动（后台进行）");
+    } else {
+        // 全量同步：重建整个 Tantivy 索引
+        let notes_read = data.notes.read().await;
+        let index_data = SearchIndexDataExtractor::extract(&notes_read);
+        drop(notes_read);
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = search_engine.rebuild_index(index_data.into_iter()) {
+                error!("  └─ 重建搜索索引失败: {:?}", e);
+            } else {
+                info!("  └─ 搜索索引重建完成");
+            }
+        });
+        info!("✅ 搜索索引全量重建已启动（后台进行）");
+    }
 
     // 9. 持久化索引到磁盘
     info!("💾 步骤 8/9: 持久化索引");

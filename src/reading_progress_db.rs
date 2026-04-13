@@ -3,7 +3,7 @@
 //! 管理用户的笔记阅读进度和历史记录
 
 use anyhow::{Context, Result};
-use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, TableDefinition};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::SystemTime;
@@ -193,28 +193,27 @@ impl ReadingProgressDatabase {
     }
 
     /// 获取用户的所有阅读进度（按最后阅读时间降序）
+    ///
+    /// 利用 redb 范围查询（前缀 `{username}:`），
+    /// 避免全表扫描，只读取属于该用户的记录。
     pub fn get_user_progress(&self, username: &str, limit: usize) -> Result<Vec<ReadingProgress>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(READING_PROGRESS_TABLE)?;
 
-        let prefix = format!("{}:", username);
+        // key 格式："{username}:{note_path}"
+        // ':' 是 ASCII 58，';' 是 ASCII 59，前缀范围 "user:" .. "user;" 精确匹配该用户的所有记录
+        let lower = format!("{}:", username);
+        let upper = format!("{};", username);
         let mut progress_list = Vec::new();
 
-        for item in table.iter()? {
-            let (key_value, json_value) = item?;
-            let key = key_value.value();
-
-            if key.starts_with(&prefix) {
-                let json = json_value.value();
-                let progress: ReadingProgress = serde_json::from_str(json)?;
-                progress_list.push(progress);
-            }
+        for item in table.range(lower.as_str()..upper.as_str())? {
+            let (_, json_value) = item?;
+            let progress: ReadingProgress = serde_json::from_str(json_value.value())?;
+            progress_list.push(progress);
         }
 
         // 按最后阅读时间降序排序
         progress_list.sort_by(|a, b| b.last_read_at.cmp(&a.last_read_at));
-
-        // 限制返回数量
         progress_list.truncate(limit);
 
         Ok(progress_list)
@@ -259,28 +258,27 @@ impl ReadingProgressDatabase {
     }
 
     /// 获取用户的阅读历史（按时间降序）
+    ///
+    /// 利用 redb 范围查询（前缀 `{username}:`），
+    /// 避免全表扫描，只读取属于该用户的记录。
     pub fn get_user_history(&self, username: &str, limit: usize) -> Result<Vec<ReadingHistory>> {
         let read_txn = self.db.begin_read()?;
         let table = read_txn.open_table(READING_HISTORY_TABLE)?;
 
-        let prefix = format!("{}:", username);
+        // key 格式："{username}:{timestamp_nanos}:{note_path}"
+        // 前缀范围 "user:" .. "user;" 精确匹配该用户的所有历史记录
+        let lower = format!("{}:", username);
+        let upper = format!("{};", username);
         let mut history_list = Vec::new();
 
-        for item in table.iter()? {
-            let (key_value, json_value) = item?;
-            let key = key_value.value();
-
-            if key.starts_with(&prefix) {
-                let json = json_value.value();
-                let history: ReadingHistory = serde_json::from_str(json)?;
-                history_list.push(history);
-            }
+        for item in table.range(lower.as_str()..upper.as_str())? {
+            let (_, json_value) = item?;
+            let history: ReadingHistory = serde_json::from_str(json_value.value())?;
+            history_list.push(history);
         }
 
         // 按访问时间降序排序
         history_list.sort_by(|a, b| b.visited_at.cmp(&a.visited_at));
-
-        // 限制返回数量
         history_list.truncate(limit);
 
         Ok(history_list)

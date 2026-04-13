@@ -6,6 +6,19 @@
 
 ---
 
+## [v1.3.3] — 2026-04-13
+
+性能深度优化：5 项来自 CODEREVIEW_1.3 的性能改进全部落地。
+
+### Changed
+- **[P1] Regex lazy_static 优化**：`markdown.rs`（5个）、`tags.rs`（1个）所有 `Regex::new()` 移至 `lazy_static!` 块，进程生命周期内只编译一次，大型笔记库同步速度显著提升
+- **[P2] Tantivy IndexReader 缓存复用**：`SearchEngine` 结构体中持久持有 `IndexReader`，`advanced_search` 不再每次创建新 reader，搜索延迟降低
+- **[P3] 搜索索引增量更新**：`SearchEngine` 新增 `update_documents` 方法；增量同步（Git diff）时只更新变更文件的 Tantivy 文档，不再全量重建，大型知识库同步速度大幅提升
+- **[P4] reading_progress_db 前缀范围查询**：`get_user_progress` / `get_user_history` 改用 redb `range()` 前缀查询，避免全表扫描
+- **[P5] graph.rs 消除 content_text 解析**：`extract_links_from_note` 改用 `Note.outgoing_links` 预计算字段（v1.3.1 已建），消除图谱生成时的正则解析开销
+
+---
+
 ## [v1.3.2] — 2026-04-13
 
 安全加固：修复 3 项安全类问题（Cookie 安全属性、分享密码哈希存储、中间件路径精确匹配）。

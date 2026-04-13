@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.3.2 🎉  
+**当前版本**: v1.3.3 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -514,41 +514,49 @@
 
 ---
 
-### 🔧 v1.3.3 (计划中 - 性能优化)
+### ✅ v1.3.3 (已发布 - 2026-04-13)
 
-**主题**: 性能深度优化（CODEREVIEW P1–P5）  
-**预计发布**: 2026-05 月
+**主题**: 性能深度优化（CODEREVIEW P1–P5）
 
 解决 `CODEREVIEW_1.3.md` 中全部性能问题。
 
-#### 性能优化（来自代码审查）
+#### 核心功能
 
-- [ ] **[P1] Regex 编译改用 `lazy_static!`**
-  - 文件：`src/markdown.rs`，`src/tags.rs`，`src/graph.rs`
-  - 问题：每次处理文件都重新编译多个正则表达式，大型笔记库下累计性能损耗明显
-  - 修复：将所有 `Regex::new(...)` 移至 `lazy_static!` 块，进程生命周期内只编译一次
+- ✅ **[P1] Regex 编译改用 `lazy_static!`**
+  - 文件：`src/markdown.rs`（5个正则）、`src/tags.rs`（1个正则）
+  - 修复：所有 `Regex::new(...)` 移至 `lazy_static!` 块，进程生命周期内只编译一次
+  - 注：`graph.rs` 的正则通过 P5 改用 `outgoing_links` 已消除
 
-- [ ] **[P2] Tantivy `IndexReader` 缓存复用**
-  - 文件：`src/search_engine.rs:207`
-  - 问题：每次搜索请求都重新创建 `IndexReader`，引入不必要的初始化开销
-  - 修复：在 `SearchEngine` 结构体中持久持有 `IndexReader`，搜索时直接复用
+- ✅ **[P2] Tantivy `IndexReader` 缓存复用**
+  - 文件：`src/search_engine.rs`
+  - 修复：`SearchEngine` 持久持有 `reader: IndexReader`，`advanced_search` 直接复用，无需每次初始化
 
-- [ ] **[P3] 搜索索引支持增量更新**
-  - 文件：`src/sync.rs:338`，`src/search_engine.rs`
-  - 问题：增量同步后仍全量重建 Tantivy 索引，5000+ 文件场景下每次同步代价高
-  - 修复：在 `SearchEngine` 中实现 `update_documents(changed, deleted)` 方法；增量同步时只删除旧文档、添加新文档
+- ✅ **[P3] 搜索索引增量更新**
+  - 文件：`src/search_engine.rs`、`src/sync.rs`
+  - 修复：新增 `update_documents(changed, deleted)` 方法；增量同步时只更新变更文件，不全量重建
 
-- [ ] **[P4] 分享/历史查询改用前缀索引**
-  - 文件：`src/share_db.rs:156`，`src/reading_progress_db.rs:196`
-  - 问题：`get_user_shares`、`get_user_history` 做全表扫描并在内存中过滤
-  - 修复：重新设计 redb 键格式，将用户名作为键前缀（如 `admin:uuid`），利用 redb 范围查询按前缀高效检索
+- ✅ **[P4] reading_progress_db 前缀范围查询**
+  - 文件：`src/reading_progress_db.rs`
+  - 修复：`get_user_progress` / `get_user_history` 改用 redb `range()` 前缀查询，消除全表扫描
+  - 注：`share_db.get_user_shares` 因键格式为纯 UUID 暂不适用范围查询，保持原设计
 
-- [ ] **[P5] 降低 `content_text` 内存占用**
-  - 文件：`src/domain.rs`，`src/sync.rs`
-  - 问题：每个笔记同时在内存中保存原始 Markdown（`content_text`）和渲染 HTML（`content_html`），大型知识库内存占用翻倍
-  - 修复（分阶段）：
-    - 阶段一：搜索索引构建时提取文本，之后不在 `Note` 中保留 `content_text`（仅传递给 `SearchEngine`）
-    - ~~阶段二：图谱 WikiLink 提取改用 `outgoing_links` 字段~~ — **已在 v1.3.1 完成**（`Note.outgoing_links` 字段已添加）
+- ✅ **[P5] graph.rs 消除 `content_text` 解析**
+  - 文件：`src/graph.rs`
+  - 修复：`extract_links_from_note` 改用 `note.outgoing_links` 预计算字段，消除热路径正则解析
+  - 注：P5 阶段一（移除 Note.content_text 字段）延至 v1.3.4
+
+#### 实际交付物
+
+- 修改文件：`src/markdown.rs`、`src/tags.rs`（P1 lazy_static）
+- 修改文件：`src/search_engine.rs`（P2 reader 缓存 + P3 update_documents）
+- 修改文件：`src/sync.rs`（P3 增量搜索更新）
+- 修改文件：`src/reading_progress_db.rs`（P4 范围查询）
+- 修改文件：`src/graph.rs`（P5 outgoing_links）
+
+#### 测试结果
+
+- 全量测试：**52/52 通过**
+- 新增测试：0 个（性能优化无行为变化，现有测试覆盖）
 
 ---
 
@@ -740,7 +748,7 @@
 **Q2 (4-6月)**: 质量加固期
 - ✅ 完成 v1.3.1（紧急 Bug 修复 + XSS 安全修复）🎉
 - ✅ 完成 v1.3.2（安全加固：Cookie、分享密码哈希、中间件收紧）🎉
-- 完成 v1.3.3（性能优化：Regex/Tantivy/增量搜索索引/前缀查询/内存优化）
+- ✅ 完成 v1.3.3（性能优化：Regex/Tantivy/增量搜索索引/前缀查询/内存优化）🎉
 - 完成 v1.3.4（代码质量 + 测试覆盖补全：Q1/Q3/Q5/Q6/Q7 + sync/graph/persistence 测试）
 
 **Q3 (7-9月)**: 体验提升期
