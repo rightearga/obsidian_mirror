@@ -29,7 +29,8 @@ struct PersistenceMetadata {
 }
 
 /// 持久化版本号：修改持久化结构体（Note 等）时必须递增，以强制重建缓存
-const CURRENT_VERSION: u32 = 2;
+/// v1.4.9：移除 Note.content_text 字段，CURRENT_VERSION 升至 3
+const CURRENT_VERSION: u32 = 3;
 
 /// 索引持久化管理器
 pub struct IndexPersistence {
@@ -352,7 +353,6 @@ mod tests {
             path: format!("{}.md", title),
             title: title.to_string(),
             content_html: format!("<p>{}</p>", title),
-            content_text: title.to_string(),
             backlinks: Vec::new(),
             tags: vec!["test".to_string()],
             toc: Vec::<TocItem>::new(),

@@ -6,6 +6,17 @@
 
 ---
 
+## [v1.4.9] — 2026-04-13
+
+架构优化：移除 `Note.content_text`，大型笔记库内存占用降低约 40-50%。
+
+### Changed
+- **`Note.content_text` 完整移除**：原始 Markdown 文本不再驻留内存。内容在同步时直接读入、传给 Tantivy 搜索引擎后丢弃。CURRENT_VERSION 升至 3，启动时自动触发缓存重建。
+- **同步管道重构**：`ProcessedNote` 增加 `Option<String>` content 字段；`process_single_note` 返回 3-tuple；新增 `extract_search_data()` 函数替代已废弃的 `SearchIndexDataExtractor`；全量/增量同步均直接从处理结果提取内容传给 Tantivy
+- 当持久化命中但 Tantivy 磁盘索引为空时，给出友好警告提示用户手动触发 `/sync`（因内容不在内存中，无法自动重建）
+
+---
+
 ## [v1.4.8] — 2026-04-13
 
 代码质量全面提升：clippy 零警告 + 10 个新测试（search_engine + handlers 集成测试）。

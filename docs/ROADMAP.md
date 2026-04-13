@@ -2,7 +2,7 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.8 🎉  
+**当前版本**: v1.4.9 🎉  
 **最后更新**: 2026-04-13
 
 ---
@@ -964,29 +964,29 @@
 
 ---
 
-### ✨ v1.4.9 (计划中 - 架构优化)
+### ✅ v1.4.9 (已发布 - 2026-04-13)
 
 **主题**: 移除 `Note.content_text`，内存占用减半  
 **预计发布**: 2026-06 月
 
 #### content_text 完整移除（CODEREVIEW P5 阶段一）
 
-- [ ] **从 `Note` 结构体中移除 `content_text` 字段**
+- ✅ **从 `Note` 结构体中移除 `content_text` 字段**
   - 文件：`src/domain.rs`
   - 当前状态：每个笔记同时保存原始 Markdown（`content_text`）和渲染 HTML（`content_html`），大型库内存翻倍
   - 修复：直接删除字段，CURRENT_VERSION 升至 3，强制缓存重建
 
-- [ ] **同步管道重构：content 仅在构建期传递**
+- ✅ **同步管道重构：content 仅在构建期传递**
   - 文件：`src/sync.rs`、`src/indexer.rs`
   - `ProcessedNote` 类型增加 `Option<String>` content 字段（新处理的笔记携带，缓存复用的为 None）
   - 全量同步：content 从处理结果直接传给 SearchEngine，不存入 Note
   - 增量同步：仅更新变更文件，未变更文件依赖 Tantivy 磁盘索引（配合 v1.4.7）
 
-- [ ] **更新 `graph.rs`（已完成，确认无残留依赖）**
+- ✅ **更新 `graph.rs`（已完成，确认无残留依赖）**
   - v1.4.3 已将 `extract_links_from_note` 改用 `outgoing_links`，理论上无 content_text 依赖
   - 验证全量测试通过
 
-- [ ] **文档全面更新**
+- ✅ **文档全面更新**
   - `CLAUDE.md`：更新 Note 结构体说明、同步管道描述
   - `docs/CODEREVIEW_1.3.md`：P5 状态改为 ✅ 完整修复
   - `.claude/project.md`：版本号 + 模块状态

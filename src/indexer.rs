@@ -8,8 +8,12 @@ use walkdir::WalkDir;
 
 use crate::domain::Note;
 
-/// 处理后的笔记数据（包含路径、笔记对象和链接）
-pub type ProcessedNote = (String, Note, Vec<String>);
+/// 处理后的笔记数据：(相对路径, Note, 出链标题列表, 原始文本内容)
+///
+/// 第 4 个元素 `Option<String>` 是原始 Markdown 内容（供 Tantivy 全文索引使用）：
+/// - `Some(content)` — 本次新处理的笔记（内容从磁盘读取）
+/// - `None` — 缓存命中的笔记（内容已在 Tantivy 磁盘索引中，无需重传）
+pub type ProcessedNote = (String, Note, Vec<String>, Option<String>);
 
 /// 反向链接构建器
 pub struct BacklinkBuilder;
@@ -86,14 +90,14 @@ impl IndexUpdater {
         // 只清理需要更新的笔记的旧 link_index 条目
         let updating_paths: HashSet<String> = processed_notes
             .iter()
-            .map(|(path, _, _)| path.clone())
+            .map(|(path, _, _, _)| path.clone())
             .collect();
 
         // 删除旧的 link_index 条目（通过值查找键）
         link_index.retain(|_, path| !updating_paths.contains(path));
 
-        // 插入或更新笔记
-        for (relative_path, note, _links) in processed_notes {
+        // 插入或更新笔记（content 已从 ProcessedNote 移出，不存入 Note）
+        for (relative_path, note, _links, _content) in processed_notes {
             notes_map.insert(relative_path.clone(), note.clone());
             link_index.insert(note.title, relative_path);
         }
@@ -128,27 +132,27 @@ impl TagIndexBuilder {
     }
 }
 
-/// 搜索索引数据提取器
-pub struct SearchIndexDataExtractor;
-
-impl SearchIndexDataExtractor {
-    /// 从笔记集合中提取搜索索引所需的数据
-    pub fn extract(
-        notes: &HashMap<String, Note>,
-    ) -> Vec<(String, String, String, std::time::SystemTime, Vec<String>)> {
-        notes
-            .iter()
-            .map(|(path, note)| {
+/// 从 ProcessedNote 列表中提取供 Tantivy 索引的数据
+///
+/// 只提取含有原始内容（`Some(content)`）的笔记，即本次新处理的笔记。
+/// 缓存命中笔记（`None`）的内容已在 Tantivy 磁盘索引中，无需重传。
+pub fn extract_search_data(
+    notes: &[ProcessedNote],
+) -> Vec<(String, String, String, std::time::SystemTime, Vec<String>)> {
+    notes
+        .iter()
+        .filter_map(|(path, note, _, content_opt)| {
+            content_opt.as_ref().map(|content| {
                 (
                     path.clone(),
                     note.title.clone(),
-                    note.content_text.clone(),
+                    content.clone(),
                     note.mtime,
-                    note.tags.clone(), // 包含标签信息
+                    note.tags.clone(),
                 )
             })
-            .collect()
-    }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -163,7 +167,6 @@ mod tests {
             path: format!("{}.md", title),
             title: title.to_string(),
             content_html: String::new(),
-            content_text: String::new(),
             backlinks: Vec::new(),
             tags: Vec::new(),
             toc: Vec::<TocItem>::new(),

@@ -49,7 +49,8 @@ pub struct Note {
     pub path: String, // Relative path string (e.g., "folder/note.md")
     pub title: String,
     pub content_html: String,
-    pub content_text: String, // 原始纯文本内容,用于搜索
+    // content_text 已在 v1.4.9 移除：原始 Markdown 文本不再驻留内存。
+    // 搜索索引由 Tantivy 磁盘索引维持，全量/增量同步时直接从文件读取内容传给引擎。
     pub backlinks: Vec<String>,
     pub tags: Vec<String>, // 标签列表
     pub toc: Vec<TocItem>, // 目录列表

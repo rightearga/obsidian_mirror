@@ -13,7 +13,7 @@ use crate::domain::Note;
 use crate::sidebar::build_sidebar;
 use crate::indexer::{
     FileIndexBuilder, BacklinkBuilder, TagIndexBuilder,
-    IndexUpdater, SearchIndexDataExtractor
+    IndexUpdater, extract_search_data,
 };
 use crate::persistence::IndexPersistence;
 
@@ -147,19 +147,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                                 if existing_docs > 0 {
                                     info!("🔎 Tantivy 磁盘索引已存在（{} 条文档），跳过重建，直接复用", existing_docs);
                                 } else {
-                                    info!("🔎 Tantivy 磁盘索引为空，重建搜索索引");
-                                    let notes_read = data.notes.read().await;
-                                    let index_data = SearchIndexDataExtractor::extract(&notes_read);
-                                    drop(notes_read);
-
-                                    let search_engine = data.search_engine.clone();
-                                    tokio::task::spawn_blocking(move || {
-                                        if let Err(e) = search_engine.rebuild_index(index_data.into_iter()) {
-                                            error!("  └─ 重建搜索索引失败: {:?}", e);
-                                        } else {
-                                            info!("  └─ 搜索索引重建完成");
-                                        }
-                                    });
+                                    // v1.4.9：content_text 已从 Note 移除，无法从持久化数据重建搜索索引。
+                                    // 触发 /sync 端点可强制重新处理所有文件并重建索引。
+                                    warn!("⚠️  Tantivy 磁盘索引为空且 Note 不含原始内容，搜索功能暂时不可用。\
+                                           请手动触发 POST /sync 以重建搜索索引。");
                                 }
                                 
                                 let total_time = sync_start.elapsed();
@@ -320,18 +311,9 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     let mut link_index_write = data.link_index.write().await;
 
     // P3: 在消费 processed_notes 之前，提取搜索索引所需数据
-    // 增量同步：只更新本次处理的笔记；全量同步：之后从 notes_write 提取全量数据
-    let incremental_search_data: Vec<(String, String, String, std::time::SystemTime, Vec<String>)> =
-        processed_notes
-            .iter()
-            .map(|(path, note, _)| (
-                path.clone(),
-                note.title.clone(),
-                note.content_text.clone(),
-                note.mtime,
-                note.tags.clone(),
-            ))
-            .collect();
+    // 只有 content = Some 的笔记（本次新处理）才需要更新 Tantivy 索引；
+    // 缓存命中（content = None）的笔记内容已在 Tantivy 磁盘上，不需要重传。
+    let search_data = extract_search_data(&processed_notes);
 
     // 更新笔记和链接索引
     IndexUpdater::update_notes_and_links(
@@ -368,11 +350,11 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     let search_engine = data.search_engine.clone();
     if is_incremental {
-        // 增量同步：仅更新变更文件，删除已删除文件，避免全量重建
+        // 增量同步：仅更新变更文件（有 content 的），删除已删除文件
         let deleted_for_search = files_to_delete.clone();
         tokio::task::spawn_blocking(move || {
             if let Err(e) = search_engine.update_documents(
-                incremental_search_data.into_iter(),
+                search_data.into_iter(),
                 &deleted_for_search,
             ) {
                 error!("  └─ 增量更新搜索索引失败: {:?}", e);
@@ -380,12 +362,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         });
         info!("✅ 搜索索引增量更新已启动（后台进行）");
     } else {
-        // 全量同步：重建整个 Tantivy 索引
-        let notes_read = data.notes.read().await;
-        let index_data = SearchIndexDataExtractor::extract(&notes_read);
-        drop(notes_read);
+        // 全量同步：用本次处理的全量数据重建 Tantivy 索引
+        // （v1.4.9 起 content 不再存储于 Note，直接从 processed_notes 获取）
         tokio::task::spawn_blocking(move || {
-            if let Err(e) = search_engine.rebuild_index(index_data.into_iter()) {
+            if let Err(e) = search_engine.rebuild_index(search_data.into_iter()) {
                 error!("  └─ 重建搜索索引失败: {:?}", e);
             } else {
                 info!("  └─ 搜索索引重建完成");
@@ -455,7 +435,7 @@ fn process_markdown_files(
     files: Vec<std::path::PathBuf>,
     local_path: std::path::PathBuf,
     existing_notes: HashMap<String, Note>,
-) -> Vec<(String, Note, Vec<String>)> {
+) -> Vec<(String, Note, Vec<String>, Option<String>)> {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use rayon::prelude::*;
@@ -485,18 +465,18 @@ fn process_markdown_files(
         let needs_update = should_update_note(&relative_path_str, path, &existing_notes);
         
         if !needs_update {
-            // 文件未变更，复用现有笔记
+            // 文件未变更，复用现有笔记（content = None：内容已在 Tantivy 磁盘上）
             if let Some(note) = existing_notes.get(&relative_path_str) {
-                results.lock().unwrap().push((relative_path_str, note.clone(), Vec::new()));
+                results.lock().unwrap().push((relative_path_str, note.clone(), Vec::new(), None));
                 skipped.fetch_add(1, Ordering::Relaxed);
             }
             return;
         }
         
-        // 读取并处理文件
+        // 读取并处理文件（content 单独返回，不存入 Note）
         match process_single_note(path, &relative_path_str) {
-            Some((note, links)) => {
-                results.lock().unwrap().push((relative_path_str, note, links));
+            Some((note, links, content)) => {
+                results.lock().unwrap().push((relative_path_str, note, links, Some(content)));
                 processed.fetch_add(1, Ordering::Relaxed);
             }
             None => {
@@ -538,10 +518,13 @@ fn should_update_note(
 }
 
 /// 处理单个笔记文件
+///
+/// 返回 `(Note, 出链列表, 原始内容文本)`。
+/// 内容文本单独返回（不存入 Note），由调用方决定是否传递给 Tantivy 索引引擎。
 fn process_single_note(
     path: &std::path::Path,
     relative_path: &str,
-) -> Option<(Note, Vec<String>)> {
+) -> Option<(Note, Vec<String>, String)> {
     // 读取文件内容
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
@@ -550,7 +533,7 @@ fn process_single_note(
             return None;
         }
     };
-    
+
     let metadata = match std::fs::metadata(path) {
         Ok(m) => m,
         Err(e) => {
@@ -558,26 +541,24 @@ fn process_single_note(
             return None;
         }
     };
-    
+
     let mtime = metadata.modified().unwrap_or(SystemTime::now());
-    
+
     let (html, links, tags, frontmatter, toc) = MarkdownProcessor::process(&content);
-    
-    // Title: Filename without extension
-    let file_stem = match path.file_stem() {
+
+    // 标题：文件名去掉扩展名
+    let title = match path.file_stem() {
         Some(s) => s.to_string_lossy().to_string(),
         None => {
             error!("❌ 无法获取文件名: {:?}", path);
             return None;
         }
     };
-    let title = file_stem.clone();
 
     let note = Note {
         path: relative_path.to_string(),
-        title: title.clone(),
+        title,
         content_html: html,
-        content_text: content.clone(),
         backlinks: Vec::new(),
         tags,
         toc,
@@ -587,7 +568,8 @@ fn process_single_note(
         outgoing_links: links.clone(),
     };
 
-    Some((note, links))
+    // content 单独返回，供调用方传递给 Tantivy 搜索索引（不存入 Note 避免内存翻倍）
+    Some((note, links, content))
 }
 
 /// 获取当前 Git 提交 hash
@@ -622,7 +604,6 @@ mod tests {
             path: path.to_string(),
             title: path.to_string(),
             content_html: String::new(),
-            content_text: String::new(),
             backlinks: Vec::new(),
             tags: Vec::new(),
             toc: Vec::<TocItem>::new(),

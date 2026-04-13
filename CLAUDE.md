@@ -77,7 +77,7 @@ docker compose up -d
 
 所有内存数据存储在 `Arc<AppState>` 中，各字段使用 `tokio::sync::RwLock` 保护：
 
-- `notes: HashMap<String, Note>` — 相对路径 → `Note`（标题、HTML、原文、标签、目录、反向链接、frontmatter、修改时间、**出链列表 `outgoing_links`**）
+- `notes: HashMap<String, Note>` — 相对路径 → `Note`（标题、HTML、标签、目录、反向链接、frontmatter、修改时间、出链列表 `outgoing_links`）；注：v1.4.9 起 `content_text` 已移除，内容不再驻留内存
 - `link_index: HashMap<String, String>` — 笔记标题/文件名 → 相对路径
 - `backlinks: HashMap<String, Vec<String>>` — 笔记标题 → 链接到它的笔记标题列表
 - `tag_index: HashMap<String, Vec<String>>` — 标签名 → 包含该标签的笔记标题列表

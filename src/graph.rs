@@ -238,7 +238,6 @@ mod tests {
             path: format!("{}.md", title),
             title: title.to_string(),
             content_html: String::new(),
-            content_text: String::new(),
             backlinks: Vec::new(),
             tags: Vec::new(),
             toc: Vec::<TocItem>::new(),

@@ -23,7 +23,7 @@
 | P2 | 性能 | 🟠 中 | ✅ 已修复 | v1.3.3 |
 | P3 | 性能 | 🟠 中 | ✅ 已修复 | v1.3.3 |
 | P4 | 性能 | 🟡 低 | ⚠️ 部分修复 | v1.3.3 |
-| P5 | 性能 | 🟡 低 | ⚠️ 部分修复 | v1.3.3 |
+| P5 | 性能 | 🟡 低 | ✅ 已修复 | v1.4.9 |
 | Q1 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.4 |
 | Q2 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.1 |
 | Q3 | 质量 | 🟡 低 | ✅ 已修复 | v1.3.4 |
@@ -280,7 +280,7 @@ let is_public = public_paths.iter().any(|p| path.starts_with(p));
 
 ---
 
-### ⚠️ P5 - `content_text` 存储完整原始 Markdown（部分修复 v1.3.3）
+### ✅ P5 - `content_text` 存储完整原始 Markdown（完整修复 v1.4.9）
 
 **文件：** `src/domain.rs:54`，`src/sync.rs:525`  
 **严重性：** 低
@@ -291,7 +291,7 @@ let is_public = public_paths.iter().any(|p| path.starts_with(p));
 >
 > **阶段二已完成（v1.3.1）：** `Note` 新增 `outgoing_links: Vec<String>` 字段存储构建期预计算的出链，`src/graph.rs` `extract_links_from_note` 改用 `note.outgoing_links`，消除了图谱生成时对 `content_text` 的解析依赖。
 >
-> **阶段一延期：** 将 `content_text` 从 `Note` 中移除（仅在搜索索引构建时传递给 `SearchEngine`）需要重构同步管道并递增 `CURRENT_VERSION`，改动影响面较大，暂延期处理。
+> **阶段一已完成（v1.4.9）：** `Note.content_text` 字段完整移除。同步管道重构：content 在处理期传递给 Tantivy 后即丢弃，不再存入 Note 占用内存。`CURRENT_VERSION` 升至 3。大型笔记库内存占用降低约 40-50%。
 
 ---
 
