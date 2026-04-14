@@ -1,7 +1,7 @@
 # obsidian_mirror v1.5.x 代码审查报告
 
-**审查日期：** 2026-04-14  
-**审查版本：** v1.5.0（commit `8a74135`）  
+**审查日期：** 2026-04-14（v1.5.0–v1.5.5 全系列）  
+**审查版本：** v1.5.5（commit `f6f2e9b`）  
 **审查范围：** `src/` 全部 27 个 `.rs` 文件  
 **严重级别：** 🔴 P0 / 🟠 P1 / 🟡 P2 / 🔵 P3 / ⚪ Info  
 **状态标记：** ✅ 已修复（本次）/ 🔜 → 版本 / ⏸ 设计性限制，已知接受
@@ -10,187 +10,222 @@
 
 ## 总体评价
 
-**结论：v1.5.0 架构加固效果显著，redb spawn_blocking 覆盖基本完整；但 A1 修复存在两处遗漏——bcrypt verify panic 静默为"密码错误"，以及分享链接创建时 bcrypt hash 仍在 async 上下文直接调用，需本次修复。**
+**结论：v1.5.x 系列功能丰富（搜索升级、多用户、内嵌语法、SSE 通知），整体代码质量稳步提升；本次审计新增 6 项问题，其中 1 项 P1（sync 失败历史缺失）+ 1 项 P2（SSE 连接泄漏）在本版本修复，其余 4 项为低优先级。**
 
 | 维度 | 评分 | 说明 |
 |------|------|------|
-| 架构设计   | ★★★★☆ | `RwLock<AppConfig>` 设计正确；所有 config 读取均未持锁跨 await |
-| 异步正确性 | ★★★★☆ | auth/share/progress 的 redb IO 已全面异步化；bcrypt 有两处遗漏（B1/B2 修复后升至 ★★★★★） |
-| 安全性     | ★★★★☆ | 与 v1.4.x 审计无新增安全问题；路径遍历、XSS、JWT 均已稳定 |
-| 错误处理   | ★★★★☆ | spawn_blocking JoinError 大部分已处理；B1 修复后全面覆盖 |
-| 测试覆盖   | ★★★☆☆ | 新增 T3 测试；spawn_blocking 路径和 bcrypt 路径无专项测试 |
-| 代码质量   | ★★★★☆ | config RwLock 使用规范；Q4 遗留密码表单 token 问题仍在 |
+| 架构设计   | ★★★★☆ | `RwLock<AppConfig>`、broadcast channel、background_tasks 设计合理 |
+| 异步正确性 | ★★★★★ | v1.5.0/1.5.1 修复后 bcrypt/redb 全面异步化；v1.5.5 后台任务句柄存储完善 |
+| 安全性     | ★★★★☆ | 多用户角色体系正确；embed 内容为服务端 HTML 无 XSS；SSE 端点需认证保护 |
+| 错误处理   | ★★★★☆ | sync 失败历史未记录（B1 修复后升至 ★★★★★） |
+| 测试覆盖   | ★★★★☆ | 新增 config_reload 测试；SSE/搜索历史/embed 路径仍缺专项测试 |
+| 代码质量   | ★★★★☆ | 搜索历史 key 纳秒冲突风险极低；软删除语义与 HTTP DELETE 方法不符 |
 
 ---
 
-## 一、安全问题（Security）
+## 一、Bug / 正确性（Correctness）
 
-### ⚪ S1 - 信息性：分享密码表单 HTML 插入请求路径 token
+### 🟠 B1 - `sync_history` 只记录成功同步，失败同步未追加记录 ✅ 已修复（本次）
 
-**文件：** `src/share_handlers.rs:330`  
-**严重性：** Info（不可利用）
-
-```rust
-// token 来自请求路径，非 DB 验证值
-let password_form = format!(r#"...fetch('/share/{}', ...)..."#, token);
-```
-
-此分支仅在 `get_share(&token)` 成功（token 匹配 DB 中的 UUID）后才进入，实际不存在 XSS 注入风险。沿袭 CODEREVIEW_1.4 S2 观察：防御性最佳实践应使用 `share_link.token`（DB 验证值）。
-
----
-
-## 二、Bug / 正确性（Correctness）
-
-### 🟠 B1 - bcrypt verify spawn_blocking panic 被静默为"密码错误" ✅ 已修复（本次）
-
-**文件：** `src/auth_handlers.rs:93`，`src/auth_handlers.rs:230`  
+**文件：** `src/sync.rs:542`，`src/handlers.rs:230-236`  
 **严重性：** P1
 
 ```rust
-// login_handler:93 — spawn_blocking panic → Ok(false) → 登录失败但无 500 无日志
-let is_valid = tokio::task::spawn_blocking(move || {
-    crate::auth::PasswordManager::verify_password(&pwd, &hash)
-})
-.await
-.unwrap_or(Ok(false));  // ← JoinError 被静默为"密码错误"
-
-// change_password_handler:230 — 同样模式
-let verify_result = ...spawn_blocking(...).await.unwrap_or(Ok(false));
+// sync.rs — SyncRecord 只在 perform_sync 正常完成时追加
+// v1.5.5：广播 done 事件并追加同步历史记录
+{
+    let record = SyncRecord { status: "completed".to_string(), ... };
+    let mut history = data.sync_history.write().await;
+    history.push_back(record);  // ← 若 perform_sync 中途返回 Err，此处不会执行
+}
 ```
-
-当 `spawn_blocking` 内的 bcrypt verify 线程 panic 时，`JoinHandle::await` 返回 `Err(JoinError)`。`.unwrap_or(Ok(false))` 将此错误转为 `Ok(false)`，用户看到"用户名或密码错误"，而非 500，且**无任何错误日志**。其他所有 `spawn_blocking` 调用均使用 `unwrap_or_else(|e| Err(...))` 模式，唯此两处例外。
-
-**修复方案**：改用 `unwrap_or_else(|e| { error!(...); Err(anyhow!(...)) })`。
-
----
-
-### 🟠 B2 - `ShareLink::new()` 的 bcrypt hash 在 async 上下文直接调用 ✅ 已修复（本次）
-
-**文件：** `src/share_handlers.rs:121`，`src/share_db.rs:69-73`  
-**严重性：** P1
 
 ```rust
-// create_share_handler:121 — async context 直接调用 ShareLink::new()
-let share_link = ShareLink::new(
-    body.note_path.clone(), username.clone(),
-    expires_in, body.password.clone(), body.max_visits,
-);
-
-// share_db.rs:69-73 — ShareLink::new 内部调用 bcrypt::hash（~100-300ms CPU）
-let password_hash = password.map(|p| {
-    bcrypt::hash(p, PASSWORD_BCRYPT_COST)
-        .expect("bcrypt 哈希失败（不应发生）")  // ← 可 panic + 阻塞 async 线程
-});
+// handlers.rs:sync_handler — 失败时无 history 记录
+match perform_sync(&data).await {
+    Ok(_) => HttpResponse::Ok().body("同步成功"),
+    Err(e) => {
+        error!("同步失败: {:?}", e);
+        HttpResponse::InternalServerError().body(format!("同步失败: {}", e))
+        // ← 缺失：未将 status="failed" 的 SyncRecord 追加到 sync_history
+    }
+}
 ```
 
-当分享链接设有密码时，`bcrypt::hash` 在 Tokio worker 线程上运行 100-300ms，阻塞其他 async 任务。A1 修复将 `db.create_share()` 移入 spawn_blocking，但未包含 `ShareLink::new()` 本身。
+Roadmap 规定 `SyncRecord.status` 应有 "completed" / "failed" 两种值，但失败路径（git pull 失败、Markdown 处理 panic 等）不会追加任何记录，`/api/sync/history` 无法反映同步失败情况，`/health` 的 `last_sync_record` 也不能正确显示最近失败。
 
-此外 `.expect(...)` 在 bcrypt 极少情况下失败时会 panic 整个请求。
-
-**修复方案**：将 `ShareLink::new()` 和 `db.create_share()` 合并到同一个 `spawn_blocking` 闭包中执行。
+**修复方案**：在 `sync_handler`、`webhook_sync_handler` 及定时同步任务中，对 `perform_sync` 返回 `Err` 的情况追加 `status="failed"` 的历史记录。
 
 ---
 
-### 🟡 B3 - `save_progress_handler` 双步骤存在 TOCTOU 竞争 ⏸ 设计性限制，已知接受
+## 二、异步与并发（Async）
 
-**文件：** `src/reading_progress_handlers.rs:110-151`  
+### 🟡 A1 - SSE 流在 "done" 事件后不关闭，连接持续占用 ✅ 已修复（本次）
+
+**文件：** `src/handlers.rs:1032-1049`  
 **严重性：** P2
 
 ```rust
-// 步骤1：get_progress（spawn_blocking）
-let mut progress = match tokio::task::spawn_blocking(move || db.get_progress(&uname, &note_path)) ...
-
-// 步骤2：save_progress（另一个 spawn_blocking）
-let db2 = Arc::clone(&app_state.reading_progress_db);
-if let Err(e) = tokio::task::spawn_blocking(move || db2.save_progress(&progress_clone)) ...
-```
-
-两次 spawn_blocking 之间若同一用户并发访问，可能出现"读旧写新"覆盖丢失。但这是已有设计（阅读进度为最终一致性语义），竞争不影响数据安全，只影响进度精确度。接受为已知限制。
-
----
-
-## 三、异步与并发（Async）
-
-### 🟡 A1 - `update_share`/`update_last_login` fire-and-forget JoinHandle 丢弃
-
-**文件：** `src/share_handlers.rs:341-347`，`src/auth_handlers.rs:103-105`  
-**严重性：** P2（可接受的设计选择）
-
-```rust
-// fire-and-forget，JoinHandle 被丢弃
-tokio::task::spawn_blocking(move || {
-    if let Err(e) = db2.update_share(&updated_link) {
-        tracing::error!("更新分享链接访问次数失败: {}", e);
+// 当前实现：只有 RecvError::Closed（app 关闭）才结束流
+let event_stream = stream::unfold(rx, |mut rx| async move {
+    match rx.recv().await {
+        Ok(event) => {
+            // 无论 stage="done" 还是其他，都继续 Some(...)
+            Some((Ok::<Bytes, actix_web::Error>(Bytes::from(sse_line)), rx))
+        }
+        Err(RecvError::Closed) => None,  // ← 只有 sender 关闭时才结束
     }
 });
 ```
 
-JoinHandle 丢弃后，Tokio 不取消任务（任务继续运行）。服务正常运行时这是"最终一致性"语义，可接受。应用关闭时若 Tokio runtime drop，正在执行的 spawn_blocking 任务会被强制终止，最后一次访问计数可能丢失（TOCTOU）。
+同步完成（stage="done"）后，客户端连接仍保持打开状态，等待下一次同步的事件。在长时间运行的服务中，每个访问 `/api/sync/events` 的客户端都会保持连接，直到应用重启。100 个并发客户端 = 100 个挂起的 `async move` 闭包持续等待 broadcast。
 
-此为已知设计限制，accept。
-
----
-
-## 四、错误处理（Error Handling）
-
-### 🔵 Q1 - `RwLock::read/write().unwrap()` 在锁中毒时会 panic
-
-**文件：** `src/handlers.rs:284,505,885,1004,1012`，`src/sync.rs:43`，`src/auth_handlers.rs:117,165`，`src/main.rs:325`  
-**严重性：** P3
-
-`std::sync::RwLock` 锁中毒场景（持有写锁的线程 panic）在 Rust async 程序中极其罕见，但 `.unwrap()` 意味着中毒后所有后续访问均 panic。可使用 `.unwrap_or_else(|e| e.into_inner())` 模式从中毒锁恢复，或接受为设计限制（中毒概率可忽略不计）。
+**修复方案**：将 unfold 状态改为 `(rx, finished_flag)`；收到 "done" 或 "error" 事件后发送该事件，并在下次调用时返回 `None` 关闭流。
 
 ---
 
-## 五、代码质量（Code Quality）
+### 🟡 A2 - `expand_embeds` 在持有 TokioRwLock 读锁期间递归处理 HTML
 
-### 🟡 Q2 - `public_base_url` 无格式验证，空字符串或非 URL 值会生成无效分享 URL
-
-**文件：** `src/config.rs:36`，`src/share_handlers.rs:146-147`  
+**文件：** `src/handlers.rs:497`（调用方 doc_handler）  
 **严重性：** P2
 
 ```rust
-// 若 public_base_url = Some("") 或 Some("not-a-url")：
-format!("{}/share/{}", base_url.trim_end_matches('/'), share_link.token)
-// → "/share/{token}"（相对 URL）或 "not-a-url/share/{token}"（无效 URL）
+// doc_handler — notes 和 link_index 的读锁在 expand_embeds 期间持续持有
+let notes = data.notes.read().await;         // 读锁开始
+let link_index = data.link_index.read().await;  // 读锁开始
+// ...
+let expanded_content = expand_embeds(&note.content_html, &notes, &link_index, 0);
+// 递归展开，可能对每个内嵌笔记再次处理 HTML（最多 2 层）
+// 读锁直到 notes 和 link_index 变量出作用域才释放
 ```
 
-应在应用启动时或配置加载时校验 `public_base_url` 格式（须以 `http://` 或 `https://` 开头），或在使用时 fallback 到 Host header 推断。
+读锁本身不阻塞其他读者，但持续持有 TokioRwLock 读锁会阻塞 `/sync`（写锁）更新索引。对于包含多个 `![[]]` 内嵌的大型笔记，expand_embeds 执行时间可长达数毫秒，此间同步操作的写锁必须等待。
+
+**缓解方案**：在持有读锁期间克隆所需数据，然后释放锁再调用 `expand_embeds`。
+
+---
+
+## 三、代码质量（Code Quality）
+
+### 🟡 Q1 - `delete_user_handler` 执行软删除但使用 HTTP DELETE 语义
+
+**文件：** `src/auth_handlers.rs:493-540`  
+**严重性：** P2
+
+```rust
+// "删除"用户实际只是禁用
+pub async fn delete_user_handler(...) -> impl Responder {
+    // ...
+    let mut user = db.get_user(&t_clone2)?.ok_or_else(...)?;
+    user.enabled = false;  // ← 不是真正删除
+    db.update_user(&user)?;
+    // 响应：{"message": "用户已禁用"}
+}
+```
+
+HTTP DELETE 语义通常意味着资源被永久移除。当前实现只是将 `enabled = false`，数据仍保留在 auth.db。前端文档应明确说明这是"禁用"而非"删除"，以避免用户误解（如期望被删用户可以重新创建）。
+
+**建议**：要么将路由改为 `POST /api/admin/users/{u}/disable`，要么真正删除用户并添加重新创建的文档说明。接受为已知设计选择。
+
+---
+
+### 🔵 Q2 - `SearchHistoryEntry::db_key()` 使用纳秒时间戳，并发请求可能产生 key 冲突
+
+**文件：** `src/reading_progress_db.rs`（`SearchHistoryEntry::db_key`）  
+**严重性：** P3
+
+```rust
+pub fn db_key(&self) -> String {
+    let timestamp = self.searched_at.duration_since(...).as_nanos();
+    format!("{}:{}", self.username, timestamp)
+    // 同一用户在同一纳秒并发发送两条搜索请求 → key 相同 → 后一条覆盖前一条
+}
+```
+
+实际冲突概率极低（需要同一用户在 < 1ns 内发送两条请求），但与 `ReadingHistory::db_key()` 相同模式对比，后者附加了 `note_path` 作为额外区分维度。可考虑添加随机后缀或 UUID 作为 tiebreaker。
+
+---
+
+### 🔵 Q3 - `background_tasks.lock()` 使用 `if let Ok` 静默忽略锁中毒
+
+**文件：** `src/sync.rs`（background_tasks push 段）  
+**严重性：** P3
+
+```rust
+if let Ok(mut tasks) = data.background_tasks.lock() {
+    tasks.retain(|h| !h.is_finished());
+    tasks.push(h);
+}
+// 锁中毒时：句柄丢失，优雅关闭不会等待该任务
+```
+
+锁中毒概率极低，但若发生，被忽略的 JoinHandle 不会在关闭时等待，可能导致 Tantivy 写操作被强制中断（数据损坏风险低，Tantivy 有 WAL，但不推荐）。
+
+---
+
+## 四、安全性（Security）
+
+### ⚪ S1 - 旧 JWT Token `role` 字段缺失导致降级为 viewer（文档说明）
+
+**文件：** `src/auth.rs:20-25`  
+**严重性：** Info
+
+```rust
+#[serde(default = "default_role")]
+pub role: String,
+
+fn default_role() -> String { "viewer".to_string() }
+```
+
+v1.5.3 前签发的 JWT Token 不含 `role` 字段，反序列化时默认 `viewer`。用户下次登录前的所有请求将以 viewer 权限执行（即使实际是 admin），可能导致 `/sync`、`/api/config/reload` 返回 403。
+
+这是正确的安全降级行为（未知角色给最低权限），但可能导致已登录用户突然无法触发同步。升级至 v1.5.3+ 后建议提示管理员重新登录。
+
+---
+
+### ⚪ S2 - 信息性：分享密码表单 HTML 插入请求路径 token（延续 CODEREVIEW_1.4 S2）
+
+**文件：** `src/share_handlers.rs`  
+**严重性：** Info — 不可利用，与前次报告一致，沿袭接受
 
 ---
 
 ## 修复状态汇总
 
+### v1.5.0–v1.5.1 遗留问题（已修复）
+
+| 编号 | 问题 | 级别 | 状态 |
+|------|------|------|------|
+| B1 (v1.5.1) | bcrypt verify panic 静默为"密码错误" | 🟠 P1 | ✅ v1.5.1 |
+| B2 (v1.5.1) | ShareLink::new() bcrypt 在 async 上下文 | 🟠 P1 | ✅ v1.5.1 |
+| B3 (v1.5.1) | save_progress TOCTOU | 🟡 P2 | ⏸ 设计性限制 |
+| A1 (v1.5.1) | fire-and-forget JoinHandle | 🟡 P2 | ⏸ 设计性限制 |
+| Q1 (v1.5.1) | RwLock unwrap() | 🔵 P3 | 🔜 → v1.6.0 |
+| Q2 (v1.5.1) | public_base_url 无格式验证 | 🟡 P2 | 🔜 → v1.6.0 |
+
+### v1.5.2–v1.5.5 新增问题
+
 | 编号 | 问题 | 级别 | 状态 | 修复版本 |
 |------|------|------|------|---------|
-| B1 | bcrypt verify panic 静默为"密码错误" | 🟠 P1 | ✅ 已修复（本次） | v1.5.1 |
-| B2 | ShareLink::new() bcrypt 在 async 上下文直接调用 | 🟠 P1 | ✅ 已修复（本次） | v1.5.1 |
-| B3 | save_progress TOCTOU | 🟡 P2 | ⏸ 设计性限制 | — |
-| A1 | fire-and-forget JoinHandle | 🟡 P2 | ⏸ 设计性限制 | — |
-| Q1 | RwLock unwrap() | 🔵 P3 | 🔜 → v1.6.0 | — |
-| Q2 | public_base_url 无格式验证 | 🟡 P2 | 🔜 → v1.5.2 | — |
-| S1 | 密码表单使用请求路径 token | ⚪ Info | ⏸ 不可利用，接受 | — |
+| B1 | sync_history 只记录成功，失败未追加 | 🟠 P1 | ✅ 已修复（本次） | v1.5.6 |
+| A1 | SSE 流在 done 事件后不关闭 | 🟡 P2 | ✅ 已修复（本次） | v1.5.6 |
+| A2 | expand_embeds 持锁递归处理 | 🟡 P2 | 🔜 → v1.6.0 | — |
+| Q1 | delete_user 软删除与 HTTP DELETE 语义不符 | 🟡 P2 | ⏸ 设计性限制，已知接受 | — |
+| Q2 | SearchHistoryEntry key 纳秒冲突 | 🔵 P3 | 🔜 → v1.6.0 | — |
+| Q3 | background_tasks 锁中毒静默忽略 | 🔵 P3 | 🔜 → v1.6.0 | — |
+| S1 | 旧 JWT 降级为 viewer（文档说明） | ⚪ Info | ⏸ 正确安全行为 | — |
 
-**修复统计（本次审计 v1.5.1）**：  
-已修复 **2 项**（B1/B2） / 推迟 **2 项** / 接受为设计限制 **3 项**
+**修复统计（本次审计 v1.5.6）**：  
+已修复 **2 项**（B1/A1） / 推迟 **3 项** / 接受为设计限制 **2 项**
 
 ---
 
 ## 进入 v1.6.0 前必须解决的问题
 
-无 P0 问题。v1.5.x 系列内已修复所有 P1 问题。
+1. **B1** ✅ — sync history 完整性：已修复，失败同步现在正确记录
 
 ---
 
-## 附：CODEREVIEW_1.4 历史问题状态确认
+## 附：CODEREVIEW_1.4 历史问题状态更新
 
-| 编号 | 状态 | 说明 |
-|------|------|------|
-| A1（redb spawn_blocking）| ✅ 已修复（v1.5.0）| auth/share/progress 全覆盖；bcrypt 在 v1.5.1 补全 |
-| B2（config_reload 热重载）| ✅ 已修复（v1.5.0）| AppConfig → RwLock，写入后触发同步 |
-| B3（uptime_seconds 语义）| ✅ 已修复（v1.5.0）| start_time.elapsed() |
-| E1（Rayon mutex 中毒）| ✅ 已修复（v1.5.0）| unwrap_or_else |
-| E2（模板错误纯文本）| ✅ 已修复（v1.5.0）| JSON 统一 |
-| Q2（URL scheme 不可靠）| ✅ 已修复（v1.5.0）| X-Forwarded-Proto + public_base_url |
-| Q3（Git commit 重复）| ✅ 已修复（v1.5.0）| 统一到 GitClient |
-| T3（config_reload 测试）| ✅ 已修复（v1.5.0）| 401 未认证测试 |
+全部 8 项已在 v1.5.0 修复，状态不变。详见 CODEREVIEW_1.4.md。

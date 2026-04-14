@@ -227,10 +227,34 @@ pub async fn sync_handler(req: actix_web::HttpRequest, data: web::Data<Arc<AppSt
         }
     };
 
+    // B1 修复：记录失败同步的历史（成功的记录已由 perform_sync 内部追加）
+    let sync_start = std::time::Instant::now();
+    let start_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
     match perform_sync(&data).await {
         Ok(_) => HttpResponse::Ok().body("同步成功"),
         Err(e) => {
             error!("同步失败: {:?}", e);
+            // 记录失败同步记录（perform_sync 内只记录成功情况）
+            let end_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let notes_count = data.notes.read().await.len();
+            let record = crate::sync::SyncRecord {
+                started_at: start_ts,
+                finished_at: end_ts,
+                notes_count,
+                status: "failed".to_string(),
+                error_msg: Some(e.to_string()),
+                duration_ms: sync_start.elapsed().as_millis() as u64,
+            };
+            let mut history = data.sync_history.write().await;
+            if history.len() >= 10 { history.pop_front(); }
+            history.push_back(record);
             HttpResponse::InternalServerError().body(format!("同步失败: {}", e))
         }
     }
@@ -1028,22 +1052,29 @@ pub async fn sync_events_handler(data: web::Data<Arc<AppState>>) -> impl Respond
 
     let rx = data.sync_progress_tx.subscribe();
 
-    // 将 broadcast::Receiver 转为 Stream<Item = Result<Bytes, actix_web::Error>>
-    let event_stream = stream::unfold(rx, |mut rx| async move {
+    // A1 修复：使用 (rx, finished) 二元组作为 unfold 状态，
+    // "done"/"error" 事件发送后将 finished=true，下次调用时返回 None 关闭流，
+    // 避免客户端连接在同步完成后永久挂起占用服务端资源。
+    let event_stream = stream::unfold((rx, false), |(mut rx, finished)| async move {
+        if finished {
+            return None; // 上一轮已发出终止事件，关闭流
+        }
         match rx.recv().await {
             Ok(event) => {
+                // "done" 或 "error" 阶段是流的终止信号
+                let is_final = event.stage == "done" || event.stage == "error";
                 let json = serde_json::to_string(&event).unwrap_or_default();
                 let sse_line = format!("data: {}\n\n", json);
                 Some((
                     Ok::<Bytes, actix_web::Error>(Bytes::from(sse_line)),
-                    rx,
+                    (rx, is_final), // 若 is_final=true，下次调用返回 None
                 ))
             }
-            Err(RecvError::Closed) => None,  // 发送端关闭，结束流
+            Err(RecvError::Closed) => None,  // 发送端关闭（应用退出），结束流
             Err(RecvError::Lagged(n)) => {
                 // 接收过慢，跳过了若干消息，发送一条 lag 通知
                 let lag_msg = format!("data: {{\"stage\":\"lag\",\"progress\":0,\"message\":\"跳过 {} 条消息\"}}\n\n", n);
-                Some((Ok(Bytes::from(lag_msg)), rx))
+                Some((Ok(Bytes::from(lag_msg)), (rx, false)))
             }
         }
     });
@@ -1178,10 +1209,32 @@ pub async fn webhook_sync_handler(
     };
 
     tracing::info!("📡 Webhook 触发同步");
+    // B1 修复：记录失败同步的历史
+    let wh_start = std::time::Instant::now();
+    let wh_start_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
     match crate::sync::perform_sync(&data).await {
         Ok(_) => HttpResponse::Ok().body("同步完成"),
         Err(e) => {
             tracing::error!("Webhook 触发同步失败: {:?}", e);
+            let end_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let notes_count = data.notes.read().await.len();
+            let record = crate::sync::SyncRecord {
+                started_at: wh_start_ts,
+                finished_at: end_ts,
+                notes_count,
+                status: "failed".to_string(),
+                error_msg: Some(e.to_string()),
+                duration_ms: wh_start.elapsed().as_millis() as u64,
+            };
+            let mut history = data.sync_history.write().await;
+            if history.len() >= 10 { history.pop_front(); }
+            history.push_back(record);
             HttpResponse::InternalServerError().body(format!("同步失败: {}", e))
         }
     }

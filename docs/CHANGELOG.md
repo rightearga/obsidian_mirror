@@ -8,6 +8,21 @@
 
 ---
 
+## [v1.5.6] — 2026-04-14
+
+代码审计修复版本（CODEREVIEW_1.5，v1.5.2–v1.5.5）。
+
+### Fixed
+- **[B1] sync_history 只记录成功同步**：`sync_handler` 和 `webhook_sync_handler` 在 `perform_sync` 返回 `Err` 时现在也会追加 `status="failed"` 的 `SyncRecord`，确保 `/api/sync/history` 和 `/health.last_sync_record` 能正确反映同步失败情况
+- **[A1] SSE 流在 done 事件后不关闭**：`sync_events_handler` 的 `unfold` 状态改为 `(rx, finished_flag)`；收到 "done"/"error" 阶段事件后发送该事件，下次调用时返回 `None` 关闭流，避免客户端连接在同步完成后永久挂起
+
+### 审计统计
+- 🟠 P1 修复：1 项（B1 sync 失败历史缺失）
+- 🟡 P2 修复：1 项（A1 SSE 连接泄漏）
+- 发现问题总计（v1.5.2–v1.5.5）：8 项（含接受 2 项、推迟 3 项）
+
+---
+
 ## [v1.5.5] — 2026-04-14
 
 实时通知与运维增强：SSE 同步进度、优雅关闭、同步历史记录。
