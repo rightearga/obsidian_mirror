@@ -345,13 +345,79 @@ WASM NoteIndex.search(query) → 排序结果
 
 ---
 
-### 🔧 v1.6.4 — 代码审计（CODEREVIEW_1.6）
+### ✨ v1.6.4 — WASM 性能优化（M1/M2/M3）
+
+**主题**：消灭 v1.6.3 基准测试暴露的三个性能瓶颈，全面提升 WASM 模块吞吐
+
+#### M1：`highlight_terms` 避免双倍 `to_lowercase` 分配（遗留自 v1.5.2）
+
+**问题**：`search_engine.rs::generate_snippet` 和 `crates/wasm/src/lib.rs::highlight_terms`
+在每次搜索命中时对 `text` 和 `term` 各调用一次 `to_lowercase()`，产生两次堆分配。
+
+```rust
+// 当前（双倍分配）
+let term_lower = term.to_lowercase();   // 分配 1
+let text_lower = text.to_lowercase();   // 分配 2
+```
+
+**修复方案**：
+- 方案 A（简单）：只做一次 `term.to_lowercase()`，用 `memchr` 做大小写不敏感子串查找
+- 方案 B（彻底）：引入 `unicase` crate，零分配大小写不敏感比较
+
+**预期收益**：`search/fulltext_hit` -2~5 µs（当前 54.4 µs → ~50 µs），
+消除 v1.5.2 引入的 +10 µs `<mark>` 高亮代价中的分配部分
+
+**文件**：`src/search_engine.rs`，`crates/wasm/src/lib.rs`
+
+---
+
+#### M2：WASM `compute_graph_layout` Barnes-Hut 四叉树近似
+
+**问题**：当前 Fruchterman-Reingold 使用 O(n²) 排斥力计算。500 节点 × 15 迭代
+= 1.875M 对运算 ≈ 10.6ms（原生 Release），浏览器端约 20-50ms。
+
+**修复方案**：Barnes-Hut 四叉树近似 O(n log n)：
+1. 每轮迭代构建四叉树（O(n log n)）
+2. 对每个节点，距离足够远的簇用质心近似（θ 参数控制精度/速度权衡，默认 θ=0.9）
+3. 吸引力计算不变（只有连边节点，稀疏图中 O(E) ≪ O(n²)）
+
+**预期收益**：
+
+| 节点数 | 当前 | 优化后目标 |
+|--------|------|----------|
+| 200 | 3.0ms | ~0.8ms |
+| 500 | 10.6ms | ~2ms |
+| 1000 | ~40ms | ~5ms |
+
+**文件**：`crates/wasm/src/lib.rs`（新增 `QuadTree` 结构体）
+
+---
+
+#### M3：NoteIndex CJK 搜索速度均衡（拉近与 ASCII 的差距）
+
+**问题**：CJK 搜索（705 µs）比 ASCII（244 µs）慢约 3×。原因：
+- CJK 每字生成 unigram + bigram（2 token/字），"编程语言"4 字 → 7 个 token
+- ASCII "rust"分词后仅 1 个 token
+- token 数多 → 倒排索引查询次数多 → 候选集更大
+
+**修复方案**：
+1. **限制查询 token 数上限**：query 超过 8 个 token 时，仅取 TF-IDF 最高的 8 个
+2. **位图加速候选交集**：改用 bitset 存储候选 note 集合，替换 `HashSet<usize>`
+3. **bigram 权重上调**：精确 bigram 匹配得分提高（+15），减少宽泛 unigram 带来的噪声候选
+
+**预期收益**：CJK 搜索从 705 µs → ~300 µs（接近 ASCII 水平）
+
+**文件**：`crates/wasm/src/lib.rs`
+
+---
+
+### 🔧 v1.6.5 — 代码审计（CODEREVIEW_1.6）
 
 **主题**：对 v1.6.x WASM 相关代码进行系统性审查
 
 - 审计重点：
   - WASM 模块内存管理（wasm-bindgen 内存泄漏）
-  - 离线搜索索引内容安全（`index.bin` 是否包含不应暴露的信息）
+  - 离线搜索索引内容安全（`index.json` 是否包含不应暴露的信息）
   - WASM 加载失败 fallback 路径是否完整覆盖
   - Rust unsafe 代码（如果有）的安全性
 - 产出：`docs/CODEREVIEW_1.6.md`
