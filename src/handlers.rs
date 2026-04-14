@@ -9,7 +9,7 @@ use askama::Template;
 use crate::state::AppState;
 use crate::sync::perform_sync;
 use crate::sidebar::{flatten_sidebar, find_first_file};
-use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate};
+use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate};
 use crate::search_engine::SortBy;
 use crate::graph::generate_graph;
 use crate::domain::BreadcrumbItem;
@@ -1349,6 +1349,32 @@ pub async fn config_reload_handler(
         Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
             "error": format!("重载后同步失败: {}", e)
         })),
+    }
+}
+
+/// GET /graph — 全局知识图谱专页（v1.7.0）
+///
+/// 独立全屏图谱页面，支持全局图谱与单笔记子图切换。
+/// 工具栏包含：搜索框（高亮节点）、深度选择器、孤立节点开关、聚类着色开关。
+#[get("/graph")]
+pub async fn graph_page_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+
+    let tmpl = GraphPageTemplate {
+        title: "知识图谱",
+        sidebar: &flat_sidebar,
+        backlinks: &backlinks_empty,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("图谱专页模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
     }
 }
 

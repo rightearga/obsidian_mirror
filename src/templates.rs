@@ -81,6 +81,17 @@ pub struct RecentNotesPageTemplate<'a> {
     pub days: u64,
 }
 
+/// 全局知识图谱专页模板（v1.7.0）
+///
+/// GET /graph 路由的独立全屏图谱页，支持全局图谱与单笔记子图切换。
+#[derive(Template)]
+#[template(path = "graph_page.html")]
+pub struct GraphPageTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+}
+
 /// 管理员用户管理页面模板（v1.5.3）
 #[derive(Template)]
 #[template(path = "admin_users.html")]

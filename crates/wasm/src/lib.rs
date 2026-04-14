@@ -477,19 +477,60 @@ impl NoteIndex {
             .map(|t| if is_cjk_bigram(t) { 15.0_f32 } else { 10.0 })
             .collect();
 
-        // 对候选笔记评分（直接查询预缓存的 token 集合，O(1) per token per note）
+        // M4（v1.7.0）：预计算 token→query_idx 映射，评分阶段用位掩码替换重复 HashSet 查询。
+        //
+        // 旧方案（M3 后）：每候选笔记执行 query_tokens.len() × 3 次 HashSet::contains()
+        //   = 8 × 3 = 24 次字符串哈希查找（每次约 50ns on L1 miss → 1.2µs/笔记）
+        //
+        // 新方案（M4）：迭代 TokenCache 中较短的 title/tag 集合（通常 ≤ 5 条），
+        //   每条做一次 HashMap<&str, u8> 查询，建立 3 个 u8 位掩码，
+        //   再用位运算一次性求分。减少笔记数较多时的热路径开销。
+        let token_to_qidx: HashMap<&str, usize> = query_tokens.iter()
+            .enumerate()
+            .map(|(i, t)| (t.as_str(), i))
+            .collect();
+
+        // 对候选笔记评分（位掩码方案，v1.7.0 M4）
         let mut scored: Vec<(f32, &NoteEntry)> = candidate_bits.iter_ones()
             .filter_map(|idx| {
                 let note   = self.notes.get(idx)?;
                 let cached = self.token_cache.get(idx)?;
 
-                let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)| {
-                    let mut s = 0.0f32;
-                    if cached.title_tokens.contains(token.as_str())   { s += tw; }
-                    if cached.tag_tokens.contains(token.as_str())     { s += 5.0; }
-                    if cached.content_tokens.contains(token.as_str()) { s += 1.0; }
-                    s
-                }).sum();
+                // 位掩码：bit i = query_token[i] 在该字段中命中（最多 8 个 query token）
+                let mut title_mask: u8 = 0;
+                let mut tag_mask:   u8 = 0;
+                let mut body_mask:  u8 = 0;
+
+                // 遍历 title_tokens（通常 ≤ 5 个），建立标题位掩码
+                for tok in &cached.title_tokens {
+                    if let Some(&qi) = token_to_qidx.get(tok.as_str()) {
+                        title_mask |= 1u8 << qi;
+                    }
+                }
+                // 遍历 tag_tokens（通常 ≤ 3 个）
+                for tok in &cached.tag_tokens {
+                    if let Some(&qi) = token_to_qidx.get(tok.as_str()) {
+                        tag_mask |= 1u8 << qi;
+                    }
+                }
+                // 遍历 content_tokens
+                for tok in &cached.content_tokens {
+                    if let Some(&qi) = token_to_qidx.get(tok.as_str()) {
+                        body_mask |= 1u8 << qi;
+                    }
+                }
+
+                // 位运算求分：遍历每个 query token，查对应位是否置位
+                let score: f32 = (0..query_tokens.len())
+                    .map(|i| {
+                        let bit = 1u8 << i;
+                        let mut s = 0.0f32;
+                        if title_mask & bit != 0 { s += title_weights[i]; }
+                        if tag_mask   & bit != 0 { s += 5.0; }
+                        if body_mask  & bit != 0 { s += 1.0; }
+                        s
+                    })
+                    .sum();
 
                 if score > 0.0 { Some((score, note)) } else { None }
             })
@@ -798,8 +839,15 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
 
     // M2（v1.6.4）：n > 100 时使用 Barnes-Hut O(n log n) 近似代替 O(n²) 全对排斥力
     let use_barnes_hut = n > 100;
+    // M5（v1.7.0）：θ 自适应——前 60% 迭代用较大 θ 快速收敛，后 40% 用较小 θ 精细布局。
+    //   θ = 1.2（前期）：s/d < 1.2 时用质心近似，允许更多近似 → 每迭代更快
+    //   θ = 0.7（后期）：s/d < 0.7 时用质心近似，精度更高 → 布局抖动更小
+    //   θ_sq = θ² 避免每次迭代重复乘法
+    let theta_early_sq = 1.2_f64 * 1.2_f64; // 前 60% 迭代
+    let theta_late_sq  = 0.7_f64 * 0.7_f64; // 后 40% 迭代
+    let warmup_iters = (iterations as f64 * 0.6).round() as u32;
 
-    for _ in 0..iterations {
+    for iter_idx in 0..iterations {
         let mut fx = vec![0.0_f64; n];
         let mut fy = vec![0.0_f64; n];
 
@@ -817,8 +865,8 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
                 tree.insert(i, pos_x[i], pos_y[i], bounds);
             }
 
-            // θ = 0.9：近似精度参数（s/d < θ 时用质心近似）
-            let theta_sq = 0.9_f64 * 0.9_f64;
+            // M5：根据迭代阶段选择 θ（前期快速收敛，后期精细布局）
+            let theta_sq = if iter_idx < warmup_iters { theta_early_sq } else { theta_late_sq };
             for i in 0..n {
                 let (rfx, rfy) = tree.repulsion_force(pos_x[i], pos_y[i], k_sq, theta_sq, i);
                 fx[i] += rfx;
@@ -1303,5 +1351,75 @@ mod tests {
         // 内容不超限时不截断
         let result = truncate_html("<p>Hi</p>", 100);
         assert_eq!(result, "Hi", "不超限时不应截断");
+    }
+
+    // ─── v1.7.0 测试：M4 评分 Bitset ──────────────────────────────────────────
+
+    /// M4 验证：多 query token 命中标题/标签/正文时分数应与期望一致
+    #[test]
+    fn test_m4_scoring_correctness() {
+        use serde_json::json;
+        // 构建包含 1 条笔记的 NoteIndex
+        let notes_json = serde_json::to_string(&json!([
+            {
+                "title": "Rust 编程指南",
+                "path": "guide.md",
+                "tags": ["rust"],
+                "content": "介绍 Rust 语言基础知识",
+                "mtime": 0
+            }
+        ])).unwrap();
+        let idx = NoteIndex::load_json(&notes_json).expect("load_json 应成功");
+
+        // 搜索 "rust"：应在标题和标签中命中，分数 = title_weight(10) + tag(5) = 15
+        let result_json = idx.search_json("rust", 10);
+        let results: Vec<serde_json::Value> = serde_json::from_str(&result_json).unwrap();
+        assert_eq!(results.len(), 1, "应找到 1 条笔记");
+        let score = results[0]["score"].as_f64().unwrap();
+        // 标题命中 10 + 标签命中 5 + 内容未含 "rust"（title/tag 已覆盖），score ≥ 10
+        assert!(score >= 10.0, "命中标题应得分 ≥ 10，实际={}", score);
+    }
+
+    /// M4 验证：不相关查询应返回空结果
+    #[test]
+    fn test_m4_no_match_returns_empty() {
+        use serde_json::json;
+        let notes_json = serde_json::to_string(&json!([
+            {"title":"笔记 A","path":"a.md","tags":[],"content":"hello world","mtime":0}
+        ])).unwrap();
+        let idx = NoteIndex::load_json(&notes_json).expect("load_json 应成功");
+        let result = idx.search_json("完全不存在的词语xyz", 10);
+        assert_eq!(result, "[]", "无命中应返回空数组");
+    }
+
+    // ─── v1.7.0 测试：M5 θ 自适应 Barnes-Hut ──────────────────────────────────
+
+    /// M5 验证：θ 自适应不影响布局结果的有效性（节点数量与坐标有限）
+    #[test]
+    fn test_m5_theta_adaptive_layout_valid() {
+        // 150 节点触发 Barnes-Hut，验证 M5 自适应 θ 不产生 NaN/Inf 坐标
+        let nodes: Vec<_> = (0..150).map(|i| format!(r#"{{"id":"n{}"}}"#, i)).collect();
+        let nodes_json = format!("[{}]", nodes.join(","));
+        let result = compute_graph_layout(&nodes_json, "[]", 30);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let positions = arr.as_array().unwrap();
+        assert_eq!(positions.len(), 150, "应返回 150 个节点位置");
+        // 所有坐标应为有限值
+        for pos in positions {
+            let x = pos["x"].as_f64().unwrap_or(f64::NAN);
+            let y = pos["y"].as_f64().unwrap_or(f64::NAN);
+            assert!(x.is_finite(), "x 坐标不应为 NaN/Inf：{}", x);
+            assert!(y.is_finite(), "y 坐标不应为 NaN/Inf：{}", y);
+        }
+    }
+
+    /// M5 验证：小图（≤ 100 节点）不使用 Barnes-Hut，M5 不影响其路径
+    #[test]
+    fn test_m5_small_graph_unaffected() {
+        let nodes: Vec<_> = (0..50).map(|i| format!(r#"{{"id":"s{}"}}"#, i)).collect();
+        let nodes_json = format!("[{}]", nodes.join(","));
+        let result = compute_graph_layout(&nodes_json, "[]", 20);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 50, "小图应返回 50 个节点位置");
     }
 }

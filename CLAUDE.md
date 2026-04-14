@@ -140,6 +140,7 @@ docker compose up -d
 | DELETE/POST | `/api/admin/users/{u}` | 禁用/重置密码（需 admin）(v1.5.3) |
 | POST/GET/DELETE | `/api/search/history` | 搜索历史记录（需认证）(v1.5.2) |
 | GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
+| GET | `/graph` | 全局知识图谱专页（全屏，含工具栏、聚类着色，v1.7.0） |
 | POST | `/webhook/sync` | Webhook 触发同步（GitHub/GitLab 签名验证，需 webhook.enabled=true） |
 | POST | `/api/config/reload` | 配置热重载（需认证，重新读取 config.ron 并触发同步） |
 
