@@ -234,6 +234,36 @@ function renderGraph(data, currentNoteTitle) {
     container.style.display = 'block';
 
     try {
+        // v1.6.3：当 WASM 可用且节点数超过阈值时，使用 WASM 静态布局代替 Vis.js 物理引擎
+        // - WASM 布局：< 200ms（500 节点），无动画，立即显示最终位置
+        // - Vis.js 物理：~2s（500 节点），有稳定动画，节点数少时体验更好
+        const WASM_LAYOUT_THRESHOLD = 50;
+        const wasmLayout = graphRawNodes.length >= WASM_LAYOUT_THRESHOLD
+            ? window.WasmLoader?.computeGraphLayout(
+                graphRawNodes.map(n => ({ id: n.id })),
+                graphRawEdges.map(e => ({ from: e.from, to: e.to }))
+              )
+            : null;
+
+        if (wasmLayout) {
+            // WASM 布局成功：直接注入坐标，禁用物理引擎
+            const positions = {};
+            wasmLayout.forEach(({ id, x, y }) => { positions[id] = { x, y }; });
+            // 将预计算坐标写入节点数据
+            graphRawNodes.forEach(node => {
+                if (positions[node.id]) {
+                    node.x = positions[node.id].x;
+                    node.y = positions[node.id].y;
+                    node.physics = false; // 固定位置，不参与物理模拟
+                }
+            });
+            // 重建 DataSet 使坐标生效
+            graphData.nodes = new vis.DataSet(graphRawNodes);
+            // 覆盖 physics 配置，禁用物理引擎
+            options.physics = { enabled: false };
+            console.log(`[WASM] 图谱布局完成（${graphRawNodes.length} 节点，WASM 静态模式）`);
+        }
+
         graphNetwork = new vis.Network(container, graphData, options);
 
         // 点击节点跳转
@@ -244,10 +274,12 @@ function renderGraph(data, currentNoteTitle) {
             }
         });
 
-        // 稳定后停用物理
-        graphNetwork.on('stabilizationIterationsDone', () => {
-            graphNetwork.setOptions({ physics: { enabled: false } });
-        });
+        if (!wasmLayout) {
+            // 仅在 Vis.js 物理模式下监听稳定事件
+            graphNetwork.on('stabilizationIterationsDone', () => {
+                graphNetwork.setOptions({ physics: { enabled: false } });
+            });
+        }
 
         // 渲染标签颜色图例
         renderTagLegend(tagColorMap);

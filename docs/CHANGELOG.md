@@ -8,6 +8,22 @@
 
 ---
 
+## [v1.6.3] — 2026-04-14
+
+前端 JS → WASM 替换：图谱布局加速、本地搜索过滤、客户端 TOC 生成。
+
+### Added
+- **`compute_graph_layout(nodes, edges, iterations)` WASM 函数**：Fruchterman-Reingold 力导向布局算法；自适应迭代次数（>300节点→15次，>100节点→30次，≤100节点→50次）；返回 `[{id,x,y}]` 坐标数组
+- **`filter_notes(notes, tagsFilter, folderFilter, limit)` WASM 函数**：多标签交集（ALL 语义）+ 路径前缀过滤，< 5ms（1000 条笔记）；fallback 到 JS 等价实现
+- **`generate_toc_from_html(html)` WASM 函数**：从渲染 HTML 提取 h1-h6 标题生成 TOC，< 1ms（100 个标题）；配合实时预览实时更新
+- **6 个新单元测试**：图谱布局（基本/空图）、笔记过滤（标签/路径）、TOC（基本/空）
+
+### Changed
+- **`graph.js` 图谱渲染**：节点数 ≥ 50 时自动使用 WASM 静态布局（禁用 Vis.js 物理引擎），< 200ms；节点数 < 50 保持 Vis.js 物理动画
+- **`loader.js`**：新增 `WasmLoader.computeGraphLayout()`、`filterNotes()`、`generateToc()` 方法（均含 fallback）
+
+---
+
 ## [v1.6.2] — 2026-04-14
 
 PWA 离线搜索：自定义 WASM 全文索引 + Service Worker 拦截 /api/search。

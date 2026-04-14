@@ -480,11 +480,330 @@ fn make_snippet(content: &str, query_tokens: &HashSet<String>, max_len: usize) -
     format!("{}{}{}", prefix, snippet, suffix)
 }
 
+// ─── v1.6.3：图谱布局（Force-Directed）──────────────────────────────────────
+
+/// 图谱节点输入格式
+#[derive(Debug, Deserialize)]
+struct GraphNode {
+    /// 节点唯一 ID（与 Vis.js 节点 id 一致）
+    id: String,
+}
+
+/// 图谱边输入格式
+#[derive(Debug, Deserialize)]
+struct GraphEdge {
+    /// 起始节点 ID
+    from: String,
+    /// 终止节点 ID
+    to: String,
+}
+
+/// 节点布局位置输出格式
+#[derive(Serialize)]
+struct NodePosition {
+    id: String,
+    x: f64,
+    y: f64,
+}
+
+/// 使用 Fruchterman-Reingold 算法计算力导向图谱布局坐标（v1.6.3）。
+///
+/// 性能目标：500 节点 30 次迭代 < 200ms（WASM Release 模式）。
+///
+/// # 参数
+/// - `nodes_json`：`[{"id":"..."},...]` 格式的节点 JSON
+/// - `edges_json`：`[{"from":"...","to":"..."},...]` 格式的边 JSON
+/// - `iterations`：迭代次数（建议：<100节点→50次，<300节点→30次，>300节点→15次）
+///
+/// # 返回
+/// `[{"id":"...","x":100.0,"y":-50.0},...]` 格式的 JSON 字符串
+#[wasm_bindgen(js_name = computeGraphLayout)]
+pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32) -> String {
+    let nodes: Vec<GraphNode> = match serde_json::from_str(nodes_json) {
+        Ok(v) => v,
+        Err(_) => return "[]".to_string(),
+    };
+    let edges: Vec<GraphEdge> = serde_json::from_str(edges_json).unwrap_or_default();
+
+    let n = nodes.len();
+    if n == 0 { return "[]".to_string(); }
+    if n == 1 {
+        let r = serde_json::json!([{"id": nodes[0].id, "x": 0.0, "y": 0.0}]);
+        return r.to_string();
+    }
+
+    // 初始化位置：圆形均匀分布，避免重叠
+    let init_r = 500.0_f64 * (n as f64).sqrt();
+    let mut pos_x: Vec<f64> = (0..n)
+        .map(|i| init_r * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos())
+        .collect();
+    let mut pos_y: Vec<f64> = (0..n)
+        .map(|i| init_r * (2.0 * std::f64::consts::PI * i as f64 / n as f64).sin())
+        .collect();
+
+    // 建立节点 ID → 索引映射
+    let id_to_idx: HashMap<&str, usize> = nodes.iter()
+        .enumerate()
+        .map(|(i, node)| (node.id.as_str(), i))
+        .collect();
+
+    // 解析有效边（仅保留两端都存在于节点列表中的边）
+    let adj_edges: Vec<(usize, usize)> = edges.iter()
+        .filter_map(|e| {
+            let i = id_to_idx.get(e.from.as_str())?;
+            let j = id_to_idx.get(e.to.as_str())?;
+            if i != j { Some((*i, *j)) } else { None }
+        })
+        .collect();
+
+    // Fruchterman-Reingold 参数
+    // k：最优节点间距（正比于布局面积开方）
+    let area = 2000.0_f64 * 2000.0_f64;
+    let k = (area / n as f64).sqrt();
+    let mut temp = 200.0_f64; // 初始温度
+    let cooling = 0.85_f64;   // 每轮降温系数
+
+    for _ in 0..iterations {
+        let mut fx = vec![0.0_f64; n];
+        let mut fy = vec![0.0_f64; n];
+
+        // 排斥力（所有节点对）
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = pos_x[i] - pos_x[j];
+                let dy = pos_y[i] - pos_y[j];
+                let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+                let repulsion = k * k / dist;
+                let rx = dx / dist * repulsion;
+                let ry = dy / dist * repulsion;
+                fx[i] += rx;
+                fy[i] += ry;
+                fx[j] -= rx;
+                fy[j] -= ry;
+            }
+        }
+
+        // 吸引力（连边节点对）
+        for &(i, j) in &adj_edges {
+            let dx = pos_x[j] - pos_x[i];
+            let dy = pos_y[j] - pos_y[i];
+            let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+            let attraction = dist * dist / k;
+            let ax = dx / dist * attraction;
+            let ay = dy / dist * attraction;
+            fx[i] += ax;
+            fy[i] += ay;
+            fx[j] -= ax;
+            fy[j] -= ay;
+        }
+
+        // 应用合力（受温度限制最大位移）
+        for i in 0..n {
+            let magnitude = (fx[i] * fx[i] + fy[i] * fy[i]).sqrt().max(1.0);
+            let displacement = magnitude.min(temp);
+            pos_x[i] += fx[i] / magnitude * displacement;
+            pos_y[i] += fy[i] / magnitude * displacement;
+        }
+
+        temp *= cooling;
+    }
+
+    // 居中（将重心移到原点）
+    let cx = pos_x.iter().sum::<f64>() / n as f64;
+    let cy = pos_y.iter().sum::<f64>() / n as f64;
+    let result: Vec<NodePosition> = nodes.iter().enumerate()
+        .map(|(i, node)| NodePosition {
+            id: node.id.clone(),
+            x: (pos_x[i] - cx).round(),
+            y: (pos_y[i] - cy).round(),
+        })
+        .collect();
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+}
+
+// ─── v1.6.3：本地搜索过滤 ────────────────────────────────────────────────────
+
+/// 轻量笔记过滤条目（来自 /api/titles 的 note_items 字段）
+#[derive(Debug, Deserialize, Serialize, Clone)]
+struct FilterNote {
+    title: String,
+    path: String,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+/// 本地 WASM 笔记过滤（v1.6.3）。
+///
+/// 从前端缓存的 `note_items` 列表中快速过滤，支持多标签交集匹配和路径前缀过滤。
+/// 与服务端搜索互补：WASM 先给出本地建议，服务端异步补充全文搜索结果。
+///
+/// # 参数
+/// - `notes_json`：`[{"title":"...","path":"...","tags":["..."]}]` 格式的 JSON
+/// - `tags_filter`：逗号分隔的标签列表（全部匹配，OR 用多次调用实现）
+/// - `folder_filter`：文件夹路径前缀（空字符串 = 不过滤）
+/// - `limit`：最大返回条数
+///
+/// # 返回
+/// 过滤后的 `[{"title":"...","path":"...","tags":[...]}]` JSON
+#[wasm_bindgen(js_name = filterNotes)]
+pub fn filter_notes(notes_json: &str, tags_filter: &str, folder_filter: &str, limit: u32) -> String {
+    let notes: Vec<FilterNote> = match serde_json::from_str(notes_json) {
+        Ok(v) => v,
+        Err(_) => return "[]".to_string(),
+    };
+
+    let required_tags: Vec<&str> = tags_filter
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect();
+
+    let folder_lower = folder_filter.to_lowercase();
+
+    let results: Vec<&FilterNote> = notes.iter()
+        .filter(|note| {
+            // 路径前缀过滤（大小写不敏感）
+            if !folder_lower.is_empty() && !note.path.to_lowercase().starts_with(&folder_lower) {
+                return false;
+            }
+            // 多标签交集过滤（ALL 语义）
+            if !required_tags.is_empty() {
+                let note_tags_lower: Vec<String> = note.tags.iter().map(|t| t.to_lowercase()).collect();
+                for req_tag in &required_tags {
+                    if !note_tags_lower.iter().any(|t| t == req_tag) {
+                        return false;
+                    }
+                }
+            }
+            true
+        })
+        .take(limit as usize)
+        .collect();
+
+    serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string())
+}
+
+// ─── v1.6.3：客户端 TOC 生成 ─────────────────────────────────────────────────
+
+/// TOC 条目
+#[derive(Serialize)]
+struct TocEntry {
+    level: u8,
+    text: String,
+    id: String,
+}
+
+/// 从服务端渲染的 HTML 中提取目录（TOC），用于客户端快速刷新（v1.6.3）。
+///
+/// 扫描 `<h1>...<h6>` 标题元素，提取 `id` 属性和文本内容，
+/// 生成与服务端 `Note.toc` 格式兼容的 JSON 数组。
+///
+/// 目标：100 个标题 < 1ms（替代服务端 TOC 字段，支持本地预览实时更新）。
+///
+/// # 参数
+/// - `html`：渲染后的 HTML 字符串（来自 `render_markdown` 或服务端）
+///
+/// # 返回
+/// `[{"level":2,"text":"标题","id":"anchor-id"}]` 格式的 JSON
+#[wasm_bindgen(js_name = generateTocFromHtml)]
+pub fn generate_toc_from_html(html: &str) -> String {
+    lazy_static! {
+        // 匹配 <h1 id="anchor">文本</h1> 等，捕获 id 属性和标题文本
+        static ref HEADING_RE: Regex = Regex::new(
+            r#"(?i)<h([1-6])(?:[^>]*?\bid=['"]([\w\-]+)['"][^>]*)?>([^<]*(?:<[^/][^>]*>[^<]*</[^>]+>[^<]*)*)</h[1-6]>"#
+        ).unwrap();
+        // 剥离内嵌标签（如 <code>、<em>）
+        static ref TAG_STRIP_RE: Regex = Regex::new(r"<[^>]+>").unwrap();
+    }
+
+    let entries: Vec<TocEntry> = HEADING_RE.captures_iter(html)
+        .filter_map(|caps| {
+            let level: u8 = caps.get(1)?.as_str().parse().ok()?;
+            let id = caps.get(2).map_or("", |m| m.as_str()).to_string();
+            let raw_text = caps.get(3).map_or("", |m| m.as_str());
+            // 剥离内嵌标签后获取纯文本
+            let text = TAG_STRIP_RE.replace_all(raw_text, "")
+                .trim()
+                .to_string();
+            if text.is_empty() { return None; }
+            Some(TocEntry { level, text, id })
+        })
+        .collect();
+
+    serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
+}
+
 // ─── 单元测试（运行于原生目标，无需 wasm-pack）──────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── v1.6.3 测试：图谱布局 + 搜索过滤 + TOC ────────────────────────────────
+
+    #[test]
+    fn test_compute_graph_layout_basic() {
+        let nodes = r#"[{"id":"a"},{"id":"b"},{"id":"c"}]"#;
+        let edges = r#"[{"from":"a","to":"b"},{"from":"b","to":"c"}]"#;
+        let result = compute_graph_layout(nodes, edges, 10);
+        let positions: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let arr = positions.as_array().unwrap();
+        assert_eq!(arr.len(), 3, "应返回 3 个节点位置");
+        // 每个节点有 id, x, y 字段
+        for pos in arr {
+            assert!(pos.get("id").is_some(), "应有 id 字段");
+            assert!(pos.get("x").is_some(), "应有 x 字段");
+            assert!(pos.get("y").is_some(), "应有 y 字段");
+        }
+    }
+
+    #[test]
+    fn test_compute_graph_layout_empty() {
+        let result = compute_graph_layout("[]", "[]", 10);
+        assert_eq!(result, "[]", "空图应返回空数组");
+    }
+
+    #[test]
+    fn test_filter_notes_by_tag() {
+        let notes = r#"[
+            {"title":"Rust 笔记","path":"rust.md","tags":["rust","编程"]},
+            {"title":"Python 笔记","path":"python.md","tags":["python"]},
+            {"title":"Rust Web","path":"web/rust.md","tags":["rust","web"]}
+        ]"#;
+        let result = filter_notes(notes, "rust", "", 10);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 2, "应过滤出 2 条 rust 标签笔记");
+    }
+
+    #[test]
+    fn test_filter_notes_by_folder() {
+        let notes = r#"[
+            {"title":"根目录笔记","path":"root.md","tags":[]},
+            {"title":"子目录笔记","path":"web/note.md","tags":[]}
+        ]"#;
+        let result = filter_notes(notes, "", "web/", 10);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 1, "应只返回 web/ 路径下的笔记");
+    }
+
+    #[test]
+    fn test_generate_toc_basic() {
+        let html = r#"<h1 id="h-1">主标题</h1><p>段落</p><h2 id="h-2">小节</h2>"#;
+        let result = generate_toc_from_html(html);
+        let toc: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let arr = toc.as_array().unwrap();
+        assert_eq!(arr.len(), 2, "应提取 2 个标题");
+        assert_eq!(arr[0]["level"], 1, "第一个应为 h1");
+        assert_eq!(arr[0]["text"], "主标题");
+        assert_eq!(arr[0]["id"], "h-1");
+    }
+
+    #[test]
+    fn test_generate_toc_empty() {
+        let result = generate_toc_from_html("<p>无标题段落</p>");
+        assert_eq!(result, "[]", "无标题时应返回空数组");
+    }
 
     // ─── NoteIndex 测试（v1.6.2）──────────────────────────────────────────────
 
