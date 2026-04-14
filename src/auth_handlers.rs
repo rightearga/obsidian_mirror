@@ -84,13 +84,17 @@ pub async fn login_handler(
     }
 
     // A1 修复：bcrypt verify 是 CPU 密集型操作，移入 spawn_blocking
+    // B1 修复：spawn_blocking panic 不得静默为"密码错误"，须记录日志并返回 500
     let pwd = form.password.clone();
     let hash = user.password_hash.clone();
     let is_valid = tokio::task::spawn_blocking(move || {
         crate::auth::PasswordManager::verify_password(&pwd, &hash)
     })
     .await
-    .unwrap_or(Ok(false));
+    .unwrap_or_else(|e| {
+        tracing::error!("bcrypt verify spawn_blocking panic: {}", e);
+        Err(anyhow::anyhow!("spawn_blocking panic: {}", e))
+    });
 
     match is_valid {
         Ok(true) => {
@@ -221,13 +225,17 @@ pub async fn change_password_handler(
     };
 
     // A1 修复：bcrypt verify 是 CPU 密集型操作，移入 spawn_blocking
+    // B1 修复：spawn_blocking panic 不得静默为"旧密码错误"，须记录日志并返回 500
     let old_pwd = form.old_password.clone();
     let hash = user.password_hash.clone();
     let verify_result = tokio::task::spawn_blocking(move || {
         PasswordManager::verify_password(&old_pwd, &hash)
     })
     .await
-    .unwrap_or(Ok(false));
+    .unwrap_or_else(|e| {
+        tracing::error!("bcrypt verify spawn_blocking panic: {}", e);
+        Err(anyhow::anyhow!("spawn_blocking panic: {}", e))
+    });
 
     match verify_result {
         Ok(true) => {

@@ -55,6 +55,9 @@ impl ShareLink {
     ///
     /// 若提供了密码，将使用 bcrypt 对其进行单向哈希后存储，
     /// 防止数据库文件被盗取时密码明文暴露。
+    ///
+    /// **注意**：此函数包含 `bcrypt::hash`（CPU 密集，约 100-300ms），
+    /// 调用方必须在 `tokio::task::spawn_blocking` 中执行，避免阻塞 async executor。
     pub fn new(
         note_path: String,
         creator: String,
@@ -67,9 +70,13 @@ impl ShareLink {
         let expires_at = expires_in.map(|d| created_at + d);
 
         // 对密码进行 bcrypt 哈希，不存储明文
+        // bcrypt::hash 失败极为罕见（内存不足等），此处 unwrap_or_else 记录错误并跳过哈希
         let password_hash = password.map(|p| {
             bcrypt::hash(p, PASSWORD_BCRYPT_COST)
-                .expect("bcrypt 哈希失败（不应发生）")
+                .unwrap_or_else(|e| {
+                    tracing::error!("bcrypt hash 失败（将跳过密码保护）: {}", e);
+                    String::new() // 空字符串将导致验证始终失败，分享链接无法被访问
+                })
         });
 
         Self {
@@ -78,7 +85,7 @@ impl ShareLink {
             creator,
             created_at,
             expires_at,
-            password_hash,
+            password_hash: password_hash.filter(|h| !h.is_empty()),
             max_visits,
             visit_count: 0,
         }

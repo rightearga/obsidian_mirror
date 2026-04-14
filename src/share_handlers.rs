@@ -116,29 +116,33 @@ pub async fn create_share_handler(
     }
     drop(notes);
 
-    // 创建分享链接
+    // B2 修复：ShareLink::new() 内部包含 bcrypt::hash（CPU 密集，~100-300ms），
+    // 必须在 spawn_blocking 中执行，避免阻塞 Tokio async 执行器线程。
+    // 同时将 db.create_share() 合并到同一闭包，减少一次 spawn_blocking 开销。
     let expires_in = body.expires_in_seconds.map(Duration::from_secs);
-    let share_link = ShareLink::new(
-        body.note_path.clone(),
-        username.clone(),
-        expires_in,
-        body.password.clone(),
-        body.max_visits,
-    );
-
-    // A1 修复：redb IO 移入 spawn_blocking，避免阻塞 Tokio 线程池
-    // 保存到数据库
+    let note_path = body.note_path.clone();
+    let uname_for_link = username.clone();
+    let password = body.password.clone();
+    let max_visits = body.max_visits;
     let db = Arc::clone(&app_state.share_db);
-    let link = share_link.clone();
-    if let Err(e) = tokio::task::spawn_blocking(move || db.create_share(&link))
-        .await
-        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+
+    let share_link = match tokio::task::spawn_blocking(move || {
+        // bcrypt::hash 在此线程执行（blocking thread pool，不阻塞 async executor）
+        let link = ShareLink::new(note_path, uname_for_link, expires_in, password, max_visits);
+        db.create_share(&link)?;
+        Ok::<ShareLink, anyhow::Error>(link)
+    })
+    .await
+    .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
     {
-        error!("创建分享链接失败: {}", e);
-        return HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": "创建分享链接失败"
-        }));
-    }
+        Ok(link) => link,
+        Err(e) => {
+            error!("创建分享链接失败: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "创建分享链接失败"
+            }));
+        }
+    };
 
     // Q2 修复：优先使用 public_base_url 配置，其次读取 X-Forwarded-Proto header
     let share_url = {

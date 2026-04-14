@@ -8,6 +8,20 @@
 
 ---
 
+## [v1.5.1] — 2026-04-14
+
+代码审计修复版本（CODEREVIEW_1.5）。
+
+### Fixed
+- **[B1] bcrypt verify spawn_blocking panic 静默为密码错误**：`auth_handlers.rs` 的 `login_handler` 和 `change_password_handler` 中，`spawn_blocking` 线程 panic 时 `.unwrap_or(Ok(false))` 会静默返回"密码错误"而不记录错误日志。改为 `.unwrap_or_else(|e| { error!(...); Err(...) })`，panic 时正确返回 500
+- **[B2] `ShareLink::new()` bcrypt hash 在 async 上下文直接执行**：`create_share_handler` 直接调用 `ShareLink::new()`，其内部的 `bcrypt::hash`（~100-300ms CPU）阻塞 Tokio worker 线程。将 `ShareLink::new()` 和 `db.create_share()` 合并到同一个 `spawn_blocking` 闭包中；`ShareLink::new` 文档注释补充调用方要求。`share_db.rs` 的 `.expect()` 替换为 `unwrap_or_else` + 错误日志
+
+### 审计统计
+- 🟠 P1 修复：2 项（B1/B2）
+- 发现问题总计：7 项（含接受 3 项、推迟 2 项）
+
+---
+
 ## [v1.5.0] — 2026-04-14
 
 架构加固：清偿 CODEREVIEW_1.4 全部推迟项，消灭运行时潜在 panic 和阻塞隐患。
