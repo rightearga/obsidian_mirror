@@ -1,0 +1,19 @@
+[package]
+name = "obsidian_mirror_wasm"
+version = "0.1.0"
+edition = "2024"
+description = "obsidian_mirror WebAssembly 模块 — 供浏览器端运行的纯函数逻辑"
+
+[lib]
+# cdylib：编译为 WASM / 原生动态库（供 wasm-pack 使用）
+# rlib：编译为 Rust 库（供单元测试和服务端复用使用）
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# wasm-bindgen：Rust ↔ JS 互操作层
+# 在非 wasm32 目标上，#[wasm_bindgen] 属性为 no-op，函数仍可正常编译
+wasm-bindgen = "0.2"
+
+[dev-dependencies]
+# wasm-bindgen-test：浏览器内 WASM 测试（需 wasm-pack test）
+wasm-bindgen-test = "0.3"

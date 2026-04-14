@@ -1,10 +1,12 @@
 [workspace]
-members = ["."]
+# v1.6.0: 新增 crates/wasm 作为 WASM 专用子 crate，
+# 服务端与浏览器端共享同一份纯函数逻辑实现
+members = [".", "crates/wasm"]
 resolver = "3"
 
 [package]
 name = "obsidian_mirror"
-version = "1.5.6"
+version = "1.6.0"
 edition = "2024"
 
 [lib]

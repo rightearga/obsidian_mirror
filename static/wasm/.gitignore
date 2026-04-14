@@ -1,0 +1,10 @@
+# wasm-pack 编译输出（本地构建后自动生成，不提交到 Git）
+# 运行 `make wasm` 或 `wasm-pack build crates/wasm --target web --out-dir static/wasm` 生成
+*_bg.wasm
+*_bg.js
+*_bg.wasm.d.ts
+*.d.ts
+package.json
+# loader.js 是手写文件，需要提交
+!loader.js
+!.gitignore

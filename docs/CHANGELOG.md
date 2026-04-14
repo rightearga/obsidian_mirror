@@ -8,6 +8,29 @@
 
 ---
 
+## [v1.6.0] — 2026-04-14
+
+WASM 基础设施：打通 Rust → WebAssembly 工具链，建立渐进增强的客户端加速管道。
+
+### Added
+- **Cargo workspace 拆分**：新增 `crates/wasm/` 子 crate，`wasm-bindgen = "0.2"` 作为依赖；`Cargo.toml` workspace 增加 `crates/wasm` 成员
+- **`crates/wasm/src/lib.rs`**：WASM 模块初版，暴露 3 个函数：
+  - `wasm_version() -> String` — 版本确认
+  - `highlight_term(text, term) -> String` — `<mark>` 高亮（与服务端 `search_engine::highlight_terms` 逻辑一致）
+  - `truncate_html(html, max_chars) -> String` — HTML 截断（与服务端 `handlers::truncate_html` 逻辑一致）
+- **`static/wasm/loader.js`**：浏览器端 WASM 加载器，支持：
+  - `WebAssembly.instantiateStreaming` 异步加载
+  - 加载失败自动 fallback 到 JavaScript 等价实现（渐进增强）
+  - `performance.now()` 基准比对（`localStorage.debug_wasm=true` 启用日志）
+- **`Makefile`**：`make wasm` / `make wasm-dev` / `make server` / `make build` / `make test` 构建命令
+- **`Dockerfile`** 更新：添加 WASM 多阶段构建阶段（注释形式，取消注释即可在 Docker 内构建）
+- 8 个 WASM crate 单元测试（highlight/truncate 边界条件）
+
+### Changed
+- `templates/layout.html`：新增 `<script defer src="/static/wasm/loader.js">` 加载 WASM 模块
+
+---
+
 ## [v1.5.6] — 2026-04-14
 
 代码审计修复版本（CODEREVIEW_1.5，v1.5.2–v1.5.5）。

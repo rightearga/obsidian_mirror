@@ -172,5 +172,6 @@ docker compose up -d
 - **redb** — 嵌入式数据库，用于持久化索引、认证、分享链接、阅读进度
 - **askama** — 编译期 HTML 模板
 - **pulldown-cmark** — Markdown → HTML 渲染
+- **wasm-bindgen 0.2** — Rust ↔ JS 互操作（`crates/wasm/`，v1.6.0）
 - **rayon** — 并行笔记处理
 - **ron** — 配置文件格式
