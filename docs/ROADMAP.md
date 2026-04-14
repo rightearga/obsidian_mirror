@@ -411,7 +411,7 @@ let text_lower = text.to_lowercase();   // 分配 2
 
 ---
 
-### ✨ v1.6.5 — NoteIndex 倒排索引位图加速（M3-续）
+### ✅ v1.6.5 (已发布 - 2026-04-14) — NoteIndex 倒排索引位图加速（M3-续）
 
 **主题**：用 bitset（位图）替换 `HashSet<usize>` 候选集，进一步提升 CJK 搜索速度
 

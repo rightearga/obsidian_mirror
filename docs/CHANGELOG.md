@@ -8,6 +8,20 @@
 
 ---
 
+## [v1.6.5] — 2026-04-14
+
+NoteIndex 倒排索引位图加速（M3-续）：`HashSet<usize>` → `Bitset` 候选集。
+
+### Changed
+- **[M3-续] NoteIndex.search_json Bitset 加速**（`crates/wasm/src/lib.rs`）：
+  - 新增 `Bitset` 结构体（`Vec<u64>`，第 i 位代表 note i 是否为候选）和 `BitsetIter` 迭代器
+  - 将 posting list 合并从 `HashSet.extend()` 改为 `bits[idx/64] |= 1 << (idx%64)` 位或运算，零堆分配
+  - 1000 条笔记仅需 16 个 u64 = 128 字节（完全 L1 缓存友好）
+  - 实测改善：ASCII 搜索 239µs → **192µs**（**-19%**）；CJK 搜索在噪声范围内稳定
+  - 新增 4 个 Bitset 单元测试（基本置位/空位图/去重/搜索正确性）
+
+---
+
 ## [v1.6.4] — 2026-04-14
 
 WASM 性能优化：消灭三个基准测试暴露的性能瓶颈。

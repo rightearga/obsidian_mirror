@@ -22,7 +22,66 @@ use wasm_bindgen::prelude::*;
 // ─── v1.6.2：离线搜索相关导入 ───────────────────────────────────────────────
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::HashSet;
+
+// ─── v1.6.5：Bitset —— 位图候选集（替换 HashSet<usize>）────────────────────
+
+/// 位图结构，用于在 NoteIndex.search_json 中存储候选笔记索引集合。
+///
+/// 相比 `HashSet<usize>`：
+/// - 无哈希计算开销，位或赋值（`|=`）即可完成合并
+/// - 1000 条笔记仅需 16 个 u64 = 128 字节（完全 L1 缓存友好）
+/// - 无堆再分配，posting list 合并为零分配操作
+struct Bitset {
+    /// u64 数组，第 i 位代表 note 索引 i 是否为候选
+    bits: Vec<u64>,
+}
+
+impl Bitset {
+    /// 创建空位图，容量为 note 总数
+    fn new(note_count: usize) -> Self {
+        Bitset { bits: vec![0u64; (note_count + 63) / 64] }
+    }
+
+    /// 将 posting list 中的所有索引加入候选集（位或运算，零分配）
+    fn union_with_slice(&mut self, indices: &[usize]) {
+        for &idx in indices {
+            let word = idx / 64;
+            if word < self.bits.len() {
+                self.bits[word] |= 1u64 << (idx % 64);
+            }
+        }
+    }
+
+    /// 遍历所有置位的索引（使用 trailing_zeros 位扫描，比迭代快）
+    fn iter_ones(&self) -> BitsetIter<'_> {
+        BitsetIter { bits: &self.bits, word_idx: 0, word: self.bits.first().copied().unwrap_or(0) }
+    }
+}
+
+/// 位图迭代器：依次返回所有置位的 note 索引
+struct BitsetIter<'a> {
+    bits: &'a [u64],
+    word_idx: usize,
+    word: u64,
+}
+
+impl Iterator for BitsetIter<'_> {
+    type Item = usize;
+    fn next(&mut self) -> Option<usize> {
+        // 跳过值为 0 的字，直到找到下一个置位
+        while self.word == 0 {
+            self.word_idx += 1;
+            if self.word_idx >= self.bits.len() { return None; }
+            self.word = self.bits[self.word_idx];
+        }
+        // trailing_zeros 找到最低置位，然后清除它
+        let bit = self.word.trailing_zeros() as usize;
+        self.word &= self.word - 1; // 清除最低置位（Brian Kernighan 技巧）
+        Some(self.word_idx * 64 + bit)
+    }
+}
 
 // ─── v1.6.1：Markdown 渲染相关导入 ──────────────────────────────────────────
 
@@ -402,11 +461,13 @@ impl NoteIndex {
             tokens
         };
 
-        // 通过倒排索引快速找到候选笔记
-        let mut candidate_indices: HashSet<usize> = HashSet::new();
+        // v1.6.5 M3-续：用 Bitset 替换 HashSet<usize> 候选集
+        // 位或运算合并 posting list，零分配，128 字节完全 L1 缓存友好（1000 条笔记）
+        let n = self.notes.len();
+        let mut candidate_bits = Bitset::new(n);
         for token in &query_tokens {
             if let Some(indices) = self.inverted.get(token) {
-                candidate_indices.extend(indices);
+                candidate_bits.union_with_slice(indices);
             }
         }
 
@@ -417,8 +478,8 @@ impl NoteIndex {
             .collect();
 
         // 对候选笔记评分（直接查询预缓存的 token 集合，O(1) per token per note）
-        let mut scored: Vec<(f32, &NoteEntry)> = candidate_indices.iter()
-            .filter_map(|&idx| {
+        let mut scored: Vec<(f32, &NoteEntry)> = candidate_bits.iter_ones()
+            .filter_map(|idx| {
                 let note   = self.notes.get(idx)?;
                 let cached = self.token_cache.get(idx)?;
 
@@ -937,6 +998,44 @@ pub fn generate_toc_from_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── v1.6.5 测试：Bitset 位图 ────────────────────────────────────────────────
+
+    #[test]
+    fn test_bitset_basic() {
+        let mut bs = Bitset::new(200);
+        bs.union_with_slice(&[0, 63, 64, 127, 128, 199]);
+        let ones: Vec<usize> = bs.iter_ones().collect();
+        assert_eq!(ones, vec![0, 63, 64, 127, 128, 199], "应按升序返回所有置位索引");
+    }
+
+    #[test]
+    fn test_bitset_empty() {
+        let bs = Bitset::new(100);
+        assert_eq!(bs.iter_ones().count(), 0, "空位图应无置位");
+    }
+
+    #[test]
+    fn test_bitset_union_dedup() {
+        let mut bs = Bitset::new(100);
+        bs.union_with_slice(&[5, 10, 5, 10, 5]);
+        let ones: Vec<usize> = bs.iter_ones().collect();
+        assert_eq!(ones, vec![5, 10], "重复索引应自动去重（位图天然去重）");
+    }
+
+    #[test]
+    fn test_bitset_search_correctness() {
+        // 验证 Bitset 搜索结果与预期一致
+        let json = r#"[
+            {"title":"Rust 编程","path":"rust.md","tags":["rust"],"content":"系统编程语言","mtime":0},
+            {"title":"Python 教程","path":"py.md","tags":["python"],"content":"脚本语言","mtime":0}
+        ]"#;
+        let idx = NoteIndex::load_json(json).expect("加载失败");
+        let result_json = idx.search_json("rust", 10);
+        let arr: serde_json::Value = serde_json::from_str(&result_json).unwrap();
+        assert!(!arr.as_array().unwrap().is_empty(), "应找到 Rust 相关笔记");
+        assert_eq!(arr.as_array().unwrap()[0]["title"], "Rust 编程");
+    }
 
     // ─── v1.6.4 测试：M1/M2/M3 ──────────────────────────────────────────────────
 
