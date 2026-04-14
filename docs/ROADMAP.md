@@ -3,6 +3,7 @@
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
 **当前版本**: v1.4.10 🎉  
+**下一里程碑**: v1.5.0（架构加固，规划中）  
 **最后更新**: 2026-04-14
 
 ---
@@ -1010,6 +1011,203 @@
 
 ---
 
+## 🚀 v1.5.x 规划（2026 Q3）
+
+> v1.5 系列主题：**架构加固 → 搜索升级 → 多用户 → 内容增强 → 运维强化**
+>
+> 每个 minor 版本聚焦单一主题，patch 版本用于代码审计修复。
+
+---
+
+### 🔧 v1.5.0 — 架构加固（技术债清偿）
+
+**主题**：清偿 CODEREVIEW_1.4 全部推迟项，消灭运行时潜在 panic 和阻塞隐患
+
+#### A1：redb blocking IO 全面移入 spawn_blocking
+
+| 模块 | 文件 | 涉及函数 |
+|------|------|---------|
+| 认证 | `src/auth_handlers.rs` | `login_handler`、`change_password_handler` |
+| 分享 | `src/share_handlers.rs` | `create_share_handler`、`access_share_handler`、`list_shares_handler` |
+| 阅读进度 | `src/reading_progress_handlers.rs` | `save_progress_handler`、`get_progress_handler` |
+
+- 将所有 `auth_db.*`、`share_db.*`、`reading_progress_db.*` 调用包裹进 `tokio::task::spawn_blocking`
+- `AuthDatabase` 已用 `Arc<Database>` 实现 Clone，可直接 move 进闭包；`ShareDatabase`、`ReadingProgressDatabase` 补充 `Arc<Database>` 包裹（当前为裸 `Database`）
+
+#### B2：AppConfig 热重载真正生效
+
+- 将 `AppState.config` 改为 `Arc<RwLock<AppConfig>>`
+- 更新所有读取处（约 30 处）改为 `.config.read().await`
+- `config_reload_handler` 写入新配置后触发 `perform_sync` 以应用 `ignore_patterns` 等变更
+- 说明：`listen_addr`、`repo_url` 仍需重启生效，在接口响应中明示
+
+#### B3：/health `uptime_seconds` 修复
+
+- `AppState` 增加 `start_time: std::time::Instant` 字段
+- `/health` 中返回 `start_time.elapsed().as_secs()` 真实运行时长
+
+#### E1：Rayon mutex 中毒时优雅恢复
+
+- `src/sync.rs` 中 `results.into_inner().unwrap()` 改为 `.into_inner().unwrap_or_else(|e| e.into_inner())`
+- 补充注释说明中毒恢复语义
+
+#### E2：模板渲染错误返回结构化 JSON
+
+- 模板 `Err` 路径统一改为 `HttpResponse::InternalServerError().json({"error": "..."})`
+
+#### Q2：分享 URL scheme 改用 X-Forwarded-Proto
+
+- `share_handlers.rs` 优先读取 `X-Forwarded-Proto` header；fallback 到 Host 判断逻辑
+- `config.ron` 可选新增 `public_base_url` 字段，优先级最高
+
+#### Q3：Git commit 读取函数合并
+
+- `src/handlers.rs` 中的 `read_local_git_commit` 与 `src/sync.rs` 中的 `get_current_git_commit` 合并到 `src/git.rs`
+
+#### 测试补全
+
+- `config_reload_handler` 集成测试（T3）
+- `AppState.config` 热更新路径测试
+
+---
+
+### 🔧 v1.5.1 — 代码审计（CODEREVIEW_1.5）
+
+**主题**：对 v1.5.0 进行系统性代码审查，修复新引入问题
+
+- 审计范围：`src/` 全部 27 个 `.rs` 文件，重点关注 `RwLock<AppConfig>` 新路径的并发正确性
+- 产出：`docs/CODEREVIEW_1.5.md`
+- 遵循审计流程（`/ob-review 1.5`）
+
+---
+
+### ✨ v1.5.2 — 搜索体验升级
+
+**主题**：让搜索从"能用"变"好用"
+
+#### 模糊 / 拼音搜索
+
+- Tantivy 查询层增加容错模糊匹配（`FuzzyTermQuery`，最多 1 个编辑距离）
+- 可选：集成拼音转换（`pinyin` crate），支持 `rust` 匹配 "Rust 编程"
+
+#### 搜索建议自动补全优化
+
+- `/api/titles` 返回数据增加 path 字段，前端补全时可显示路径上下文
+- 后端增加 `/api/suggest?q=` 端点，返回 fuzzy 匹配的标题列表（限 10 条）
+
+#### 摘要 snippet 改进
+
+- 当前 `snippet` 字段为固定截取；改为 Tantivy SnippetGenerator 生成真正的命中上下文摘要
+- 摘要中关键词加粗高亮（`<mark>` 标签）
+
+#### 搜索历史持久化
+
+- 当前搜索历史仅存 localStorage；新增后端 `/api/search/history`（存入 `reading_progress_db` 复用）
+- 支持清空历史
+
+---
+
+### ✨ v1.5.3 — 多用户与权限管理
+
+**主题**：从单管理员向真正多用户演进
+
+#### 用户角色
+
+| 角色 | 权限 |
+|------|------|
+| `admin` | 所有操作（含 /sync、/api/config/reload、用户管理） |
+| `editor` | 查看 + 分享链接创建/管理（未来预留编辑权限入口） |
+| `viewer` | 只读浏览，无分享、无管理操作 |
+
+- `User` 结构体增加 `role: UserRole` 枚举字段
+- 认证中间件注入 role 信息，敏感端点（/sync、/api/config/reload）校验 `admin` 角色
+- CURRENT_VERSION 递增（User 结构变更触发数据库重建）
+
+#### 管理员界面
+
+- `GET /admin/users` — 用户列表页（Askama 模板）
+- `POST /api/admin/users` — 创建用户（admin only）
+- `DELETE /api/admin/users/{username}` — 删除用户（admin only）
+- `POST /api/admin/users/{username}/reset-password` — 重置密码
+
+#### 分享链接多用户适配
+
+- `GET /api/share/list` 仅返回当前用户的分享；admin 可查看全部（增加 `?all=true` 参数）
+
+---
+
+### ✨ v1.5.4 — Obsidian 语法完整支持
+
+**主题**：内容渲染更忠实于原版 Obsidian 体验
+
+#### 笔记内嵌（Block Embed）
+
+- `![[笔记.md]]` → 内联展示目标笔记的渲染 HTML（可折叠）
+- `![[笔记.md#标题]]` → 内联展示指定章节内容
+- 实现：handler 层递归渲染，加深度保护（最多 2 层，防止循环嵌入）
+
+#### 脚注支持
+
+- `[^1]` 脚注语法（pulldown-cmark 已支持 `ENABLE_FOOTNOTES`，需在 options 中开启）
+- 脚注跳转锚点与反跳回原文的双向链接
+
+#### Mermaid 主题适配
+
+- 当前 Mermaid 图在深色模式下配色不协调
+- 根据当前主题动态注入 `%%{init: {"theme": "dark"}}%%` 或默认主题
+- 前端 JS 监听主题切换事件，重新渲染 Mermaid 图
+
+#### Callout 折叠动画
+
+- 可折叠 Callout（`> [!NOTE]-`）补充展开/折叠 CSS transition 动画
+- 折叠状态存入 localStorage，页面刷新后保持
+
+---
+
+### ✨ v1.5.5 — 实时通知与运维增强
+
+**主题**：让运维可观测、优雅、可靠
+
+#### SSE 实时同步进度推送
+
+- `GET /api/sync/events` — Server-Sent Events 端点，同步期间推送进度事件
+  ```
+  data: {"stage": "git_pull", "progress": 20, "message": "拉取最新提交..."}
+  data: {"stage": "markdown", "progress": 60, "notes_processed": 234}
+  data: {"stage": "done", "progress": 100, "total_notes": 1024}
+  ```
+- 前端同步按钮点击后改为实时进度条显示（替换当前的"同步中"转圈）
+- 实现：`tokio::sync::broadcast` channel 广播给所有 SSE 订阅者
+
+#### 优雅关闭等待后台任务
+
+- 当前 `tokio::spawn` 的 Tantivy 重建、redb 持久化任务在进程退出时可能被强制中断
+- 修复：将这些任务的 `JoinHandle` 存入 `AppState`，`main.rs` 在关闭前 `await` 全部完成
+- 超时保护：等待上限 30 秒，超时后强制退出并打印警告
+
+#### 同步历史记录
+
+- `AppState` 增加 `sync_history: RwLock<VecDeque<SyncRecord>>`（最近 10 条）
+- `SyncRecord { started_at, finished_at, notes_processed, status, error_msg }`
+- `/health` 返回最近一次同步记录；新增 `/api/sync/history` 返回全部历史
+
+#### 依赖版本升级
+
+- 定期检查并升级 `actix-web`、`tantivy`、`redb`、`jieba-rs` 等核心依赖
+- 回归测试全量通过后发布
+
+---
+
+### 🔧 v1.5.6 — 代码审计（CODEREVIEW_1.5.x）
+
+**主题**：对 v1.5.2–v1.5.5 引入的新代码进行系统性审查
+
+- 审计重点：SSE 连接泄漏、多用户权限绕过、笔记内嵌递归深度越界
+- 产出：`docs/CODEREVIEW_1.5.md`（合并 v1.5.x 全系列审计结果）
+- 遵循审计流程（`/ob-review 1.5`）
+
+---
+
 ## 📦 功能分类
 
 ### 🚨 紧急修复（v1.3.1 / v1.3.2）
@@ -1142,6 +1340,15 @@
 - 完成 v1.4.8（代码质量：clippy 零警告、search_engine 测试、handlers 集成测试）
 - ✅ 完成 v1.4.9（架构优化：content_text 移除、内存减半、CURRENT_VERSION 升至 3）🎉
 - ✅ 完成 v1.4.10（代码审计修复：路径遍历 P0、sync_status 状态修复、API 认证 401 JSON）🎉
+
+**Q3 (7-9月)**: 架构演进与功能深化（v1.5.x）
+- 🔧 v1.5.0：架构加固（redb spawn_blocking 全面修复、AppConfig RwLock 热重载、uptime 修复）
+- 🔧 v1.5.1：代码审计（CODEREVIEW_1.5）
+- ✨ v1.5.2：搜索体验升级（模糊匹配、Tantivy snippet、搜索历史持久化）
+- ✨ v1.5.3：多用户与权限管理（admin/editor/viewer 角色、用户管理界面）
+- ✨ v1.5.4：Obsidian 语法完整支持（笔记内嵌、脚注、Mermaid 主题适配）
+- ✨ v1.5.5：实时通知与运维增强（SSE 进度推送、优雅关闭、同步历史）
+- 🔧 v1.5.6：代码审计（CODEREVIEW_1.5.x）
 
 ### 核心价值主张
 
