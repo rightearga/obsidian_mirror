@@ -38,6 +38,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     info!("========================================");
     let sync_start = std::time::Instant::now();
 
+    // 在同步开始前克隆配置快照，避免持有读锁跨越 .await 点
+    // （config_reload_handler 可能在同步期间更新配置，本次同步使用启动时的快照）
+    let config = data.config.read().unwrap().clone();
+
     // 标记同步状态为 running，并注册 RAII 守卫：
     // 正常退出时在函数末尾手动设为 IDLE；异常（? 传播）退出时 guard Drop 将状态设为 FAILED。
     data.sync_status.store(sync_status::RUNNING, Ordering::Relaxed);
@@ -66,10 +70,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         info!("📂 内存为空，尝试加载持久化索引...");
         
         // 先获取当前 Git 提交（用于验证持久化数据）
-        if let Ok(current_commit) = get_current_git_commit(&data.config.local_path).await {
-            match IndexPersistence::open(&data.config.database.index_db_path) {
+        if let Ok(current_commit) = GitClient::get_current_commit(&config.local_path).await {
+            match IndexPersistence::open(&config.database.index_db_path) {
                 Ok(persistence) => {
-                    match persistence.load_indexes(&current_commit, &data.config.ignore_patterns) {
+                    match persistence.load_indexes(&current_commit, &config.ignore_patterns) {
                         Ok(Some(loaded)) => {
                             info!("✅ 从持久化数据库恢复索引");
                             
@@ -104,10 +108,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 1. Git Pull/Clone 并检测变更
     info!("📥 步骤 1/9: Git 同步");
-    let sync_result = GitClient::sync(&data.config.repo_url, &data.config.local_path).await?;
+    let sync_result = GitClient::sync(&config.repo_url, &config.local_path).await?;
     
     // 获取当前 Git 提交
-    let current_git_commit = get_current_git_commit(&data.config.local_path).await?;
+    let current_git_commit = GitClient::get_current_commit(&config.local_path).await?;
     
     match &sync_result {
         SyncResult::InitialClone => {
@@ -127,7 +131,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                 if file_index_count == 0 {
                     info!("⚠️  文件索引为空，重建文件索引");
                     let mut file_index_write = data.file_index.write().await;
-                    *file_index_write = FileIndexBuilder::build(&data.config.local_path);
+                    *file_index_write = FileIndexBuilder::build(&config.local_path);
                     let count = file_index_write.len();
                     drop(file_index_write);
                     info!("✅ 文件索引重建完成，共 {} 个文件", count);
@@ -139,9 +143,9 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                 info!("⚠️  无 Git 变更，但内存为空，尝试加载持久化索引");
                 
                 // 尝试从持久化数据库加载索引
-                match IndexPersistence::open(&data.config.database.index_db_path) {
+                match IndexPersistence::open(&config.database.index_db_path) {
                     Ok(persistence) => {
-                        match persistence.load_indexes(&current_git_commit, &data.config.ignore_patterns) {
+                        match persistence.load_indexes(&current_git_commit, &config.ignore_patterns) {
                             Ok(Some(loaded)) => {
                                 // 成功加载持久化索引
                                 info!("✅ 从持久化数据库恢复索引");
@@ -156,7 +160,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                                 // 重建文件索引（资源文件不持久化，每次启动都需要扫描）
                                 info!("📦 重建资源文件索引");
                                 let mut file_index_write = data.file_index.write().await;
-                                *file_index_write = FileIndexBuilder::build(&data.config.local_path);
+                                *file_index_write = FileIndexBuilder::build(&config.local_path);
                                 let file_count = file_index_write.len();
                                 drop(file_index_write);
                                 info!("✅ 资源文件索引重建完成，共 {} 个文件", file_count);
@@ -209,7 +213,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         SyncResult::InitialClone | SyncResult::NoChange => {
             // 首次克隆或无变更但内存为空，扫描所有文件
             info!("🔍 步骤 2/8: 扫描所有 Markdown 文件");
-            let scanner = VaultScanner::new(data.config.clone());
+            let scanner = VaultScanner::new(config.clone());
             let files = scanner.scan()?;
             info!("✅ 扫描完成，发现 {} 个 Markdown 文件", files.len());
             (files, Vec::new())
@@ -219,8 +223,8 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
             info!("🔍 步骤 2/8: 处理变更文件");
             
             // 过滤出 .md 文件，并排除忽略模式
-            let local_path = &data.config.local_path;
-            let ignore_patterns = &data.config.ignore_patterns;
+            let local_path = &config.local_path;
+            let ignore_patterns = &config.ignore_patterns;
             
             let changed_md: Vec<_> = changed.iter()
                 .filter(|p| {
@@ -293,7 +297,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     // 3. Build file index (for all non-.md files like images, PDFs)
     info!("📦 步骤 3/8: 构建资源文件索引");
     let mut file_index_write = data.file_index.write().await;
-    *file_index_write = FileIndexBuilder::build(&data.config.local_path);
+    *file_index_write = FileIndexBuilder::build(&config.local_path);
     drop(file_index_write);
 
     // ✅ 在删除文件之前，先保存现有笔记用于增量更新
@@ -313,7 +317,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     info!("⚙️  步骤 4/8: 并行处理笔记");
     let process_start = std::time::Instant::now();
     
-    let local_path = data.config.local_path.clone();
+    let local_path = config.local_path.clone();
     
     // 使用 tokio::task::spawn_blocking 在线程池中并行处理
     let processed_notes = tokio::task::spawn_blocking(move || {
@@ -395,7 +399,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 9. 持久化索引到磁盘
     info!("💾 步骤 8/9: 持久化索引");
-    if let Ok(persistence) = IndexPersistence::open(&data.config.database.index_db_path) {
+    if let Ok(persistence) = IndexPersistence::open(&config.database.index_db_path) {
         let notes = data.notes.read().await.clone();
         let link_index = data.link_index.read().await.clone();
         let backlinks = data.backlinks.read().await.clone();
@@ -403,7 +407,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         let sidebar = data.sidebar.read().await.clone();
         
         // 在后台线程保存（避免阻塞主线程）
-        let ignore_patterns = data.config.ignore_patterns.clone();
+        let ignore_patterns = config.ignore_patterns.clone();
         tokio::task::spawn_blocking(move || {
             if let Err(e) = persistence.save_indexes(
                 &current_git_commit,
@@ -518,7 +522,9 @@ fn process_markdown_files(
         info!("  └─ 失败: {} 个", failed_count);
     }
     
-    results.into_inner().unwrap()
+    // E1 修复：Mutex 中毒时（Rayon worker panic 持有锁）从 PoisonError 中恢复数据，
+    // 避免主线程 panic 并泄漏 sync_status = RUNNING
+    results.into_inner().unwrap_or_else(|e| e.into_inner())
 }
 
 /// 检查笔记是否需要更新
@@ -592,23 +598,7 @@ fn process_single_note(
     Some((note, links, content))
 }
 
-/// 获取当前 Git 提交 hash
-async fn get_current_git_commit(local_path: &std::path::Path) -> anyhow::Result<String> {
-    use tokio::process::Command;
-    
-    let output = Command::new("git")
-        .current_dir(local_path)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .await?;
-    
-    if !output.status.success() {
-        return Err(anyhow::anyhow!("Failed to get current commit"));
-    }
-    
-    let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(commit)
-}
+// get_current_commit 已迁移至 src/git.rs::GitClient::get_current_commit（Q3 合并重复逻辑）
 
 #[cfg(test)]
 mod tests {

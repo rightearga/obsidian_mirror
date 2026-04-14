@@ -85,6 +85,8 @@ docker compose up -d
 
 所有内存数据存储在 `Arc<AppState>` 中，各字段使用 `tokio::sync::RwLock` 保护：
 
+- `config: std::sync::RwLock<AppConfig>` — 运行时配置，支持热重载（`config_reload_handler` 写入新值）；读取：`.config.read().unwrap()`，**禁止持有读锁跨越 `.await` 点**（v1.5.0）
+- `start_time: Instant` — 应用启动时间，供 `/health` 端点返回真实 `uptime_seconds`（v1.5.0）
 - `notes: HashMap<String, Note>` — 相对路径 → `Note`（标题、HTML、标签、目录、反向链接、frontmatter、修改时间、出链列表 `outgoing_links`）；注：v1.4.9 起 `content_text` 已移除，内容不再驻留内存
 - `link_index: HashMap<String, String>` — 笔记标题/文件名 → 相对路径
 - `backlinks: HashMap<String, Vec<String>>` — 笔记标题 → 链接到它的笔记标题列表

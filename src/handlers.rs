@@ -222,7 +222,7 @@ pub async fn index_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
             };
             return match tmpl.render() {
                 Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-                Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+                Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("模板渲染失败: {}", e)})),
             };
         }
     }
@@ -246,7 +246,7 @@ pub async fn index_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
 
     match tmpl.render() {
         Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("模板渲染失败: {}", e)})),
     }
 }
 
@@ -281,11 +281,13 @@ pub async fn assets_handler(
         }
     };
 
+    let local_path = data.config.read().unwrap().local_path.clone();
+
     // 先尝试直接访问（可能是完整路径）
-    let direct_path = data.config.local_path.join(&decoded_filename);
+    let direct_path = local_path.join(&decoded_filename);
     if direct_path.exists() && direct_path.is_file() {
         // 路径遍历防护：确保解析后的路径仍在 local_path 内
-        if !is_path_within(&data.config.local_path, &direct_path) {
+        if !is_path_within(&local_path, &direct_path) {
             error!("❌ 路径遍历攻击被拒绝: {}", decoded_filename);
             return Err(actix_web::error::ErrorForbidden("Access denied"));
         }
@@ -296,10 +298,10 @@ pub async fn assets_handler(
     // 如果不是完整路径，查找文件索引
     let file_index = data.file_index.read().await;
     if let Some(full_path) = file_index.get(&decoded_filename) {
-        let file_path = data.config.local_path.join(full_path);
+        let file_path = local_path.join(full_path);
         if file_path.exists() && file_path.is_file() {
             // 文件索引中的路径由系统构建，理论上已在 local_path 内，但仍做防御性检查
-            if !is_path_within(&data.config.local_path, &file_path) {
+            if !is_path_within(&local_path, &file_path) {
                 error!("❌ 文件索引路径遍历防护触发: {}", full_path);
                 return Err(actix_web::error::ErrorForbidden("Access denied"));
             }
@@ -373,7 +375,7 @@ pub async fn doc_handler(path: web::Path<String>, data: web::Data<Arc<AppState>>
 
             match tmpl.render() {
                 Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-                Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+                Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("模板渲染失败: {}", e)})),
             }
         } else {
             HttpResponse::NotFound().body("Note not found in map")
@@ -409,7 +411,7 @@ pub async fn tags_list_handler(data: web::Data<Arc<AppState>>) -> impl Responder
     
     match tmpl.render() {
         Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-        Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("模板渲染失败: {}", e)})),
     }
 }
 
@@ -455,7 +457,7 @@ pub async fn tag_notes_handler(
         
         match tmpl.render() {
             Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
-            Err(e) => HttpResponse::InternalServerError().body(format!("Template error: {}", e)),
+            Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("模板渲染失败: {}", e)})),
         }
     } else {
         HttpResponse::NotFound().body(format!("标签未找到: {}", decoded_tag))
@@ -484,12 +486,8 @@ pub async fn health_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
     use crate::state::sync_status;
     use serde_json::json;
     use std::sync::atomic::Ordering;
-    use std::time::SystemTime;
 
-    let uptime = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
+    let uptime = data.start_time.elapsed().as_secs();
 
     let notes_count = data.notes.read().await.len();
 
@@ -504,7 +502,10 @@ pub async fn health_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
     };
 
     // 当前 Git commit（从本地仓库读取）
-    let git_commit = read_local_git_commit(&data.config.local_path).await;
+    let local_path_for_git = data.config.read().unwrap().local_path.clone();
+    let git_commit = crate::git::GitClient::get_current_commit(&local_path_for_git)
+        .await
+        .unwrap_or_default();
 
     let health_info = json!({
         "status": "healthy",
@@ -525,25 +526,6 @@ pub async fn health_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
     HttpResponse::Ok().json(health_info)
 }
 
-/// 读取本地仓库的 HEAD commit hash（异步，出错时返回空字符串）
-async fn read_local_git_commit(local_path: &std::path::Path) -> String {
-    let path = local_path.to_path_buf();
-    tokio::task::spawn_blocking(move || {
-        let head_file = path.join(".git").join("HEAD");
-        let head = std::fs::read_to_string(&head_file).unwrap_or_default();
-        if head.starts_with("ref: ") {
-            let ref_path = head.trim_start_matches("ref: ").trim();
-            let commit_file = path.join(".git").join(ref_path);
-            std::fs::read_to_string(commit_file)
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default()
-        } else {
-            head.trim().to_string()
-        }
-    })
-    .await
-    .unwrap_or_default()
-}
 
 /// GET /api/stats - 笔记统计信息
 /// 
@@ -899,13 +881,15 @@ pub async fn webhook_sync_handler(
     body: web::Bytes,
     data: web::Data<Arc<AppState>>,
 ) -> impl Responder {
-    let webhook_cfg = &data.config.webhook;
-
-    if !webhook_cfg.enabled {
+    let (webhook_enabled, webhook_secret) = {
+        let cfg = data.config.read().unwrap();
+        (cfg.webhook.enabled, cfg.webhook.secret.clone())
+    };
+    if !webhook_enabled {
         return HttpResponse::Forbidden().body("Webhook 未启用");
     }
 
-    let secret = &webhook_cfg.secret;
+    let secret = &webhook_secret;
     if secret.is_empty() {
         return HttpResponse::InternalServerError().body("Webhook 密钥未配置");
     }
@@ -1016,13 +1000,19 @@ pub async fn config_reload_handler(
     };
 
     // 记录变更
-    let old_patterns = &data.config.ignore_patterns;
-    let new_patterns = &new_config.ignore_patterns;
-    let patterns_changed = old_patterns != new_patterns;
-
+    let (old_patterns, patterns_changed) = {
+        let cfg = data.config.read().unwrap();
+        let changed = cfg.ignore_patterns != new_config.ignore_patterns;
+        (cfg.ignore_patterns.clone(), changed)
+    };
+    let _ = old_patterns; // 仅用于日志，可扩展
     tracing::info!("🔄 配置热重载：ignore_patterns 变更 = {}", patterns_changed);
 
-    // 触发完整同步以应用新配置（忽略持久化缓存）
+    // B2 修复：将新配置写入 AppState.config（真正实现热重载）
+    *data.config.write().unwrap() = new_config;
+    tracing::info!("✅ 新配置已应用到运行时状态");
+
+    // 触发完整同步以应用新配置（ignoring 持久化缓存）
     let _guard = match data.sync_lock.try_lock() {
         Ok(g) => g,
         Err(_) => return HttpResponse::Conflict().json(serde_json::json!({
@@ -1076,6 +1066,7 @@ mod tests {
             security: SecurityConfig::default(),
             sync_interval_minutes: 0,
             webhook: WebhookConfig::default(),
+            public_base_url: None,
         };
 
         let search_engine = Arc::new(SearchEngine::new(&idx_path).unwrap());
@@ -1150,6 +1141,29 @@ mod tests {
         assert!(
             body.contains("孤立笔记") || body.contains("孤"),
             "/orphans 页面应包含相关内容"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_config_reload_handler_requires_auth() {
+        // config_reload_handler 在无认证扩展时应返回 401
+        let state = make_test_state().await;
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state))
+                .route("/api/config/reload", web::post().to(config_reload_handler)),
+        )
+        .await;
+
+        let req = test::TestRequest::post()
+            .uri("/api/config/reload")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        // 未注入认证扩展，应返回 401
+        assert_eq!(
+            resp.status(),
+            actix_web::http::StatusCode::UNAUTHORIZED,
+            "config_reload 未认证时应返回 401"
         );
     }
 

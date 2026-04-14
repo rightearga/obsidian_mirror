@@ -27,6 +27,13 @@ pub struct AppConfig {
     /// Webhook 触发同步配置
     #[serde(default)]
     pub webhook: WebhookConfig,
+
+    /// 公开基础 URL（用于生成分享链接，优先于从请求头推断的 scheme+host）
+    ///
+    /// 反向代理场景（Nginx/Caddy）下建议设置，例如 `"https://notes.example.com"`。
+    /// 未设置时使用 X-Forwarded-Proto header 推断，最终 fallback 到 Host header。
+    #[serde(default)]
+    pub public_base_url: Option<String>,
 }
 
 /// Webhook 配置

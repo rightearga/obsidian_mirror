@@ -229,6 +229,7 @@ fn load_config(config_path: &str) -> AppConfig {
                 security: Default::default(),
                 sync_interval_minutes: 0,
                 webhook: Default::default(),
+                public_base_url: None,
             }
         }
     }
@@ -320,10 +321,12 @@ fn init_reading_progress_database(config: &AppConfig) -> anyhow::Result<Arc<Read
 /// 执行初始数据同步
 async fn perform_initial_sync(app_state: &Arc<AppState>) {
     info!("🔄 检查本地数据...");
-    
-    if app_state.config.local_path.exists() {
+    // 读取配置快照（std::sync::RwLock，非异步）
+    let local_path = app_state.config.read().unwrap().local_path.clone();
+
+    if local_path.exists() {
         info!("✅ 本地路径存在，开始初始同步...");
-        
+
         match perform_sync(app_state).await {
             Ok(_) => {
                 info!("✅ 初始同步完成");
@@ -334,7 +337,7 @@ async fn perform_initial_sync(app_state: &Arc<AppState>) {
             }
         }
     } else {
-        warn!("⚠️  本地路径不存在: {}", app_state.config.local_path.display());
+        warn!("⚠️  本地路径不存在: {}", local_path.display());
         warn!("⚠️  请先配置正确的本地路径或执行 Git 同步");
     }
 }
@@ -482,8 +485,8 @@ async fn start_http_server(
     // 保存持久化索引（如果需要）
     info!("💾 保存持久化索引...");
     if let Ok(persistence) = obsidian_mirror::persistence::IndexPersistence::open(&config_for_shutdown.database.index_db_path) {
-        // 获取当前 Git 提交
-        if let Ok(git_commit) = get_git_commit(&config_for_shutdown.local_path).await {
+        // 获取当前 Git 提交（使用 GitClient 公共接口，不重复实现）
+        if let Ok(git_commit) = obsidian_mirror::git::GitClient::get_current_commit(&config_for_shutdown.local_path).await {
             let notes = app_state_for_shutdown.notes.read().await.clone();
             let link_index = app_state_for_shutdown.link_index.read().await.clone();
             let backlinks = app_state_for_shutdown.backlinks.read().await.clone();
@@ -522,20 +525,4 @@ async fn change_password_page_handler() -> actix_web::Result<actix_web::HttpResp
         .body(html))
 }
 
-/// 获取当前 Git 提交 hash
-async fn get_git_commit(local_path: &std::path::Path) -> anyhow::Result<String> {
-    use tokio::process::Command;
-    
-    let output = Command::new("git")
-        .current_dir(local_path)
-        .args(["rev-parse", "HEAD"])
-        .output()
-        .await?;
-    
-    if !output.status.success() {
-        return Err(anyhow::anyhow!("Failed to get current commit"));
-    }
-    
-    let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok(commit)
-}
+// get_git_commit 已移除，统一使用 obsidian_mirror::git::GitClient::get_current_commit（Q3）

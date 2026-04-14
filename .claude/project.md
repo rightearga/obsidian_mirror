@@ -12,19 +12,20 @@
 
 ## 当前开发状态
 
-**当前版本：1.4.10**
+**当前版本：1.5.0**
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
 | Markdown 处理 | ✅ 稳定 | WikiLink、图片嵌入、frontmatter、TOC；标题文本已 HTML 转义（S1 修复） |
 | 全文搜索 | ✅ 稳定 | Tantivy + jieba 中文分词，支持标签/文件夹/日期过滤 |
 | Git 同步 | ✅ 稳定 | 增量同步（diff 驱动）；并发保护（B2 修复）；增量反向链接修复（B4） |
-| 持久化索引 | ✅ 稳定 | redb + postcard（CURRENT_VERSION=2）；clear() 已补全标签清理（B1 修复） |
-| 认证系统 | ✅ 稳定 | JWT + bcrypt；Cookie 含 Secure + SameSite::Lax（S2 修复）；路径精确匹配（S4 修复） |
-| 分享链接 | ✅ 稳定 | UUID token，支持密码/次数/过期限制；密码 bcrypt 哈希存储（S3 修复） |
-| 阅读进度 | ✅ 稳定 | 滚动位置记忆 + 阅读历史 |
+| 持久化索引 | ✅ 稳定 | redb + postcard（CURRENT_VERSION=3）；clear() 已补全标签清理（B1 修复） |
+| 认证系统 | ✅ 稳定 | JWT + bcrypt；全部 redb/bcrypt IO 移入 spawn_blocking（A1）；Cookie Secure 动态控制 |
+| 分享链接 | ✅ 稳定 | UUID token；密码 bcrypt 哈希；URL scheme 支持 X-Forwarded-Proto + public_base_url（Q2） |
+| 阅读进度 | ✅ 稳定 | 滚动位置记忆 + 阅读历史；redb IO 已入 spawn_blocking（A1） |
 | 关系图谱 | ✅ 稳定 | Vis.js 渲染，支持 1-3 层深度 |
 | Prometheus 指标 | ✅ 稳定 | `/metrics` 端点，含请求数、笔记数、延迟直方图 |
+| 应用状态 | ✅ 稳定 | `AppConfig` 改为 `RwLock<AppConfig>` 支持热重载（B2）；`start_time` 用于真实 uptime（B3） |
 
 ---
 
@@ -191,6 +192,6 @@ cargo test markdown::tests
 
 5. **持久化版本升级**：修改 `Note`、`SidebarNode` 等持久化结构体时，必须同步递增 `src/persistence.rs` 中的 `CURRENT_VERSION` 常量，否则旧格式数据会导致反序列化失败（postcard 不向后兼容）。
 
-6. **并发读写**：`AppState` 所有字段使用 `tokio::sync::RwLock`，sync 期间会短暂持有写锁。HTTP 请求只需读锁，通常不受影响；但 sync 耗时过长时会造成读请求等待。
+6. **并发读写**：`AppState` 的笔记索引字段（`notes`、`backlinks` 等）使用 `tokio::sync::RwLock`，sync 期间会短暂持有写锁。`config` 字段使用 `std::sync::RwLock`（同步锁，读取时用 `.config.read().unwrap()`）；**禁止持有 config 读锁跨越 `.await` 点**，应在使用前克隆所需值。
 
 7. **默认管理员账户**：`auth_enabled: true` 时，若 `auth.db` 为空，自动以 `config.security.default_admin_username/password` 创建账户。生产环境务必修改默认密码，并将 `jwt_secret` 替换为随机字符串（建议 `openssl rand -base64 32`）。

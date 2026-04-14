@@ -48,8 +48,14 @@ pub async fn login_handler(
     jwt_manager: web::Data<Arc<JwtManager>>,
     app_state: web::Data<Arc<crate::state::AppState>>,
 ) -> impl Responder {
+    // A1 修复：redb IO 移入 spawn_blocking，避免阻塞 Tokio 线程池
     // 获取用户
-    let user = match auth_db.get_user(&form.username) {
+    let db = Arc::clone(&*auth_db);
+    let uname = form.username.clone();
+    let user = match tokio::task::spawn_blocking(move || db.get_user(&uname))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
         Ok(Some(user)) => user,
         Ok(None) => {
             return HttpResponse::Unauthorized().json(LoginResponse {
@@ -77,14 +83,26 @@ pub async fn login_handler(
         });
     }
 
-    // 验证密码
-    match PasswordManager::verify_password(&form.password, &user.password_hash) {
+    // A1 修复：bcrypt verify 是 CPU 密集型操作，移入 spawn_blocking
+    let pwd = form.password.clone();
+    let hash = user.password_hash.clone();
+    let is_valid = tokio::task::spawn_blocking(move || {
+        crate::auth::PasswordManager::verify_password(&pwd, &hash)
+    })
+    .await
+    .unwrap_or(Ok(false));
+
+    match is_valid {
         Ok(true) => {
             // 生成 JWT token
             match jwt_manager.generate_token(&user.username) {
                 Ok(token) => {
-                    // 更新最后登录时间
-                    let _ = auth_db.update_last_login(&user.username);
+                    // A1 修复：更新最后登录时间（fire-and-forget，不阻塞响应）
+                    let db2 = Arc::clone(&*auth_db);
+                    let uname2 = user.username.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let _ = db2.update_last_login(&uname2);
+                    });
 
                     // 设置 Cookie（有效期根据 remember_me 决定）
                     let max_age = if form.remember_me.unwrap_or(false) {
@@ -96,7 +114,7 @@ pub async fn login_handler(
                     // 安全属性：HttpOnly 防止 JS 读取；
                     // Secure 仅在 force_https_cookie=true（生产 HTTPS）时启用，
                     // HTTP（内网/开发）下设为 false 避免 Cookie 被浏览器静默丢弃
-                    let secure = app_state.config.security.force_https_cookie;
+                    let secure = app_state.config.read().unwrap().security.force_https_cookie;
                     let cookie = Cookie::build("auth_token", token.clone())
                         .path("/")
                         .max_age(max_age)
@@ -144,7 +162,7 @@ pub async fn logout_handler(
     app_state: web::Data<Arc<crate::state::AppState>>,
 ) -> impl Responder {
     // 删除 Cookie（Secure 标志必须与登录时一致，浏览器才能正确清除）
-    let secure = app_state.config.security.force_https_cookie;
+    let secure = app_state.config.read().unwrap().security.force_https_cookie;
     let cookie = Cookie::build("auth_token", "")
         .path("/")
         .max_age(Duration::seconds(0))
@@ -178,8 +196,14 @@ pub async fn change_password_handler(
         }
     };
 
+    // A1 修复：redb IO 移入 spawn_blocking，避免阻塞 Tokio 线程池
     // 获取用户
-    let user = match auth_db.get_user(&username) {
+    let db = Arc::clone(&*auth_db);
+    let uname = username.clone();
+    let user = match tokio::task::spawn_blocking(move || db.get_user(&uname))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
         Ok(Some(user)) => user,
         Ok(None) => {
             return HttpResponse::NotFound().json(ApiResponse {
@@ -196,14 +220,36 @@ pub async fn change_password_handler(
         }
     };
 
-    // 验证旧密码
-    match PasswordManager::verify_password(&form.old_password, &user.password_hash) {
+    // A1 修复：bcrypt verify 是 CPU 密集型操作，移入 spawn_blocking
+    let old_pwd = form.old_password.clone();
+    let hash = user.password_hash.clone();
+    let verify_result = tokio::task::spawn_blocking(move || {
+        PasswordManager::verify_password(&old_pwd, &hash)
+    })
+    .await
+    .unwrap_or(Ok(false));
+
+    match verify_result {
         Ok(true) => {
-            // 加密新密码
-            match PasswordManager::hash_password(&form.new_password) {
+            // A1 修复：bcrypt hash 是 CPU 密集型操作，移入 spawn_blocking
+            let new_pwd = form.new_password.clone();
+            let hash_result = tokio::task::spawn_blocking(move || {
+                PasswordManager::hash_password(&new_pwd)
+            })
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)));
+
+            match hash_result {
                 Ok(new_hash) => {
-                    // 更新密码
-                    match auth_db.change_password(&username, &new_hash) {
+                    // A1 修复：redb IO 移入 spawn_blocking，避免阻塞 Tokio 线程池
+                    let db2 = Arc::clone(&*auth_db);
+                    let uname2 = username.clone();
+                    let change_result =
+                        tokio::task::spawn_blocking(move || db2.change_password(&uname2, &new_hash))
+                            .await
+                            .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)));
+
+                    match change_result {
                         Ok(_) => HttpResponse::Ok().json(ApiResponse {
                             success: true,
                             message: "密码修改成功".to_string(),

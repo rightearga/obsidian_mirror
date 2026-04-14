@@ -147,8 +147,8 @@ impl GitClient {
         Ok(SyncResult::InitialClone)
     }
 
-    /// 获取当前 Git 提交 hash
-    async fn get_current_commit(local_path: &Path) -> Result<String> {
+    /// 获取当前 Git 提交 hash（公共接口，供 sync/handlers/main 共用）
+    pub async fn get_current_commit(local_path: &Path) -> Result<String> {
         let output = Command::new("git")
             .current_dir(local_path)
             .args(["rev-parse", "HEAD"])
