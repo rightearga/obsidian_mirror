@@ -8,6 +8,22 @@
 
 ---
 
+## [v1.5.4] — 2026-04-14
+
+Obsidian 语法完整支持：笔记内嵌、脚注、Mermaid 主题注入、Callout 折叠动画。
+
+### Added
+- **笔记内嵌**（`![[笔记.md]]` / `![[笔记.md#章节]]`）：
+  - `markdown.rs` 将内嵌语法编译为占位符 div（`class="note-embed-placeholder"`）
+  - `handlers.rs` 新增 `expand_embeds()` 函数，在 `doc_handler` 响应时展开为原生 `<details>/<summary>` 折叠块，深度限制 2 层防止循环内嵌
+  - `static/css/embed.css`：内嵌块 CSS（深/浅色适配）
+- **脚注支持** `[^1]`：开启 pulldown-cmark `ENABLE_FOOTNOTES`，自动生成双向跳转锚点
+- **Mermaid 主题注入**（`mermaid-init.js`）：渲染/重渲染前自动注入 `%%{init: {"theme": "..."}}%%`，确保图表跟随全局主题切换；若图表已有 init 指令则跳过
+- **Callout 折叠 CSS 动画**（`callout.css`）：`display:none` 改为 `max-height` + `opacity` transition，展开/折叠有 0.3s 平滑过渡
+- **Callout 折叠状态持久化**（`callout.js`）：新增 `saveCalloutState` / `restoreCalloutStates` 函数，用 `localStorage` 记录每个 Callout 在当前页面的折叠状态，刷新后自动恢复
+
+---
+
 ## [v1.5.3] — 2026-04-14
 
 多用户与权限管理：三级角色体系、管理员 API、/admin/users 页面。

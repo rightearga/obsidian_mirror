@@ -66,34 +66,55 @@ impl MarkdownProcessor {
                 let alt_text = caps.get(2).map_or("", |m| m.as_str()).trim();
 
                 // 检查是否是图片文件
-                let is_image = target.to_lowercase().ends_with(".png")
-                    || target.to_lowercase().ends_with(".jpg")
-                    || target.to_lowercase().ends_with(".jpeg")
-                    || target.to_lowercase().ends_with(".gif")
-                    || target.to_lowercase().ends_with(".svg")
-                    || target.to_lowercase().ends_with(".webp");
+                let target_lower = target.to_lowercase();
+                let is_image = target_lower.ends_with(".png")
+                    || target_lower.ends_with(".jpg")
+                    || target_lower.ends_with(".jpeg")
+                    || target_lower.ends_with(".gif")
+                    || target_lower.ends_with(".svg")
+                    || target_lower.ends_with(".webp");
 
-                // URL 编码文件路径
-                let url_encoded = percent_encoding::utf8_percent_encode(
-                    target,
-                    percent_encoding::NON_ALPHANUMERIC,
-                )
-                .to_string();
+                // 检查是否是笔记内嵌（.md 扩展名或无扩展名视为笔记引用）
+                // ![[笔记.md]] 或 ![[笔记#章节]] 会被服务端展开为可折叠内嵌块
+                let is_note_embed = target_lower.ends_with(".md")
+                    || (!target.contains('.') && !is_image);
 
-                if is_image {
-                    // 图片:生成标准 Markdown 图片语法
-                    // 如果用户没有指定 alt 文本,使用空字符串而不是文件名
-                    // 在图片前后添加换行符,确保图片单独成行
-                    format!("\n\n![{}](/assets/{})\n\n", alt_text, url_encoded)
-                } else {
-                    // 非图片文件(PDF、文档等):生成链接
-                    // 链接文本使用 alt_text,如果为空则使用文件名
-                    let link_text = if alt_text.is_empty() {
-                        target
+                if is_note_embed {
+                    // 笔记内嵌：解析可选的 #章节 锚点，生成占位符 div
+                    // doc_handler 会在响应时调用 expand_embeds() 展开为真实 HTML
+                    let (embed_target, embed_section) = if let Some(hash_pos) = target.find('#') {
+                        (&target[..hash_pos], &target[hash_pos + 1..])
                     } else {
-                        alt_text
+                        (target, "")
                     };
-                    format!("[{}](/assets/{})", link_text, url_encoded)
+                    let encoded_target = percent_encoding::utf8_percent_encode(
+                        embed_target,
+                        percent_encoding::NON_ALPHANUMERIC,
+                    ).to_string();
+                    let encoded_section = percent_encoding::utf8_percent_encode(
+                        embed_section,
+                        percent_encoding::NON_ALPHANUMERIC,
+                    ).to_string();
+                    // 占位符：data-embed-title 存储目标笔记标题/路径，data-embed-section 存储章节锚点
+                    format!(
+                        r#"<div class="note-embed-placeholder" data-embed-title="{}" data-embed-section="{}"></div>"#,
+                        encoded_target, encoded_section
+                    )
+                } else {
+                    // URL 编码文件路径（图片或其他资源）
+                    let url_encoded = percent_encoding::utf8_percent_encode(
+                        target,
+                        percent_encoding::NON_ALPHANUMERIC,
+                    ).to_string();
+
+                    if is_image {
+                        // 图片:生成标准 Markdown 图片语法
+                        format!("\n\n![{}](/assets/{})\n\n", alt_text, url_encoded)
+                    } else {
+                        // 非图片文件(PDF、文档等):生成链接
+                        let link_text = if alt_text.is_empty() { target } else { alt_text };
+                        format!("[{}](/assets/{})", link_text, url_encoded)
+                    }
                 }
             })
             .to_string();
@@ -196,6 +217,8 @@ impl MarkdownProcessor {
         options.insert(Options::ENABLE_TABLES);
         options.insert(Options::ENABLE_STRIKETHROUGH);
         options.insert(Options::ENABLE_TASKLISTS);
+        // v1.5.4：启用脚注语法 [^1]，pulldown-cmark 会自动生成锚点跳转和回跳链接
+        options.insert(Options::ENABLE_FOOTNOTES);
 
         // 第一遍解析：生成 HTML 并收集标题
         let mut toc = Vec::new();
@@ -389,6 +412,14 @@ impl MarkdownProcessor {
     }
 
     /// 对字符串进行 HTML 转义，防止 XSS 注入
+    /// HTML 特殊字符转义（公开版本，供 handlers.rs 等层使用）
+    pub fn html_escape_text(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    }
+
     fn html_escape(s: &str) -> String {
         s.replace('&', "&amp;")
             .replace('<', "&lt;")

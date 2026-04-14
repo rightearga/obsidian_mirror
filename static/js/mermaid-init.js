@@ -226,10 +226,12 @@ const MermaidManager = {
                 // 获取图表定义（需要解码 HTML 实体）
                 const rawText = element.textContent;
                 let graphDefinition = this.decodeHtmlEntities(rawText);
-                
+
                 // 关键修复：预处理边标签中的 <br> 标签
-                // 将 |"text <br> text"| 中的 <br> 替换为换行符
                 graphDefinition = this.fixEdgeLabelBreaks(graphDefinition);
+
+                // v1.5.4：注入主题指令，确保与当前明/暗主题一致
+                graphDefinition = this.injectThemeDirective(graphDefinition, this.getCurrentTheme());
                 
                 // 保存原始图表定义到 data 属性，供主题切换时使用
                 element.setAttribute('data-mermaid-source', graphDefinition);
@@ -264,6 +266,17 @@ const MermaidManager = {
         const textarea = document.createElement('textarea');
         textarea.innerHTML = text;
         return textarea.value;
+    },
+
+    // v1.5.4：在图表源码开头注入 %%{init: {...}}%% 主题指令
+    // 确保每张图表都使用当前全局主题，覆盖图表自身可能携带的旧 init 指令
+    injectThemeDirective(source, theme) {
+        const mermaidTheme = theme === 'dark' ? 'dark' : 'default';
+        // 若图表已有 %%{init}%%，跳过注入（尊重用户显式配置）
+        if (/%%\s*\{/.test(source)) {
+            return source;
+        }
+        return `%%{init: {"theme": "${mermaidTheme}"}}%%\n${source}`;
     },
 
     // 修复边标签中的 <br> 标签
@@ -547,15 +560,18 @@ const MermaidManager = {
             }
             
             // 获取保存的原始图表定义
-            const graphDefinition = element.getAttribute('data-mermaid-source');
+            let graphDefinition = element.getAttribute('data-mermaid-source');
             if (!graphDefinition) {
                 continue;
             }
-            
+
+            // v1.5.4：重新渲染时注入新主题指令
+            graphDefinition = this.injectThemeDirective(graphDefinition, newTheme === 'dark' ? 'dark' : 'default');
+
             try {
                 // 生成唯一 ID
                 const id = `mermaid-${Date.now()}-${i}`;
-                
+
                 // 使用新主题渲染图表
                 const { svg } = await mermaid.render(id, graphDefinition);
                 

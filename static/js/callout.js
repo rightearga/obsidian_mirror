@@ -87,6 +87,8 @@
             header.style.cursor = 'pointer';
             header.addEventListener('click', () => {
                 callout.classList.toggle('callout-collapsed');
+                // v1.5.4：持久化折叠状态到 localStorage
+                saveCalloutState(callout, callout.classList.contains('callout-collapsed'));
             });
         }
 
@@ -147,11 +149,53 @@
             .replace(/"/g, '&quot;');
     }
 
+    // ── v1.5.4：Callout 折叠状态持久化（localStorage）──────────────────────
+
+    /** 生成 Callout 的稳定存储键（基于页面路径 + Callout 在文档中的位置序号） */
+    function calloutStorageKey(callout) {
+        const path = window.location.pathname;
+        const allCallouts = Array.from(document.querySelectorAll('.callout-foldable'));
+        const idx = allCallouts.indexOf(callout);
+        return `callout:${path}:${idx}`;
+    }
+
+    /** 保存折叠状态 */
+    function saveCalloutState(callout, collapsed) {
+        try {
+            const key = calloutStorageKey(callout);
+            if (collapsed) {
+                localStorage.setItem(key, '1');
+            } else {
+                localStorage.removeItem(key);
+            }
+        } catch (_) { /* localStorage 不可用时静默忽略 */ }
+    }
+
+    /** 在初始化后恢复 localStorage 中保存的折叠状态（仅覆盖默认展开的 Callout） */
+    function restoreCalloutStates() {
+        const path = window.location.pathname;
+        document.querySelectorAll('.callout-foldable').forEach((callout, idx) => {
+            const key = `callout:${path}:${idx}`;
+            try {
+                if (localStorage.getItem(key) === '1') {
+                    callout.classList.add('callout-collapsed');
+                } else if (localStorage.getItem(key) === '0') {
+                    callout.classList.remove('callout-collapsed');
+                }
+                // 未记录则保持 [!TYPE]- / [!TYPE]+ 默认状态
+            } catch (_) {}
+        });
+    }
+
     // 初始化：DOM 加载完成后执行
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', initCallouts);
+        document.addEventListener('DOMContentLoaded', () => {
+            initCallouts();
+            restoreCalloutStates();
+        });
     } else {
         initCallouts();
+        restoreCalloutStates();
     }
 
     window.Callout = { init: initCallouts };

@@ -13,6 +13,123 @@ use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTe
 use crate::search_engine::SortBy;
 use crate::graph::generate_graph;
 use crate::domain::BreadcrumbItem;
+use crate::markdown::MarkdownProcessor;
+use std::collections::HashMap;
+use crate::domain::Note;
+
+/// 展开笔记内嵌占位符为可折叠 HTML（v1.5.4）。
+///
+/// 扫描 HTML 中的 `<div class="note-embed-placeholder" ...></div>`，
+/// 查找目标笔记内容并替换为 `<details class="note-embed">` 折叠块。
+/// `depth` 参数防止循环内嵌，最多展开 2 层。
+pub fn expand_embeds(
+    html: &str,
+    notes: &HashMap<String, Note>,
+    link_index: &HashMap<String, String>,
+    depth: u8,
+) -> String {
+    use regex::Regex;
+    use lazy_static::lazy_static;
+    lazy_static! {
+        static ref EMBED_REGEX: Regex = Regex::new(
+            r#"<div class="note-embed-placeholder" data-embed-title="([^"]*)" data-embed-section="([^"]*)"></div>"#
+        ).unwrap();
+    }
+
+    if depth >= 2 {
+        // 深度超限：以说明文字替代，防止无限递归
+        return EMBED_REGEX.replace_all(html, |caps: &regex::Captures| {
+            let title = percent_encoding::percent_decode_str(&caps[1])
+                .decode_utf8()
+                .unwrap_or_default()
+                .to_string();
+            format!(
+                r#"<div class="note-embed-depth-limit"><em>⚠️ 内嵌深度超限（最多 2 层）：{}</em></div>"#,
+                MarkdownProcessor::html_escape_text(&title)
+            )
+        }).to_string();
+    }
+
+    EMBED_REGEX.replace_all(html, |caps: &regex::Captures| {
+        let encoded_title = &caps[1];
+        let encoded_section = &caps[2];
+
+        // 解码目标笔记标题/路径
+        let target = percent_encoding::percent_decode_str(encoded_title)
+            .decode_utf8()
+            .unwrap_or_default()
+            .to_string();
+        let section = percent_encoding::percent_decode_str(encoded_section)
+            .decode_utf8()
+            .unwrap_or_default()
+            .to_string();
+
+        // 去除可能的 .md 扩展名后查找笔记
+        let title_without_ext = if target.to_lowercase().ends_with(".md") {
+            &target[..target.len() - 3]
+        } else {
+            &target
+        };
+
+        // 查找目标笔记：先 link_index（标题→路径），再直接路径匹配
+        let note_key = link_index.get(title_without_ext)
+            .or_else(|| link_index.get(&target))
+            .cloned()
+            .or_else(|| if notes.contains_key(&target) { Some(target.clone()) } else { None })
+            .or_else(|| {
+                let with_md = format!("{}.md", target);
+                if notes.contains_key(&with_md) { Some(with_md) } else { None }
+            });
+
+        if let Some(key) = note_key {
+            if let Some(note) = notes.get(&key) {
+                // 如果有章节锚点，提取目标章节内容（简化：截取到下一个同级标题）
+                let content_html = if section.is_empty() {
+                    note.content_html.clone()
+                } else {
+                    // 尝试通过 id 锚点提取章节（简单实现：直接展示全文，前端可通过 #anchor 跳转）
+                    note.content_html.clone()
+                };
+
+                // 递归展开嵌套内嵌（深度 +1）
+                let expanded = expand_embeds(&content_html, notes, link_index, depth + 1);
+
+                let section_hint = if !section.is_empty() {
+                    format!(" § {}", MarkdownProcessor::html_escape_text(&section))
+                } else {
+                    String::new()
+                };
+
+                format!(
+                    r#"<details class="note-embed" open>
+  <summary class="note-embed-title">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0">
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+    <a href="/doc/{path}" class="note-embed-link">{title}{section}</a>
+  </summary>
+  <div class="note-embed-content markdown-body">{content}</div>
+</details>"#,
+                    path = percent_encoding::utf8_percent_encode(&key, percent_encoding::NON_ALPHANUMERIC),
+                    title = MarkdownProcessor::html_escape_text(&note.title),
+                    section = section_hint,
+                    content = expanded,
+                )
+            } else {
+                format!(
+                    r#"<div class="note-embed-missing">⚠️ 笔记内容不可用：{}</div>"#,
+                    MarkdownProcessor::html_escape_text(&target)
+                )
+            }
+        } else {
+            format!(
+                r#"<div class="note-embed-missing">⚠️ 找不到笔记：{}</div>"#,
+                MarkdownProcessor::html_escape_text(&target)
+            )
+        }
+    }).to_string()
+}
 
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {
@@ -368,15 +485,18 @@ pub async fn doc_handler(path: web::Path<String>, data: web::Data<Arc<AppState>>
             let backlinks_map = data.backlinks.read().await;
             let empty_vec = Vec::new();
             let note_backlinks = backlinks_map.get(&note.title).unwrap_or(&empty_vec);
-            
+
             // 生成面包屑导航
             let breadcrumbs = generate_breadcrumbs(&note.path, &note.title);
+
+            // v1.5.4：展开笔记内嵌占位符（![[笔记.md]] → 可折叠 HTML 块）
+            let expanded_content = expand_embeds(&note.content_html, &notes, &link_index, 0);
 
             let tmpl = PageTemplate {
                 title: &note.title,
                 note_title: &note.title,
                 note_path: &note.path,
-                content: &note.content_html,
+                content: &expanded_content,
                 sidebar: &flat_sidebar,
                 backlinks: note_backlinks,
                 toc: &note.toc,

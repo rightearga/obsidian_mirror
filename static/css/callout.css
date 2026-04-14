@@ -60,6 +60,11 @@
 .callout-content {
     padding: 0 14px 12px;
     font-size: 0.95em;
+    /* v1.5.4：用 max-height 实现展开/折叠 CSS 过渡动画 */
+    max-height: 8000px;
+    overflow: hidden;
+    transition: max-height 0.3s ease, padding 0.25s ease, opacity 0.25s ease;
+    opacity: 1;
 }
 
 .callout-content > *:first-child {
@@ -70,9 +75,12 @@
     margin-bottom: 0;
 }
 
-/* 折叠时隐藏内容 */
+/* 折叠时收起内容（平滑过渡，取代 display:none）*/
 .callout-collapsed .callout-content {
-    display: none;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    opacity: 0;
 }
 
 /* ---- 各类型配色 ---- */
