@@ -122,6 +122,30 @@
         },
 
         /**
+         * 将 Markdown 渲染为 HTML（WASM 优先，v1.6.1）。
+         * 支持 WikiLink、数学公式占位、高亮语法等 Obsidian 扩展语法。
+         * WASM 目标 < 5ms（vs 服务端 HTTP round-trip ~50ms）。
+         *
+         * @param {string} markdown 输入 Markdown 字符串
+         * @returns {string} 渲染后的 HTML
+         */
+        renderMarkdown(markdown) {
+            const t0 = performance.now();
+            let result;
+            if (this.loaded && this.module?.render_markdown) {
+                result = this.module.render_markdown(markdown);
+                this._logPerf('renderMarkdown', 'wasm', t0);
+            } else {
+                // JavaScript fallback：基本段落化
+                result = '<p>' + markdown
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/\n\n+/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+                this._logPerf('renderMarkdown', 'js-fallback', t0);
+            }
+            return result;
+        },
+
+        /**
          * 从 HTML 中提取纯文本并截取（去除所有 HTML 标签）。
          * WASM 版本与服务端 `handlers::truncate_html` 逻辑一致。
          *

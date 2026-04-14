@@ -1,0 +1,180 @@
+/* ==========================================
+   WASM 实时预览面板样式（v1.6.1）
+   ========================================== */
+
+/* ---- 切换按钮容器 ---- */
+.wasm-preview-toggle-wrapper {
+    display: flex;
+    justify-content: flex-end;
+    padding: 6px 0;
+}
+
+.wasm-preview-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    font-size: 0.82rem;
+    color: var(--text-secondary, #888);
+    background: var(--bg-secondary, #f5f5f5);
+    border: 1px solid var(--border, #e0e0e0);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.wasm-preview-toggle-btn:hover {
+    color: var(--accent, #6a5acd);
+    border-color: var(--accent, #6a5acd);
+    background: color-mix(in srgb, var(--accent, #6a5acd) 8%, var(--bg-secondary, #f5f5f5));
+}
+
+.wasm-preview-toggle-btn.active {
+    color: var(--accent, #6a5acd);
+    border-color: var(--accent, #6a5acd);
+    background: color-mix(in srgb, var(--accent, #6a5acd) 12%, var(--bg-secondary, #f5f5f5));
+}
+
+/* ---- 预览面板主容器 ---- */
+.wasm-preview-panel {
+    border: 1px solid var(--border, #e0e0e0);
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    background: var(--bg, #fff);
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    /* 展开动画 */
+    animation: wasm-panel-in 0.2s ease;
+}
+
+@keyframes wasm-panel-in {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+[data-theme="dark"] .wasm-preview-panel {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ---- 标题行 ---- */
+.wasm-preview-header {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    padding: 8px 14px;
+    background: var(--bg-secondary, #f8f9fa);
+    border-bottom: 1px solid var(--border, #e0e0e0);
+    font-size: 0.8rem;
+    color: var(--text-secondary, #888);
+}
+
+.wasm-preview-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex: 1;
+    font-weight: 500;
+}
+
+.wasm-preview-label:last-of-type {
+    /* 右侧"实时渲染"标签 */
+}
+
+.wasm-badge {
+    display: inline-block;
+    padding: 1px 5px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--accent, #6a5acd);
+    background: color-mix(in srgb, var(--accent, #6a5acd) 12%, transparent);
+    border-radius: 3px;
+    letter-spacing: 0.05em;
+}
+
+.wasm-preview-close {
+    margin-left: auto;
+    padding: 2px 8px;
+    font-size: 0.9rem;
+    color: var(--text-secondary, #888);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    border-radius: 4px;
+    line-height: 1;
+}
+
+.wasm-preview-close:hover {
+    color: var(--text, #333);
+    background: var(--hover, rgba(0,0,0,0.06));
+}
+
+/* ---- 双栏内容区 ---- */
+.wasm-preview-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 300px;
+    max-height: 600px;
+}
+
+/* ---- 输入区（左侧） ---- */
+.wasm-preview-textarea {
+    width: 100%;
+    height: 100%;
+    min-height: 300px;
+    padding: 14px;
+    font-family: 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--text, #333);
+    background: var(--bg, #fff);
+    border: none;
+    border-right: 1px solid var(--border, #e0e0e0);
+    resize: none;
+    outline: none;
+    tab-size: 2;
+    overflow-y: auto;
+    box-sizing: border-box;
+}
+
+.wasm-preview-textarea::placeholder {
+    color: var(--text-muted, #bbb);
+    line-height: 1.8;
+}
+
+/* ---- 预览区（右侧） ---- */
+.wasm-preview-output {
+    padding: 14px 20px;
+    overflow-y: auto;
+    font-size: 0.9rem;
+}
+
+.wasm-preview-placeholder {
+    color: var(--text-muted, #bbb);
+    font-style: italic;
+    font-size: 0.85rem;
+}
+
+/* ---- 移动端：垂直布局 ---- */
+@media (max-width: 768px) {
+    .wasm-preview-body {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 1fr;
+        max-height: 80vh;
+    }
+
+    .wasm-preview-textarea {
+        border-right: none;
+        border-bottom: 1px solid var(--border, #e0e0e0);
+    }
+}
+
+/* ---- 深色模式 ---- */
+[data-theme="dark"] .wasm-preview-header {
+    background: var(--bg-secondary, #1e1e1e);
+    border-color: var(--border, #3a3a3a);
+}
+
+[data-theme="dark"] .wasm-preview-body .wasm-preview-textarea {
+    border-color: var(--border, #3a3a3a);
+}

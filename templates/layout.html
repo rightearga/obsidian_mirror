@@ -43,6 +43,7 @@
     <link rel="stylesheet" href="/static/css/math.css?v=20260413">
     <link rel="stylesheet" href="/static/css/callout.css?v=20260414">
     <link rel="stylesheet" href="/static/css/embed.css?v=20260414">
+    <link rel="stylesheet" href="/static/css/wasm-preview.css?v=20260414">
     <link rel="stylesheet" href="/static/css/lightbox.css?v=20260413">
     <!-- KaTeX 数学公式渲染（CDN） -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" crossorigin="anonymous">
@@ -638,5 +639,7 @@
     <script defer src="/static/js/pwa.js?v=20260413"></script>
     <!-- v1.6.0: WASM 模块加载器（渐进增强，WebAssembly 不可用时自动 fallback 到 JS）-->
     <script defer src="/static/wasm/loader.js?v=20260414"></script>
+    <!-- v1.6.1: WASM 实时预览面板（需 WASM 模块加载完成后激活）-->
+    <script defer src="/static/js/wasm-preview.js?v=20260414"></script>
 </body>
 </html>

@@ -14,6 +14,16 @@ crate-type = ["cdylib", "rlib"]
 # 在非 wasm32 目标上，#[wasm_bindgen] 属性为 no-op，函数仍可正常编译
 wasm-bindgen = "0.2"
 
+# v1.6.1：Markdown 渲染依赖
+# pulldown-cmark: WASM 目标禁用 simd（仅使用纯 Rust 实现，保证跨浏览器兼容性）
+pulldown-cmark = { version = "0.13.3", default-features = false, features = ["html"] }
+# regex：WikiLink 和扩展语法预处理
+regex = "1.12.3"
+# lazy_static：正则预编译（进程生命周期内只编译一次，WASM 中同样适用）
+lazy_static = "1.5.0"
+# percent-encoding：WikiLink 路径编码
+percent-encoding = "2.3.2"
+
 [dev-dependencies]
 # wasm-bindgen-test：浏览器内 WASM 测试（需 wasm-pack test）
 wasm-bindgen-test = "0.3"

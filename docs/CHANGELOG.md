@@ -8,6 +8,27 @@
 
 ---
 
+## [v1.6.1] — 2026-04-14
+
+Markdown 渲染客户端化：pulldown-cmark 编译为 WASM，浏览器端实时预览 < 5ms。
+
+### Added
+- **`render_markdown(content: &str) -> String`** WASM 函数（`crates/wasm/src/lib.rs`）：
+  - 支持完整 Obsidian 扩展语法：`[[WikiLink]]`、`![[image.png]]`、`==高亮==`、`$数学$`、`$$块级数学$$`
+  - 使用 pulldown-cmark（禁用 simd 保证跨浏览器兼容）
+  - 8 个专项单元测试（basic/WikiLink/alias/image/highlight/math-inline/math-block/table）
+- **`WasmLoader.renderMarkdown(markdown)`** — loader.js 新增方法，WASM 优先渲染，加载失败自动 fallback 到 JS 段落化
+- **实时预览面板**（`static/js/wasm-preview.js` + `static/css/wasm-preview.css`）：
+  - 当 WASM 模块可用时，在笔记页面插入「实时预览」切换按钮
+  - 激活后呈现双栏布局：左侧 Markdown textarea、右侧实时渲染（300ms 防抖）
+  - 渲染后自动触发 callout.js / MermaidManager 处理
+  - localStorage 记录折叠状态；移动端自动切换垂直布局
+
+### Changed
+- `crates/wasm/Cargo.toml`：新增依赖 pulldown-cmark、regex、lazy_static、percent-encoding
+
+---
+
 ## [v1.6.0] — 2026-04-14
 
 WASM 基础设施：打通 Rust → WebAssembly 工具链，建立渐进增强的客户端加速管道。

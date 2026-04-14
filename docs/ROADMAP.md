@@ -257,7 +257,7 @@
 
 ---
 
-### ✨ v1.6.1 — Markdown 渲染客户端化
+### ✅ v1.6.1 (已发布 - 2026-04-14) — Markdown 渲染客户端化
 
 **主题**：pulldown-cmark 编译为 WASM，浏览器本地渲染 Markdown，实现实时预览
 
