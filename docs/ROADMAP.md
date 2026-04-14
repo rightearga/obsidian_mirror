@@ -455,17 +455,23 @@ impl Bitset {
 
 ---
 
-### 🔧 v1.6.6 — 代码审计（CODEREVIEW_1.6）
+### ✅ v1.6.6 (已发布 - 2026-04-14)
 
-**主题**：对 v1.6.x WASM 相关代码进行系统性审查
+**主题**：代码审计修复（CODEREVIEW_1.6）
 
-- 审计重点：
-  - WASM 模块内存管理（wasm-bindgen 内存泄漏）
-  - 离线搜索索引内容安全（`index.json` 是否包含不应暴露的信息）
-  - WASM 加载失败 fallback 路径是否完整覆盖
-  - Rust unsafe 代码（如果有）的安全性
-- 产出：`docs/CODEREVIEW_1.6.md`
-- 遵循审计流程（`/ob-review 1.6`）
+#### 修复内容
+- ✅ **[B1] index.json 在 auth_enabled 时暴露私有笔记内容**：`auth_enabled=true` 时跳过 `static/wasm/index.json` 生成，防止笔记内容经 `/static/` 公开路径泄露
+- ✅ **[B2] index.json 生成任务未加入 background_tasks**：将写入任务 `JoinHandle` 加入 `background_tasks`，优雅关闭时等待完成
+- ✅ **[Q1] WASM crate 模块版本号未同步**：`crates/wasm/src/lib.rs` 顶部注释从 `v1.6.1` 更新为 `v1.6.5`
+
+#### 设计限制（已知接受）
+- ⏸ Q2：`index.json` 使用相对路径，与其他静态文件一致，已有 warn 日志
+- ⏸ Q3：`render_markdown` HTML passthrough，仅影响已认证用户自身笔记预览（自 XSS）
+- ⏸ A1：`NoteIndex` WASM 内存未显式释放，SPA 场景不存在泄漏
+
+#### 测试结果
+- 全量测试：**98/98 通过**
+- 新增测试：0 个（审计修复，无新逻辑）
 
 ---
 

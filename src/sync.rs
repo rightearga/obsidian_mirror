@@ -558,9 +558,11 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     SYNC_LAST_TIMESTAMP_SECONDS.set(now_ts);
 
     // v1.6.2：后台生成离线搜索索引（JSON 格式），供 WASM NoteIndex 加载
-    {
+    // v1.6.6 B1：auth_enabled=true 时 index.json 含敏感内容且路径公开（/static/ 白名单），跳过生成
+    // v1.6.6 B2：将句柄加入 background_tasks，优雅关闭时等待写入完成
+    if !config.security.auth_enabled {
         let notes_for_index = data.notes.read().await.clone();
-        tokio::task::spawn(async move {
+        let index_handle = tokio::task::spawn(async move {
             if let Ok(json) = generate_search_index_json(&notes_for_index) {
                 // 写入 static/wasm/index.json（Service Worker 会缓存此文件）
                 if let Err(e) = tokio::fs::write("static/wasm/index.json", json).await {
@@ -570,6 +572,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                 }
             }
         });
+        if let Ok(mut tasks) = data.background_tasks.lock() {
+            tasks.retain(|h| !h.is_finished());
+            tasks.push(index_handle);
+        }
     }
 
     Ok(())

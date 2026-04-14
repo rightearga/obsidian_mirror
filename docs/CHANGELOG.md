@@ -8,6 +8,23 @@
 
 ---
 
+## [v1.6.6] — 2026-04-14
+
+代码审计修复版本（CODEREVIEW_1.6）。
+
+### Fixed
+- **[B1] index.json 在 auth_enabled 时暴露私有笔记内容**（`src/sync.rs`）：当 `auth_enabled = true` 时跳过 `static/wasm/index.json` 的生成。`/static/` 为认证白名单前缀，生成该文件会导致笔记 title/path/tags/内容摘要向未认证用户泄露；禁用认证的公开部署不受影响。
+- **[B2] index.json 生成任务未加入 background_tasks**（`src/sync.rs`）：将 `tokio::task::spawn` 返回的 `JoinHandle` 加入 `data.background_tasks`，保证优雅关闭时等待文件写入完成，消除写入截断风险。
+- **[Q1] WASM crate 模块版本号未同步**（`crates/wasm/src/lib.rs`）：将模块顶部注释从 `v1.6.1` 更新为 `v1.6.5`。
+
+### 审计统计
+- 🟠 P1 修复：1 项（B1）
+- 🟡 P2 修复：1 项（B2）
+- 🔵 P3 修复：1 项（Q1）
+- 接受为设计限制：3 项（Q2 相对路径、Q3 HTML passthrough、A1 WASM 内存释放）
+
+---
+
 ## [v1.6.5] — 2026-04-14
 
 NoteIndex 倒排索引位图加速（M3-续）：`HashSet<usize>` → `Bitset` 候选集。
