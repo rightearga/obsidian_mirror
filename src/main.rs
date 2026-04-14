@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::AppState,
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, global_graph_handler, webhook_sync_handler, config_reload_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -18,7 +18,7 @@ use obsidian_mirror::{
     share_db::ShareDatabase,
     share_handlers::{create_share_handler, access_share_handler, list_shares_handler, revoke_share_handler},
     reading_progress_db::ReadingProgressDatabase,
-    reading_progress_handlers::{save_progress_handler, get_progress_handler, list_progress_handler, delete_progress_handler, add_history_handler, list_history_handler},
+    reading_progress_handlers::{save_progress_handler, get_progress_handler, list_progress_handler, delete_progress_handler, add_history_handler, list_history_handler, add_search_history_handler, get_search_history_handler, clear_search_history_handler},
     VERSION, APP_NAME,
 };
 
@@ -417,6 +417,7 @@ async fn start_http_server(
             .service(random_handler)
             .service(recent_page_handler)
             .service(titles_api_handler)
+            .service(suggest_handler)          // GET /api/suggest — 搜索建议（v1.5.2）
             .service(global_graph_handler)
             // Webhook 触发同步（需在 config.webhook.enabled=true 时才有效）
             .route("/webhook/sync", web::post().to(webhook_sync_handler))
@@ -435,6 +436,10 @@ async fn start_http_server(
             .route("/api/reading/progress/{note_path:.*}", web::delete().to(delete_progress_handler))
             .route("/api/reading/history", web::post().to(add_history_handler))
             .route("/api/reading/history", web::get().to(list_history_handler))
+            // 搜索历史相关路由（v1.5.2）
+            .route("/api/search/history", web::post().to(add_search_history_handler))
+            .route("/api/search/history", web::get().to(get_search_history_handler))
+            .route("/api/search/history", web::delete().to(clear_search_history_handler))
             .service(doc_handler)
             .service(index_handler)
     })

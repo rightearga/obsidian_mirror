@@ -855,21 +855,97 @@ pub async fn global_graph_handler(
     HttpResponse::Ok().json(graph_data)
 }
 
-/// GET /api/titles — 返回所有笔记标题和标签，供前端自动补全使用
+/// GET /api/titles — 返回所有笔记标题、路径和标签，供前端自动补全使用
 ///
 /// 前端在首次搜索框聚焦时获取，缓存于 sessionStorage 中。
+/// `titles`：向后兼容，仅标题字符串列表；
+/// `note_items`：新字段（v1.5.2），包含 title 和 path，可展示路径上下文。
 #[get("/api/titles")]
 pub async fn titles_api_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
     let notes = data.notes.read().await;
     let tag_index = data.tag_index.read().await;
 
+    // 保留向后兼容的 titles 字段
     let titles: Vec<&str> = notes.values().map(|n| n.title.as_str()).collect();
     let tags: Vec<&str> = tag_index.keys().map(|t| t.as_str()).collect();
+    // 新增 note_items 字段：包含 path 上下文，供更丰富的自动补全展示
+    let note_items: Vec<serde_json::Value> = notes.values()
+        .map(|n| serde_json::json!({"title": n.title, "path": n.path}))
+        .collect();
 
     HttpResponse::Ok().json(serde_json::json!({
         "titles": titles,
         "tags": tags,
+        "note_items": note_items,
     }))
+}
+
+/// 搜索建议查询参数
+#[derive(Debug, serde::Deserialize)]
+pub struct SuggestQuery {
+    /// 搜索关键词
+    pub q: String,
+    /// 返回条数上限（默认 10，最大 20）
+    #[serde(default = "default_suggest_limit")]
+    pub limit: usize,
+}
+
+fn default_suggest_limit() -> usize { 10 }
+
+/// GET /api/suggest — 搜索建议端点，返回模糊匹配的笔记标题和路径
+///
+/// 先通过内存前缀匹配快速过滤（大小写不敏感），
+/// 再通过 Tantivy FuzzyTermQuery 补充编辑距离 ≤1 的模糊建议，合并去重后返回。
+/// 返回格式：`[{"title": "...", "path": "..."}]`，按相关度降序。
+#[get("/api/suggest")]
+pub async fn suggest_handler(
+    query: web::Query<SuggestQuery>,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let q = query.q.trim().to_lowercase();
+    if q.is_empty() {
+        return HttpResponse::Ok().json(Vec::<serde_json::Value>::new());
+    }
+
+    let limit = query.limit.min(20);
+
+    // 1. 内存前缀/包含匹配（快速路径）
+    let notes = data.notes.read().await;
+    let mut seen_paths = std::collections::HashSet::new();
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    // 优先返回标题前缀匹配的结果
+    for note in notes.values() {
+        if note.title.to_lowercase().starts_with(&q) {
+            results.push(serde_json::json!({"title": note.title, "path": note.path}));
+            seen_paths.insert(note.path.clone());
+        }
+    }
+    // 其次返回标题包含匹配的结果（非前缀）
+    for note in notes.values() {
+        if results.len() >= limit { break; }
+        if !seen_paths.contains(&note.path) && note.title.to_lowercase().contains(&q) {
+            results.push(serde_json::json!({"title": note.title, "path": note.path}));
+            seen_paths.insert(note.path.clone());
+        }
+    }
+    drop(notes);
+
+    // 2. 若内存匹配结果不足，用 FuzzyTermQuery 补充（Tantivy 模糊匹配，容错编辑距离 1）
+    if results.len() < limit {
+        let remaining = limit - results.len();
+        if let Ok(fuzzy_results) = data.search_engine.fuzzy_suggest(&q, remaining + seen_paths.len()) {
+            for (title, path, _score) in fuzzy_results {
+                if results.len() >= limit { break; }
+                if !seen_paths.contains(&path) {
+                    results.push(serde_json::json!({"title": title, "path": path}));
+                    seen_paths.insert(path);
+                }
+            }
+        }
+    }
+
+    HttpResponse::Ok().json(results)
 }
 
 /// POST /webhook/sync — Webhook 触发同步端点

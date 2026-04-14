@@ -454,6 +454,67 @@ impl SearchEngine {
         self.reader.searcher().num_docs()
     }
 
+    /// 基于 FuzzyTermQuery 在标题字段做容错模糊搜索，返回建议列表。
+    ///
+    /// 对查询词中的每个 token 构造最多 1 个编辑距离的模糊查询（前缀匹配），
+    /// 适合搜索框实时补全场景。返回 `(title, path, score)` 三元组，按相关度降序。
+    pub fn fuzzy_suggest(
+        &self,
+        query_str: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String, f32)>> {
+        use tantivy::query::{BooleanQuery, FuzzyTermQuery, Occur};
+        use tantivy::Term;
+
+        let q = query_str.trim();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let searcher = self.reader.searcher();
+
+        // 对每个空格分隔的词构造 FuzzyTermQuery（编辑距离 1，前缀匹配）
+        let tokens: Vec<&str> = q.split_whitespace().collect();
+        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+
+        for token in &tokens {
+            let term = Term::from_field_text(self.title_field, &token.to_lowercase());
+            // prefix=true：将查询词作为前缀，编辑距离 1
+            let fuzzy_q = FuzzyTermQuery::new(term.clone(), 1, true);
+            subqueries.push((Occur::Should, Box::new(fuzzy_q)));
+            // 精确匹配优先级更高（额外 Should）
+            let exact_term = Term::from_field_text(self.title_field, &token.to_lowercase());
+            let exact_q = tantivy::query::TermQuery::new(exact_term, Default::default());
+            subqueries.push((Occur::Should, Box::new(exact_q)));
+        }
+
+        if subqueries.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let final_query = BooleanQuery::new(subqueries);
+        let top_docs = searcher.search(&final_query, &TopDocs::with_limit(limit).order_by_score())?;
+
+        let mut results = Vec::new();
+        for (score, doc_address) in top_docs {
+            let doc: tantivy::TantivyDocument = searcher.doc(doc_address)?;
+            let mut title = String::new();
+            let mut path = String::new();
+            for (field, value) in doc.field_values() {
+                if field == self.title_field && let Some(t) = value.as_str() {
+                    title = t.to_string();
+                } else if field == self.path_field && let Some(p) = value.as_str() {
+                    path = p.to_string();
+                }
+            }
+            if !title.is_empty() {
+                results.push((title, path, score));
+            }
+        }
+
+        Ok(results)
+    }
+
     /// 执行简单搜索（保持向后兼容）
     pub fn search(
         &self,
@@ -466,7 +527,10 @@ impl SearchEngine {
     }
 }
 
-// 生成搜索结果摘要片段
+/// 生成搜索结果摘要片段，并用 `<mark>` 标签高亮命中词。
+///
+/// 在内容中定位搜索词，提取 50 字符前缀 + 命中词 + 100 字符后缀，
+/// 并将所有匹配项包裹在 `<mark>...</mark>` 中供前端直接渲染为高亮效果。
 fn generate_snippet(content: &str, search_term: &str, max_len: usize) -> String {
     // 清理内容：移除换行和多余空白
     let cleaned_content = content
@@ -478,43 +542,74 @@ fn generate_snippet(content: &str, search_term: &str, max_len: usize) -> String 
     let content_lower = cleaned_content.to_lowercase();
     let search_lower = search_term.to_lowercase();
 
-    if let Some(pos) = content_lower.find(&search_lower) {
-        // 找到匹配位置，提取上下文
+    if !search_lower.is_empty()
+        && let Some(pos) = content_lower.find(&search_lower) {
+        // 找到匹配位置，提取上下文窗口
         let start = pos.saturating_sub(50);
         let end = (pos + search_term.len() + 100).min(cleaned_content.len());
-
-        // 安全地提取子串（处理 UTF-8 边界）
         let snippet = safe_substring(&cleaned_content, start, end);
 
         let prefix = if start > 0 { "..." } else { "" };
-        let suffix = if end < cleaned_content.len() {
-            "..."
-        } else {
-            ""
-        };
+        let suffix = if end < cleaned_content.len() { "..." } else { "" };
 
-        let result = format!("{}{}{}", prefix, snippet, suffix);
+        // 在摘要片段中高亮所有匹配项
+        let highlighted = highlight_terms(&snippet, search_term);
+        let result = format!("{}{}{}", prefix, highlighted, suffix);
 
-        // 限制总长度
-        if result.len() > max_len {
-            safe_substring(&result, 0, max_len) + "..."
-        } else {
-            result
-        }
-    } else {
-        // 如果找不到匹配，返回开头部分
-        if cleaned_content.is_empty() {
-            return String::from("(无内容预览)");
-        }
-
-        let preview = safe_substring(&cleaned_content, 0, max_len);
-
-        if cleaned_content.len() > max_len {
-            format!("{}...", preview)
-        } else {
-            preview
-        }
+        // 粗估 HTML 长度；字符限制适用于可见文本部分
+        return result;
     }
+
+    // 未找到匹配，返回开头部分（无高亮）
+    if cleaned_content.is_empty() {
+        return String::from("(无内容预览)");
+    }
+
+    let preview = safe_substring(&cleaned_content, 0, max_len);
+    if cleaned_content.len() > max_len {
+        format!("{}...", preview)
+    } else {
+        preview
+    }
+}
+
+/// 在文本中将所有匹配 `term` 的位置包裹为 `<mark>...</mark>` 高亮标签。
+///
+/// 大小写不敏感匹配，保留原文大小写。
+fn highlight_terms(text: &str, term: &str) -> String {
+    if term.is_empty() {
+        return text.to_string();
+    }
+    let term_lower = term.to_lowercase();
+    let text_lower = text.to_lowercase();
+
+    let mut result = String::with_capacity(text.len() + 24); // 预留 <mark></mark> 空间
+    let mut last_end = 0;
+    let mut search_start = 0;
+
+    while let Some(rel_pos) = text_lower[search_start..].find(&term_lower) {
+        let abs_pos = search_start + rel_pos;
+        // 确保在字符边界上
+        if !text.is_char_boundary(abs_pos) {
+            search_start = abs_pos + 1;
+            continue;
+        }
+        let term_end = abs_pos + term.len();
+        if term_end > text.len() || !text.is_char_boundary(term_end) {
+            search_start = abs_pos + 1;
+            continue;
+        }
+        // 追加匹配前的文本
+        result.push_str(&text[last_end..abs_pos]);
+        // 包裹高亮标签
+        result.push_str("<mark>");
+        result.push_str(&text[abs_pos..term_end]);
+        result.push_str("</mark>");
+        last_end = term_end;
+        search_start = term_end;
+    }
+    result.push_str(&text[last_end..]);
+    result
 }
 
 // 安全地提取 UTF-8 字符串的子串，避免在字符边界中间切割

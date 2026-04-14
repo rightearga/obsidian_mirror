@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tracing::error;
 
-use crate::reading_progress_db::{ReadingProgress, ReadingHistory};
+use crate::reading_progress_db::{ReadingProgress, ReadingHistory, SearchHistoryEntry};
 use crate::state::AppState;
 
 /// 保存阅读进度请求
@@ -403,4 +403,123 @@ pub struct AddHistoryRequest {
 #[derive(Debug, Deserialize)]
 pub struct ListHistoryQuery {
     pub limit: Option<usize>,
+}
+
+// ─── 搜索历史 API（v1.5.2）─────────────────────────────────────────────────
+
+/// 添加搜索历史请求体
+#[derive(Debug, Deserialize)]
+pub struct AddSearchHistoryRequest {
+    /// 搜索词（非空）
+    pub query: String,
+}
+
+/// 搜索历史响应
+#[derive(Debug, Serialize)]
+pub struct SearchHistoryResponse {
+    pub query: String,
+    pub searched_at: String,
+}
+
+/// 记录搜索历史
+///
+/// POST /api/search/history
+pub async fn add_search_history_handler(
+    req: HttpRequest,
+    body: web::Json<AddSearchHistoryRequest>,
+    app_state: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    let username = match req.extensions().get::<String>() {
+        Some(u) => u.clone(),
+        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "未认证"})),
+    };
+
+    let q = body.query.trim().to_string();
+    if q.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "搜索词不能为空"}));
+    }
+
+    let entry = SearchHistoryEntry::new(username, q);
+    // A1 规范：redb IO 移入 spawn_blocking
+    let db = Arc::clone(&app_state.reading_progress_db);
+    let entry_clone = entry.clone();
+    if let Err(e) = tokio::task::spawn_blocking(move || db.add_search_history(&entry_clone))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        error!("记录搜索历史失败: {}", e);
+        return HttpResponse::InternalServerError().json(serde_json::json!({"error": "记录失败"}));
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({"message": "已记录"}))
+}
+
+/// 查询参数
+#[derive(Debug, Deserialize)]
+pub struct ListSearchHistoryQuery {
+    /// 返回条数上限（默认 20）
+    pub limit: Option<usize>,
+}
+
+/// 获取搜索历史列表
+///
+/// GET /api/search/history
+pub async fn get_search_history_handler(
+    req: HttpRequest,
+    query: web::Query<ListSearchHistoryQuery>,
+    app_state: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    let username = match req.extensions().get::<String>() {
+        Some(u) => u.clone(),
+        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "未认证"})),
+    };
+
+    let limit = query.limit.unwrap_or(20).min(100);
+
+    let db = Arc::clone(&app_state.reading_progress_db);
+    let uname = username.clone();
+    let list = match tokio::task::spawn_blocking(move || db.get_search_history(&uname, limit))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(l) => l,
+        Err(e) => {
+            error!("获取搜索历史失败: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({"error": "查询失败"}));
+        }
+    };
+
+    use chrono::{DateTime, Utc};
+    let response: Vec<SearchHistoryResponse> = list.iter().map(|entry| SearchHistoryResponse {
+        query: entry.query.clone(),
+        searched_at: DateTime::<Utc>::from(entry.searched_at).to_rfc3339(),
+    }).collect();
+
+    HttpResponse::Ok().json(serde_json::json!({"history": response}))
+}
+
+/// 清空搜索历史
+///
+/// DELETE /api/search/history
+pub async fn clear_search_history_handler(
+    req: HttpRequest,
+    app_state: web::Data<Arc<AppState>>,
+) -> HttpResponse {
+    let username = match req.extensions().get::<String>() {
+        Some(u) => u.clone(),
+        None => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "未认证"})),
+    };
+
+    let db = Arc::clone(&app_state.reading_progress_db);
+    let uname = username.clone();
+    match tokio::task::spawn_blocking(move || db.clear_search_history(&uname))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(count) => HttpResponse::Ok().json(serde_json::json!({"message": format!("已清空 {} 条搜索历史", count)})),
+        Err(e) => {
+            error!("清空搜索历史失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "清空失败"}))
+        }
+    }
 }

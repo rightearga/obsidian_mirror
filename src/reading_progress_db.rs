@@ -20,6 +20,11 @@ const READING_PROGRESS_TABLE: TableDefinition<&str, &str> =
 /// Value: ReadingHistory (序列化为 JSON)
 const READING_HISTORY_TABLE: TableDefinition<&str, &str> = TableDefinition::new("reading_history");
 
+/// 搜索历史表定义
+/// Key: "{username}:{timestamp_nanos}" (String)
+/// Value: SearchHistoryEntry (序列化为 JSON)
+const SEARCH_HISTORY_TABLE: TableDefinition<&str, &str> = TableDefinition::new("search_history");
+
 /// 阅读进度数据结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadingProgress {
@@ -126,6 +131,40 @@ impl ReadingHistory {
     }
 }
 
+/// 搜索历史记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchHistoryEntry {
+    /// 用户名
+    pub username: String,
+
+    /// 搜索词
+    pub query: String,
+
+    /// 搜索时间
+    pub searched_at: SystemTime,
+}
+
+impl SearchHistoryEntry {
+    /// 创建新的搜索历史记录
+    pub fn new(username: String, query: String) -> Self {
+        Self {
+            username,
+            query,
+            searched_at: SystemTime::now(),
+        }
+    }
+
+    /// 生成数据库键（带时间戳保证唯一性）
+    pub fn db_key(&self) -> String {
+        let timestamp = self
+            .searched_at
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        format!("{}:{}", self.username, timestamp)
+    }
+}
+
 /// 阅读进度数据库
 pub struct ReadingProgressDatabase {
     db: Database,
@@ -152,6 +191,8 @@ impl ReadingProgressDatabase {
             let _progress_table = write_txn.open_table(READING_PROGRESS_TABLE)?;
             // 创建阅读历史表
             let _history_table = write_txn.open_table(READING_HISTORY_TABLE)?;
+            // 创建搜索历史表（v1.5.2 新增）
+            let _search_history_table = write_txn.open_table(SEARCH_HISTORY_TABLE)?;
         }
         write_txn.commit()?;
 
@@ -291,6 +332,96 @@ impl ReadingProgressDatabase {
         history_list.truncate(limit);
 
         Ok(history_list)
+    }
+
+    /// 添加搜索历史记录，并自动清理超出上限的旧记录（每用户保留最近 50 条）
+    pub fn add_search_history(&self, entry: &SearchHistoryEntry) -> Result<()> {
+        let key = entry.db_key();
+
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(SEARCH_HISTORY_TABLE)?;
+            let json = serde_json::to_string(entry)?;
+            table.insert(key.as_str(), json.as_str())?;
+        }
+        write_txn.commit()?;
+
+        debug!("✅ 记录搜索历史: {} -> \"{}\"", entry.username, entry.query);
+
+        // 自动清理旧搜索历史（保留最近 50 条）
+        let _ = self.cleanup_search_history(&entry.username, 50);
+
+        Ok(())
+    }
+
+    /// 获取用户的搜索历史（按时间降序）
+    pub fn get_search_history(&self, username: &str, limit: usize) -> Result<Vec<SearchHistoryEntry>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(SEARCH_HISTORY_TABLE)?;
+
+        // key 格式："{username}:{timestamp_nanos}"，前缀范围精确匹配该用户的所有搜索历史
+        let lower = format!("{}:", username);
+        let upper = format!("{};", username);
+        let mut list = Vec::new();
+
+        for item in table.range(lower.as_str()..upper.as_str())? {
+            let (_, json_value) = item?;
+            let entry: SearchHistoryEntry = serde_json::from_str(json_value.value())?;
+            list.push(entry);
+        }
+
+        // 按搜索时间降序
+        list.sort_by(|a, b| b.searched_at.cmp(&a.searched_at));
+        list.truncate(limit);
+
+        Ok(list)
+    }
+
+    /// 清空用户的搜索历史
+    pub fn clear_search_history(&self, username: &str) -> Result<usize> {
+        let history_list = self.get_search_history(username, usize::MAX)?;
+        let count = history_list.len();
+
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(SEARCH_HISTORY_TABLE)?;
+            for entry in &history_list {
+                let key = entry.db_key();
+                let _ = table.remove(key.as_str())?;
+            }
+        }
+        write_txn.commit()?;
+
+        if count > 0 {
+            info!("🧹 清空了 {} 条搜索历史 (用户: {})", count, username);
+        }
+
+        Ok(count)
+    }
+
+    /// 清理旧的搜索历史（保留最近 N 条）
+    fn cleanup_search_history(&self, username: &str, keep_count: usize) -> Result<usize> {
+        let list = self.get_search_history(username, usize::MAX)?;
+        if list.len() <= keep_count {
+            return Ok(0);
+        }
+
+        let to_remove = &list[keep_count..];
+        let mut removed_count = 0;
+
+        let write_txn = self.db.begin_write()?;
+        {
+            let mut table = write_txn.open_table(SEARCH_HISTORY_TABLE)?;
+            for entry in to_remove {
+                let key = entry.db_key();
+                if table.remove(key.as_str())?.is_some() {
+                    removed_count += 1;
+                }
+            }
+        }
+        write_txn.commit()?;
+
+        Ok(removed_count)
     }
 
     /// 清理旧的历史记录（保留最近 N 条）

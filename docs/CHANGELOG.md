@@ -8,6 +8,25 @@
 
 ---
 
+## [v1.5.2] — 2026-04-14
+
+搜索体验全面升级：模糊建议、路径上下文、`<mark>` 高亮摘要、搜索历史持久化。
+
+### Added
+- **`GET /api/suggest?q=`** 搜索建议端点：内存前缀匹配优先 + Tantivy `FuzzyTermQuery`（编辑距离 ≤1）补充，合并去重后返回 `[{title, path}]`
+- **`/api/titles` 增加 `note_items` 字段**：`[{title, path}]` 列表，兼容保留原有 `titles` 字符串数组
+- **搜索历史 API**（存入 `reading_progress_db` 复用，新表 `search_history`）：
+  - `POST /api/search/history` — 记录搜索词（需认证，每用户保留最近 50 条）
+  - `GET /api/search/history?limit=` — 获取历史（默认 20 条）
+  - `DELETE /api/search/history` — 清空历史
+- **`SearchHistoryEntry` 数据结构**（`reading_progress_db.rs`）+ `SEARCH_HISTORY_TABLE` redb 表
+- **`SearchEngine::fuzzy_suggest()`** 方法：基于 `FuzzyTermQuery` 返回标题模糊建议
+
+### Changed
+- **搜索摘要 `<mark>` 高亮**：`generate_snippet` 重构，在命中上下文中用 `<mark>…</mark>` 包裹关键词，前端无需额外处理即可渲染高亮效果；新增 `highlight_terms` 辅助函数
+
+---
+
 ## [v1.5.1] — 2026-04-14
 
 代码审计修复版本（CODEREVIEW_1.5）。

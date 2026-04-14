@@ -131,7 +131,9 @@ docker compose up -d
 | GET | `/orphans` | 孤立笔记列表（无出链且无入链） |
 | GET | `/random` | 随机跳转到一篇笔记（重定向） |
 | GET | `/recent` | 最近更新笔记列表（`?days=` 参数） |
-| GET | `/api/titles` | 所有笔记标题和标签（供前端自动补全） |
+| GET | `/api/titles` | 所有笔记标题/路径/标签（供前端自动补全，v1.5.2 新增 `note_items`） |
+| GET | `/api/suggest` | 搜索建议（`?q=`，内存前缀 + FuzzyTermQuery，返回 `[{title,path}]`）(v1.5.2) |
+| POST/GET/DELETE | `/api/search/history` | 搜索历史记录（需认证）(v1.5.2) |
 | GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
 | POST | `/webhook/sync` | Webhook 触发同步（GitHub/GitLab 签名验证，需 webhook.enabled=true） |
 | POST | `/api/config/reload` | 配置热重载（需认证，重新读取 config.ron 并触发同步） |
