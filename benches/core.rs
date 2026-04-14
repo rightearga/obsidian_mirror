@@ -4,11 +4,13 @@
 //!   cargo bench                    # 运行全部基准，生成 HTML 报告至 target/criterion/
 //!   cargo bench -- markdown        # 只运行名称含 "markdown" 的基准
 //!   cargo bench -- search          # 只运行搜索相关基准
+//!   cargo bench -- wasm            # 只运行 WASM 函数基准（v1.6.3 新增）
 //!
 //! 说明：
 //!   - 每个 group 代表一个性能关注点
 //!   - BenchmarkId 用于对比不同规模的性能差异
 //!   - black_box 防止编译器优化掉未使用的计算结果
+//!   - wasm 组：直接调用 WASM crate 的原生目标版本（与浏览器端行为一致）
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::hint::black_box;
@@ -19,6 +21,9 @@ use obsidian_mirror::domain::{Frontmatter, Note, TocItem};
 use obsidian_mirror::indexer::{BacklinkBuilder, TagIndexBuilder};
 use obsidian_mirror::markdown::MarkdownProcessor;
 use obsidian_mirror::search_engine::{SearchEngine, SortBy};
+
+// v1.6.3 新增：WASM crate 原生目标直接引用
+// （在 bench_wasm 函数内部导入，仅在该 group 使用）
 
 // ==========================================
 // 辅助函数：构造测试数据
@@ -339,6 +344,139 @@ fn bench_truncate_html(c: &mut Criterion) {
 }
 
 // ==========================================
+// Group 6: WASM 函数性能（v1.6.3 新增）
+// ==========================================
+//
+// 说明：
+//   - WASM crate 以原生 x86-64 目标编译运行，无 JS 引擎开销
+//   - 实际浏览器端性能因 WASM JIT 略有差异（通常 ±20%）
+//   - 主要用于回归检测和跨版本对比
+
+/// 构造 N 条笔记的 JSON（用于 NoteIndex 加载和搜索基准）
+fn make_index_json(n: usize) -> String {
+    let entries: Vec<String> = (0..n)
+        .map(|i| {
+            let tags = if i % 3 == 0 { r#"["rust","编程"]"# }
+                       else if i % 3 == 1 { r#"["python","数据"]"# }
+                       else { r#"["web","前端"]"# };
+            format!(
+                r#"{{"title":"笔记标题{}","path":"folder/note{}.md","tags":{},"content":"这是第{}条笔记的内容，包含 Rust 编程语言的技术讨论，涉及内存安全和所有权系统。Note content {} discussing performance.","mtime":{}}}"#,
+                i, i, tags, i, i, i as i64
+            )
+        })
+        .collect();
+    format!("[{}]", entries.join(","))
+}
+
+/// 构造图谱节点 JSON
+fn make_graph_nodes(n: usize) -> String {
+    let nodes: Vec<String> = (0..n).map(|i| format!(r#"{{"id":"node{}"}}"#, i)).collect();
+    format!("[{}]", nodes.join(","))
+}
+
+/// 构造图谱边 JSON（每个节点连向后续 2 个节点，形成稀疏图）
+fn make_graph_edges(n: usize) -> String {
+    let edges: Vec<String> = (0..n)
+        .flat_map(|i| {
+            vec![
+                format!(r#"{{"from":"node{}","to":"node{}"}}"#, i, (i + 1) % n),
+                format!(r#"{{"from":"node{}","to":"node{}"}}"#, i, (i + 2) % n),
+            ]
+        })
+        .collect();
+    format!("[{}]", edges.join(","))
+}
+
+fn bench_wasm(c: &mut Criterion) {
+    use obsidian_mirror_wasm::{
+        compute_graph_layout, filter_notes, generate_toc_from_html,
+        render_markdown, NoteIndex,
+    };
+
+    let mut group = c.benchmark_group("wasm");
+    group.sample_size(50);
+
+    // ─── 6-a: NoteIndex 加载（index.json 反序列化 + 倒排索引构建）──────────
+    for n in [100, 500, 1000].iter() {
+        let json = make_index_json(*n);
+        group.bench_with_input(
+            BenchmarkId::new("note_index_load", n),
+            &json,
+            |b, json| b.iter(|| NoteIndex::load_json(black_box(json)).unwrap()),
+        );
+    }
+
+    // ─── 6-b: NoteIndex 搜索（ASCII 查询词）─────────────────────────────────
+    {
+        let json = make_index_json(1000);
+        let idx = NoteIndex::load_json(&json).unwrap();
+        group.bench_function("note_index_search_ascii_1000", |b| {
+            b.iter(|| idx.search_json(black_box("rust programming"), 20))
+        });
+    }
+
+    // ─── 6-c: NoteIndex 搜索（CJK 查询词，n-gram 分词路径）──────────────────
+    {
+        let json = make_index_json(1000);
+        let idx = NoteIndex::load_json(&json).unwrap();
+        group.bench_function("note_index_search_cjk_1000", |b| {
+            b.iter(|| idx.search_json(black_box("编程语言"), 20))
+        });
+    }
+
+    // ─── 6-d: filterNotes（多标签 + 路径前缀过滤）───────────────────────────
+    for n in [100, 1000].iter() {
+        let json = make_index_json(*n);
+        group.bench_with_input(
+            BenchmarkId::new("filter_notes_tag", n),
+            &json,
+            |b, json| b.iter(|| filter_notes(black_box(json), black_box("rust"), black_box(""), 50)),
+        );
+    }
+
+    // ─── 6-e: compute_graph_layout（Fruchterman-Reingold 布局）──────────────
+    for n in [50, 100, 200, 500].iter() {
+        let nodes = make_graph_nodes(*n);
+        let edges = make_graph_edges(*n);
+        let iterations: u32 = if *n > 300 { 15 } else if *n > 100 { 30 } else { 50 };
+        group.bench_with_input(
+            BenchmarkId::new("graph_layout", n),
+            &(nodes, edges, iterations),
+            |b, (nodes, edges, iters)| {
+                b.iter(|| compute_graph_layout(black_box(nodes), black_box(edges), *iters))
+            },
+        );
+    }
+
+    // ─── 6-f: render_markdown（Markdown → HTML，含 Obsidian 扩展语法）────────
+    let md_simple = "# 标题\n\n段落内容，包含 **加粗** 和 *斜体*。\n";
+    group.bench_function("render_markdown_simple", |b| {
+        b.iter(|| render_markdown(black_box(md_simple)))
+    });
+
+    let md_with_wikilinks = "# 项目笔记\n\n这是关于 [[Rust 编程]] 的笔记，参见 [[项目概述|概述]]。\n\n==高亮文字== 和 $E = mc^2$\n\n#技术 #后端\n";
+    group.bench_function("render_markdown_wikilinks", |b| {
+        b.iter(|| render_markdown(black_box(md_with_wikilinks)))
+    });
+
+    let md_complex = "---\ntitle: 复杂笔记\n---\n# 主标题\n\n## 数学公式\n\n$$\\int_0^\\infty e^{-x}\\,dx = 1$$\n\n行内 $E=mc^2$\n\n## WikiLink\n\n参见 [[相关笔记]] 和 [[文档|别名]]。\n\n==高亮==\n\n> [!NOTE]\n> Callout 块。\n\n#tag1 #tag2\n";
+    group.bench_function("render_markdown_complex", |b| {
+        b.iter(|| render_markdown(black_box(md_complex)))
+    });
+
+    // ─── 6-g: generate_toc_from_html（从渲染 HTML 提取目录）──────────────────
+    let html_with_headings = (1..=100)
+        .map(|i| format!("<h{} id=\"h-{}\">标题 {}</h{}>", (i % 6) + 1, i, i, (i % 6) + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    group.bench_function("generate_toc_100_headings", |b| {
+        b.iter(|| generate_toc_from_html(black_box(&html_with_headings)))
+    });
+
+    group.finish();
+}
+
+// ==========================================
 // 注册并运行所有 benchmark group
 // ==========================================
 
@@ -349,5 +487,6 @@ criterion_group!(
     bench_search,
     bench_graph,
     bench_truncate_html,
+    bench_wasm,
 );
 criterion_main!(benches);

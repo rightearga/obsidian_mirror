@@ -63,6 +63,8 @@ askama = "0.15.6"
 [dev-dependencies]
 tempfile = "3.27.0"
 criterion = { version = "0.8.2", features = ["html_reports"] }
+# v1.6.3：WASM crate 在原生目标下直接参与基准测试
+obsidian_mirror_wasm = { path = "crates/wasm" }
 
 [[bench]]
 name = "core"
