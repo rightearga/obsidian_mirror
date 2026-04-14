@@ -4,6 +4,7 @@
 
 **当前版本**: v1.4.10 🎉  
 **下一里程碑**: v1.5.0（架构加固，规划中）  
+**长期规划**: v1.6.x WASM 加速（客户端渲染 / 离线搜索 / 前端 JS 替换）  
 **最后更新**: 2026-04-14
 
 ---
@@ -1208,6 +1209,162 @@
 
 ---
 
+## ⚡ v1.6.x 规划（2026 Q4）
+
+> v1.6 系列主题：**WASM 加速**
+>
+> 将核心 Rust 逻辑编译为 WebAssembly，在浏览器端运行，分三个递进阶段：
+> 基础设施搭建 → Markdown 渲染客户端化 → PWA 离线搜索 → 前端 JS 逻辑替换
+
+---
+
+### 🔧 v1.6.0 — WASM 基础设施
+
+**主题**：打通 Rust → WASM 工具链，建立可复用的编译与集成管道
+
+#### 工具链
+
+- 引入 `wasm-pack` + `wasm-bindgen` 作为 WASM 编译工具
+- Cargo workspace 拆分：新增 `crates/wasm/` 目录，独立编译目标
+  ```
+  obsidian_mirror/
+  ├── src/              ← 服务端（保持不变）
+  ├── crates/
+  │   └── wasm/         ← WASM 专用 crate（#![no_std] 可选）
+  └── static/
+      └── wasm/         ← wasm-pack 输出目录（.wasm + JS glue）
+  ```
+- `Makefile` / `build.rs` 增加 `wasm-pack build` 步骤，输出到 `static/wasm/`
+- `Dockerfile` 多阶段构建：WASM 编译阶段 + 服务端编译阶段分离
+
+#### 共享代码提取
+
+- 将 `src/markdown.rs`（纯函数部分）、`src/tags.rs` 提取为与 `std` 弱依赖的库函数，供 WASM crate 复用
+- 目标：服务端和 WASM 共享同一份 Markdown + 标签逻辑，保证一致性
+
+#### 加载策略
+
+- 浏览器异步加载 WASM 模块（`WebAssembly.instantiateStreaming`）
+- 加载失败时自动 fallback 到原有 JS 或 HTTP 服务端路径（渐进增强，不破坏现有功能）
+- 引入 `performance.now()` 基准比对：记录 WASM vs 原路径的实际耗时
+
+---
+
+### ✨ v1.6.1 — Markdown 渲染客户端化
+
+**主题**：pulldown-cmark 编译为 WASM，浏览器本地渲染 Markdown，实现实时预览
+
+#### 功能
+
+- `crates/wasm` 暴露 `render_markdown(content: &str) -> String` 函数（返回 HTML）
+- 包含完整的 Obsidian 扩展语法处理：WikiLink、Callout、数学公式包裹、高亮
+- 服务端保留 `content_html` 字段（首屏 SSR 不变）；WASM 模块作为**实时预览**路径
+
+#### 实时预览增强
+
+- 笔记页面侧边栏新增「实时预览」模式（需启用 auth，editor 角色）：
+  - 暂时不做编辑功能，但允许本地草稿预览（localStorage 临时存储）
+  - 前端 `<textarea>` 输入 Markdown，右侧实时 WASM 渲染为 HTML
+- 搜索结果卡片悬停预览改为 WASM 客户端渲染（减少 `/api/preview` 请求）
+
+#### 性能目标
+
+| 场景 | 当前（HTTP round-trip） | WASM 目标 |
+|------|------------------------|-----------|
+| 悬停预览 | ~50 ms（含网络） | < 5 ms（本地渲染） |
+| 搜索摘要 | 服务端生成 | 客户端实时截取 |
+
+---
+
+### ✨ v1.6.2 — PWA 离线搜索
+
+**主题**：在 Service Worker 中内嵌轻量 WASM 全文索引，断网可搜索
+
+#### 技术选型
+
+| 方案 | WASM 大小 | 支持 CJK | 选用理由 |
+|------|-----------|---------|---------|
+| Tantivy → WASM | ~5 MB | ✅（已有 jieba） | 太重，不适合浏览器 |
+| 自定义倒排索引 | < 200 KB | 手动分词 | **选用**，可控、轻量 |
+| MiniSearch（JS） | ~40 KB | 插件扩展 | 备选（纯 JS，无 WASM 优势） |
+
+**选用自定义 Rust 倒排索引**：
+- `crates/wasm` 实现轻量 `NoteIndex`：n-gram 分词（支持中文）+ TF 评分
+- 同步完成后，服务端后台生成 `index.bin`（postcard 序列化）并写入 `static/wasm/`
+- Service Worker 在笔记同步后更新 `index.bin` 缓存
+
+#### 离线搜索流程
+
+```
+用户搜索（离线）
+  ↓
+SW 拦截 /api/search 请求
+  ↓
+WASM NoteIndex.search(query) → 排序结果
+  ↓
+返回 JSON 结果（格式与在线 API 一致）
+  ↓
+前端无感知切换（在线/离线统一 UI）
+```
+
+#### 索引生成
+
+- `perform_sync` 完成后，后台生成 `SearchIndexDump`：`{title, path, tags, snippet_text}[]`
+- 序列化为 `index.bin`（~100-500 KB 对于 1000 条笔记）
+- 通过 `/static/wasm/index.bin` 提供下载，SW 在首次同步后预缓存
+
+---
+
+### ✨ v1.6.3 — 前端 JS → WASM 替换
+
+**主题**：将计算密集的前端 JS 逻辑迁移至 WASM，提升大规模笔记库的渲染性能
+
+#### 图谱布局计算（Graph Layout）
+
+- 当前：Vis.js 内置 JavaScript 物理引擎，500+ 节点时 CPU 占用高、动画卡顿
+- 目标：用 Rust 实现 Force-Directed 布局算法（Barnes-Hut 加速），编译为 WASM
+- WASM 计算布局坐标 `{id, x, y}[]`，传回 JS 调用 Vis.js `setPositions()`（静态渲染，无物理动画）
+- 节点数对比：
+  ```
+  JS 物理引擎：500 节点 ~2 s 稳定；1000 节点 ~8 s
+  WASM 布局：500 节点 < 100 ms；1000 节点 < 500 ms（预估）
+  ```
+
+#### 搜索结果排序与过滤
+
+- 当前：搜索结果由 Tantivy 服务端排序，前端仅展示
+- WASM 版本：前端缓存全量 `titles + tags`，本地 WASM 做二次过滤（多标签交集、路径前缀匹配）
+- 搜索框输入时，WASM 先给出本地建议，服务端异步补充精确结果（双轨并行）
+
+#### TOC 生成（可选）
+
+- 当前：TOC 由服务端 MarkdownProcessor 提取，存入 `Note.toc`
+- WASM 版本：浏览器解析 `content_html` DOM 提取标题，本地生成 TOC（节省一次网络往返）
+
+#### 性能目标
+
+| 功能 | JS 当前 | WASM 目标 |
+|------|---------|-----------|
+| 全局图谱（500 节点）布局 | ~2 s | < 200 ms |
+| 标签多选过滤（1000 条） | ~50 ms | < 5 ms |
+| TOC 生成（100 个标题） | 服务端 + 网络 | < 1 ms 本地 |
+
+---
+
+### 🔧 v1.6.4 — 代码审计（CODEREVIEW_1.6）
+
+**主题**：对 v1.6.x WASM 相关代码进行系统性审查
+
+- 审计重点：
+  - WASM 模块内存管理（wasm-bindgen 内存泄漏）
+  - 离线搜索索引内容安全（`index.bin` 是否包含不应暴露的信息）
+  - WASM 加载失败 fallback 路径是否完整覆盖
+  - Rust unsafe 代码（如果有）的安全性
+- 产出：`docs/CODEREVIEW_1.6.md`
+- 遵循审计流程（`/ob-review 1.6`）
+
+---
+
 ## 📦 功能分类
 
 ### 🚨 紧急修复（v1.3.1 / v1.3.2）
@@ -1349,6 +1506,13 @@
 - ✨ v1.5.4：Obsidian 语法完整支持（笔记内嵌、脚注、Mermaid 主题适配）
 - ✨ v1.5.5：实时通知与运维增强（SSE 进度推送、优雅关闭、同步历史）
 - 🔧 v1.5.6：代码审计（CODEREVIEW_1.5.x）
+
+**Q4 (10-12月)**: WASM 加速系列（v1.6.x）
+- 🔧 v1.6.0：WASM 基础设施（wasm-pack 工具链、Cargo workspace 拆分、fallback 加载策略）
+- ✨ v1.6.1：Markdown 渲染客户端化（pulldown-cmark → WASM，实时预览，减少 /api/preview 请求）
+- ✨ v1.6.2：PWA 离线搜索（Service Worker + 自定义轻量 WASM 倒排索引，断网可搜索）
+- ✨ v1.6.3：前端 JS → WASM 替换（图谱 Barnes-Hut 布局 < 200ms、搜索本地过滤、TOC 本地生成）
+- 🔧 v1.6.4：代码审计（CODEREVIEW_1.6）
 
 ### 核心价值主张
 
