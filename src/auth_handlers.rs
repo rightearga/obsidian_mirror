@@ -9,7 +9,7 @@ use std::sync::Arc;
 use time::Duration;
 
 use crate::auth::{JwtManager, PasswordManager};
-use crate::auth_db::AuthDatabase;
+use crate::auth_db::{AuthDatabase, UserRole};
 
 /// 登录请求体
 #[derive(Debug, Deserialize)]
@@ -99,7 +99,7 @@ pub async fn login_handler(
     match is_valid {
         Ok(true) => {
             // 生成 JWT token
-            match jwt_manager.generate_token(&user.username) {
+            match jwt_manager.generate_token(&user.username, user.role.as_str()) {
                 Ok(token) => {
                     // A1 修复：更新最后登录时间（fire-and-forget，不阻塞响应）
                     let db2 = Arc::clone(&*auth_db);
@@ -311,4 +311,266 @@ pub async fn current_user_handler(req: HttpRequest) -> impl Responder {
         "success": true,
         "username": username
     }))
+}
+
+// ─── 管理员用户管理 API（v1.5.3）────────────────────────────────────────────
+
+/// 从请求扩展中获取角色，若未注入（auth 未启用）则默认 admin（全放行）
+fn get_user_role(req: &HttpRequest) -> UserRole {
+    req.extensions().get::<UserRole>().cloned().unwrap_or(UserRole::Admin)
+}
+
+/// 校验请求者是否具有管理员权限；若无则返回 403 错误体
+fn require_admin(req: &HttpRequest) -> Result<(), HttpResponse> {
+    if get_user_role(req).is_admin() {
+        Ok(())
+    } else {
+        Err(HttpResponse::Forbidden().json(serde_json::json!({
+            "error": "需要管理员权限"
+        })))
+    }
+}
+
+/// 创建用户请求体
+#[derive(Debug, Deserialize)]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub password: String,
+    #[serde(default)]
+    pub role: Option<String>, // "admin" | "editor" | "viewer"，默认 "viewer"
+}
+
+/// 重置密码请求体
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub new_password: String,
+}
+
+/// GET /admin/users — 管理员用户列表页面（Askama 模板）
+pub async fn admin_users_page_handler(
+    req: HttpRequest,
+    auth_db: web::Data<Arc<AuthDatabase>>,
+    app_state: web::Data<Arc<crate::state::AppState>>,
+) -> impl Responder {
+    if let Err(resp) = require_admin(&req) {
+        return resp;
+    }
+
+    let db = Arc::clone(&*auth_db);
+    let users = match tokio::task::spawn_blocking(move || db.list_users())
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!("获取用户列表失败: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({"error": "获取失败"}));
+        }
+    };
+
+    use crate::templates::AdminUsersTemplate;
+    use crate::sidebar::flatten_sidebar;
+    use askama::Template;
+
+    let sidebar = app_state.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar);
+    let empty_backlinks: Vec<String> = Vec::new();
+
+    let user_data: Vec<(String, String, bool)> = users.iter()
+        .map(|u| (u.username.clone(), u.role.as_str().to_string(), u.enabled))
+        .collect();
+
+    let tmpl = AdminUsersTemplate {
+        title: "用户管理",
+        sidebar: &flat_sidebar,
+        backlinks: &empty_backlinks,
+        users: &user_data,
+    };
+
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html").body(html),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("模板渲染失败: {}", e)})),
+    }
+}
+
+/// GET /api/admin/users — 获取所有用户列表（JSON）
+pub async fn list_users_handler(
+    req: HttpRequest,
+    auth_db: web::Data<Arc<AuthDatabase>>,
+) -> impl Responder {
+    if let Err(resp) = require_admin(&req) {
+        return resp;
+    }
+
+    let db = Arc::clone(&*auth_db);
+    match tokio::task::spawn_blocking(move || db.list_users())
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(users) => {
+            let resp: Vec<serde_json::Value> = users.iter().map(|u| serde_json::json!({
+                "username": u.username,
+                "role": u.role.as_str(),
+                "enabled": u.enabled,
+                "created_at": u.created_at.to_rfc3339(),
+                "last_login": u.last_login.map(|t| t.to_rfc3339()),
+            })).collect();
+            HttpResponse::Ok().json(serde_json::json!({"users": resp}))
+        }
+        Err(e) => {
+            tracing::error!("获取用户列表失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "获取失败"}))
+        }
+    }
+}
+
+/// POST /api/admin/users — 创建新用户（admin only）
+pub async fn create_user_handler(
+    req: HttpRequest,
+    body: web::Json<CreateUserRequest>,
+    auth_db: web::Data<Arc<AuthDatabase>>,
+) -> impl Responder {
+    if let Err(resp) = require_admin(&req) {
+        return resp;
+    }
+
+    let username = body.username.trim().to_string();
+    if username.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "用户名不能为空"}));
+    }
+    if body.password.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "密码不能为空"}));
+    }
+
+    // 检查用户是否已存在
+    let db_check = Arc::clone(&*auth_db);
+    let uname_check = username.clone();
+    let exists = tokio::task::spawn_blocking(move || db_check.get_user(&uname_check))
+        .await
+        .unwrap_or(Ok(None));
+
+    match exists {
+        Ok(Some(_)) => return HttpResponse::Conflict().json(serde_json::json!({"error": "用户名已存在"})),
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+        Ok(None) => {}
+    }
+
+    // bcrypt 密码哈希（CPU 密集，移入 spawn_blocking）
+    let pwd = body.password.clone();
+    let hash = match tokio::task::spawn_blocking(move || PasswordManager::hash_password(&pwd))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(h) => h,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("密码加密失败: {}", e)})),
+    };
+
+    let role = UserRole::parse(body.role.as_deref().unwrap_or("viewer"));
+    let db = Arc::clone(&*auth_db);
+    let uname = username.clone();
+    match tokio::task::spawn_blocking(move || db.create_user_with_role(&uname, &hash, role))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(user) => {
+            tracing::info!("✅ 管理员创建新用户: {}", user.username);
+            HttpResponse::Ok().json(serde_json::json!({
+                "message": "用户创建成功",
+                "username": user.username,
+                "role": user.role.as_str(),
+            }))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("创建失败: {}", e)})),
+    }
+}
+
+/// DELETE /api/admin/users/{username} — 删除用户（admin only，不能删除自己）
+pub async fn delete_user_handler(
+    req: HttpRequest,
+    path: web::Path<String>,
+    auth_db: web::Data<Arc<AuthDatabase>>,
+) -> impl Responder {
+    if let Err(resp) = require_admin(&req) {
+        return resp;
+    }
+
+    let target = path.into_inner();
+
+    // 不能删除当前登录的管理员自己
+    let current = req.extensions().get::<String>().cloned().unwrap_or_default();
+    if current == target {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "不能删除当前登录账户"}));
+    }
+
+    // 获取用户以确认存在
+    let db_check = Arc::clone(&*auth_db);
+    let t_clone = target.clone();
+    let user_opt = tokio::task::spawn_blocking(move || db_check.get_user(&t_clone))
+        .await
+        .unwrap_or(Ok(None));
+
+    match user_opt {
+        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({"error": "用户不存在"})),
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+        Ok(Some(_)) => {}
+    }
+
+    // 执行删除（通过 update_user 设置 enabled=false，或直接删除）
+    // 使用 update_user 禁用更安全（保留数据）
+    let db = Arc::clone(&*auth_db);
+    let t_clone2 = target.clone();
+    match tokio::task::spawn_blocking(move || {
+        let mut user = db.get_user(&t_clone2)?.ok_or_else(|| anyhow::anyhow!("用户不存在"))?;
+        user.enabled = false;
+        db.update_user(&user)
+    })
+    .await
+    .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(_) => {
+            tracing::info!("✅ 管理员禁用用户: {}", target);
+            HttpResponse::Ok().json(serde_json::json!({"message": "用户已禁用"}))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+    }
+}
+
+/// POST /api/admin/users/{username}/reset-password — 重置指定用户密码（admin only）
+pub async fn reset_user_password_handler(
+    req: HttpRequest,
+    path: web::Path<String>,
+    body: web::Json<ResetPasswordRequest>,
+    auth_db: web::Data<Arc<AuthDatabase>>,
+) -> impl Responder {
+    if let Err(resp) = require_admin(&req) {
+        return resp;
+    }
+
+    let target = path.into_inner();
+
+    if body.new_password.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "新密码不能为空"}));
+    }
+
+    let pwd = body.new_password.clone();
+    let hash = match tokio::task::spawn_blocking(move || PasswordManager::hash_password(&pwd))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(h) => h,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({"error": format!("密码加密失败: {}", e)})),
+    };
+
+    let db = Arc::clone(&*auth_db);
+    let t_clone = target.clone();
+    match tokio::task::spawn_blocking(move || db.change_password(&t_clone, &hash))
+        .await
+        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+    {
+        Ok(_) => {
+            tracing::info!("✅ 管理员重置用户密码: {}", target);
+            HttpResponse::Ok().json(serde_json::json!({"message": "密码重置成功"}))
+        }
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({"error": e.to_string()})),
+    }
 }

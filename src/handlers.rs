@@ -90,8 +90,18 @@ fn generate_breadcrumbs(note_path: &str, note_title: &str) -> Vec<BreadcrumbItem
 ///
 /// 使用 sync_lock 防止并发同步请求导致 Tantivy IndexWriter 冲突和数据竞争。
 /// 若同步已在进行中，返回 409 Conflict。
+/// v1.5.3：需要 admin 角色（认证启用时）。
 #[post("/sync")]
-pub async fn sync_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+pub async fn sync_handler(req: actix_web::HttpRequest, data: web::Data<Arc<AppState>>) -> impl Responder {
+    // v1.5.3：角色检查——admin 才能触发同步（auth 未启用时无角色注入，全放行）
+    use actix_web::HttpMessage;
+    use crate::auth_db::UserRole;
+    if let Some(role) = req.extensions().get::<UserRole>()
+        && !role.is_admin() {
+        return HttpResponse::Forbidden().json(serde_json::json!({
+            "error": "触发同步需要管理员权限"
+        }));
+    }
     // 使用 try_lock 防止并发同步：若已有同步在进行，立即返回 409
     let _guard = match data.sync_lock.try_lock() {
         Ok(guard) => guard,
@@ -1061,6 +1071,14 @@ pub async fn config_reload_handler(
     if req.extensions().get::<String>().is_none() {
         return HttpResponse::Unauthorized().json(serde_json::json!({
             "error": "未认证，请先登录"
+        }));
+    }
+    // v1.5.3：角色检查——config_reload 需要 admin 权限
+    use crate::auth_db::UserRole;
+    if let Some(role) = req.extensions().get::<UserRole>()
+        && !role.is_admin() {
+        return HttpResponse::Forbidden().json(serde_json::json!({
+            "error": "配置热重载需要管理员权限"
         }));
     }
 

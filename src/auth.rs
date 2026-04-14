@@ -15,6 +15,14 @@ pub struct Claims {
     pub exp: i64,
     /// 签发时间（Unix 时间戳）
     pub iat: i64,
+    /// 用户角色（v1.5.3 新增；旧 token 中无此字段，默认反序列化为 "viewer"，重新登录后获得正确角色）
+    #[serde(default = "default_role")]
+    pub role: String,
+}
+
+/// JWT Claims 中 role 字段的默认值（旧 token 兼容）
+fn default_role() -> String {
+    "viewer".to_string()
 }
 
 /// JWT 管理器
@@ -33,8 +41,8 @@ impl JwtManager {
         }
     }
 
-    /// 生成 JWT token
-    pub fn generate_token(&self, username: &str) -> Result<String> {
+    /// 生成 JWT token（包含用户角色，供中间件做权限检查）
+    pub fn generate_token(&self, username: &str, role: &str) -> Result<String> {
         let now = Utc::now();
         let expiration = now + Duration::hours(self.token_lifetime_hours);
 
@@ -42,6 +50,7 @@ impl JwtManager {
             sub: username.to_string(),
             exp: expiration.timestamp(),
             iat: now.timestamp(),
+            role: role.to_string(),
         };
 
         let token = encode(
@@ -91,7 +100,7 @@ mod tests {
         let jwt_manager = JwtManager::new("test_secret".to_string(), 24);
 
         // 生成 token
-        let token = jwt_manager.generate_token("admin").unwrap();
+        let token = jwt_manager.generate_token("admin", "admin").unwrap();
         assert!(!token.is_empty());
 
         // 验证 token

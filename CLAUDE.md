@@ -133,6 +133,9 @@ docker compose up -d
 | GET | `/recent` | 最近更新笔记列表（`?days=` 参数） |
 | GET | `/api/titles` | 所有笔记标题/路径/标签（供前端自动补全，v1.5.2 新增 `note_items`） |
 | GET | `/api/suggest` | 搜索建议（`?q=`，内存前缀 + FuzzyTermQuery，返回 `[{title,path}]`）(v1.5.2) |
+| GET | `/admin/users` | 用户管理页面（需 admin）(v1.5.3) |
+| GET/POST | `/api/admin/users` | 用户列表/创建（需 admin）(v1.5.3) |
+| DELETE/POST | `/api/admin/users/{u}` | 禁用/重置密码（需 admin）(v1.5.3) |
 | POST/GET/DELETE | `/api/search/history` | 搜索历史记录（需认证）(v1.5.2) |
 | GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
 | POST | `/webhook/sync` | Webhook 触发同步（GitHub/GitLab 签名验证，需 webhook.enabled=true） |
@@ -148,6 +151,7 @@ docker compose up -d
 
 - `AuthMiddleware` 拦截所有请求；精确匹配公开路径（`/login`、`/api/auth/login`），前缀匹配（`/static/`、`/share/`）
 - 认证失败时：`/api/*` 路径返回 `401 + JSON {"error":"未认证"}`；页面路径重定向到 `/login`（v1.4.10）
+- v1.5.3：Token 携带 `role` 字段（admin/editor/viewer），中间件注入 `UserRole` 到请求扩展；`/sync` 和 `/api/config/reload` 需要 admin 角色
 - Token 通过 Cookie（`auth_token`，含 `Secure` + `SameSite::Lax`）或 `Authorization: Bearer` 头传递
 - 用户以 bcrypt 哈希密码存储在 `redb` 中
 - 首次启动若数据库为空，自动创建默认管理员账户

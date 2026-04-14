@@ -12,6 +12,45 @@ use std::sync::Arc;
 /// 用户表定义：用户名 -> 用户数据（JSON）
 const USERS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("users");
 
+/// 用户角色（v1.5.3 新增）
+///
+/// - `admin`：管理员，可执行所有操作，包括 /sync、/api/config/reload 和用户管理
+/// - `editor`：编辑者，可创建/管理分享链接（未来预留编辑权限入口）
+/// - `viewer`：只读访问，无分享和管理操作权限
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum UserRole {
+    #[default]
+    Admin,
+    Editor,
+    Viewer,
+}
+
+impl UserRole {
+    /// 将角色转换为字符串（用于 JWT claims）
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            UserRole::Admin  => "admin",
+            UserRole::Editor => "editor",
+            UserRole::Viewer => "viewer",
+        }
+    }
+
+    /// 从字符串解析角色，未知值默认为 viewer（最低权限，安全优先）
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "admin"  => UserRole::Admin,
+            "editor" => UserRole::Editor,
+            _        => UserRole::Viewer,
+        }
+    }
+
+    /// 检查是否具有管理员权限
+    pub fn is_admin(&self) -> bool {
+        matches!(self, UserRole::Admin)
+    }
+}
+
 /// 用户信息结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -25,6 +64,9 @@ pub struct User {
     pub last_login: Option<DateTime<Utc>>,
     /// 是否启用
     pub enabled: bool,
+    /// 用户角色（v1.5.3 新增；旧数据通过 serde default 反序列化为 admin，保持向后兼容）
+    #[serde(default)]
+    pub role: UserRole,
 }
 
 /// 用户数据库管理器
@@ -54,14 +96,20 @@ impl AuthDatabase {
         Ok(Self { db: Arc::new(db) })
     }
 
-    /// 创建新用户
+    /// 创建新用户（默认角色 admin，兼容旧代码调用）
     pub fn create_user(&self, username: &str, password_hash: &str) -> Result<User> {
+        self.create_user_with_role(username, password_hash, UserRole::Admin)
+    }
+
+    /// 创建新用户（指定角色）
+    pub fn create_user_with_role(&self, username: &str, password_hash: &str, role: UserRole) -> Result<User> {
         let user = User {
             username: username.to_string(),
             password_hash: password_hash.to_string(),
             created_at: Utc::now(),
             last_login: None,
             enabled: true,
+            role,
         };
 
         let write_txn = self.db.begin_write()?;

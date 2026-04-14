@@ -8,6 +8,29 @@
 
 ---
 
+## [v1.5.3] — 2026-04-14
+
+多用户与权限管理：三级角色体系、管理员 API、/admin/users 页面。
+
+### Added
+- **`UserRole` 枚举**（`auth_db.rs`）：`admin` / `editor` / `viewer` 三级角色，`#[serde(default)]` 旧数据自动升级为 admin
+- **`User.role` 字段**：`User` 结构体新增角色字段，JWT Claims 同步携带 `role`
+- **认证中间件注入 `UserRole`**：验证 Token 后将角色写入请求扩展，handler 通过 `req.extensions().get::<UserRole>()` 获取
+- **管理员用户管理 API**（均需 admin 角色）：
+  - `GET /api/admin/users` — 用户列表（JSON）
+  - `POST /api/admin/users` — 创建用户（指定角色）
+  - `DELETE /api/admin/users/{username}` — 禁用用户
+  - `POST /api/admin/users/{username}/reset-password` — 重置密码
+- **`GET /admin/users`** — 管理员用户管理页面（Askama 模板，含角色徽章和操作按钮）
+- **`GET /api/share/list?all=true`** — 管理员查看全部用户分享链接（普通用户只能看自己的）
+- **`ShareDatabase::list_all_shares()`** 方法
+
+### Changed
+- **`POST /sync` 和 `POST /api/config/reload` 现在需要 admin 角色**（auth 未启用时全放行）
+- `JwtManager::generate_token` 签名新增 `role: &str` 参数
+
+---
+
 ## [v1.5.2] — 2026-04-14
 
 搜索体验全面升级：模糊建议、路径上下文、`<mark>` 高亮摘要、搜索历史持久化。

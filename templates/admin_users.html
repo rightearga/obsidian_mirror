@@ -1,0 +1,158 @@
+{% extends "layout.html" %}
+
+{% block content %}
+    <div class="page-header">
+        <h1>👥 用户管理</h1>
+        <p class="page-subtitle">管理系统用户账户，分配角色权限。</p>
+    </div>
+
+    <div class="admin-actions" style="margin-bottom:1.5rem; display:flex; gap:0.75rem; flex-wrap:wrap;">
+        <button onclick="document.getElementById('create-user-form').style.display='block'" class="btn btn-primary">
+            ＋ 创建用户
+        </button>
+    </div>
+
+    <!-- 创建用户表单 -->
+    <div id="create-user-form" style="display:none; background:var(--bg-secondary); border-radius:8px; padding:1.25rem; margin-bottom:1.5rem; border:1px solid var(--border);">
+        <h3 style="margin:0 0 1rem 0;">创建新用户</h3>
+        <div style="display:grid; gap:0.75rem; max-width:400px;">
+            <div>
+                <label style="display:block; font-size:0.85rem; margin-bottom:0.3rem; color:var(--text-secondary);">用户名</label>
+                <input type="text" id="new-username" placeholder="用户名" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-size:0.9rem; box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="display:block; font-size:0.85rem; margin-bottom:0.3rem; color:var(--text-secondary);">密码</label>
+                <input type="password" id="new-password" placeholder="密码" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-size:0.9rem; box-sizing:border-box;">
+            </div>
+            <div>
+                <label style="display:block; font-size:0.85rem; margin-bottom:0.3rem; color:var(--text-secondary);">角色</label>
+                <select id="new-role" style="width:100%; padding:8px 12px; border:1px solid var(--border); border-radius:6px; background:var(--bg); color:var(--text); font-size:0.9rem;">
+                    <option value="viewer">viewer — 只读浏览</option>
+                    <option value="editor">editor — 编辑者（可创建分享链接）</option>
+                    <option value="admin">admin — 管理员（完全权限）</option>
+                </select>
+            </div>
+            <div style="display:flex; gap:0.5rem;">
+                <button onclick="createUser()" class="btn btn-primary">创建</button>
+                <button onclick="document.getElementById('create-user-form').style.display='none'" class="btn">取消</button>
+            </div>
+        </div>
+        <div id="create-msg" style="margin-top:0.75rem; font-size:0.875rem; display:none;"></div>
+    </div>
+
+    <!-- 用户列表 -->
+    {% if users.is_empty() %}
+        <div class="empty-state">
+            <p>暂无用户数据。</p>
+        </div>
+    {% else %}
+        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.75rem;">共 <strong>{{ users.len() }}</strong> 个用户</p>
+        <table style="width:100%; border-collapse:collapse; font-size:0.9rem;">
+            <thead>
+                <tr style="border-bottom:2px solid var(--border); text-align:left;">
+                    <th style="padding:0.6rem 1rem 0.6rem 0;">用户名</th>
+                    <th style="padding:0.6rem 1rem 0.6rem 0;">角色</th>
+                    <th style="padding:0.6rem 1rem 0.6rem 0;">状态</th>
+                    <th style="padding:0.6rem 0 0.6rem 0;">操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for (username, role, enabled) in users %}
+                <tr style="border-bottom:1px solid var(--border);" id="row-{{ username }}">
+                    <td style="padding:0.6rem 1rem 0.6rem 0; font-weight:500;">{{ username }}</td>
+                    <td style="padding:0.6rem 1rem 0.6rem 0;">
+                        <span class="role-badge role-{{ role }}">{{ role }}</span>
+                    </td>
+                    <td style="padding:0.6rem 1rem 0.6rem 0;">
+                        {% if *enabled %}
+                            <span style="color:#27ae60; font-size:0.8rem;">● 启用</span>
+                        {% else %}
+                            <span style="color:#e74c3c; font-size:0.8rem;">● 禁用</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding:0.6rem 0 0.6rem 0; display:flex; gap:0.5rem; flex-wrap:wrap;">
+                        <button onclick="resetPassword('{{ username }}')" class="btn btn-sm" title="重置密码">🔑 重置密码</button>
+                        <button onclick="disableUser('{{ username }}')" class="btn btn-sm btn-danger" title="禁用用户">🚫 禁用</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+
+    <!-- 操作提示 -->
+    <div id="action-msg" style="margin-top:1rem; padding:0.75rem 1rem; border-radius:6px; display:none; font-size:0.875rem;"></div>
+
+    <style>
+        .btn { padding:6px 14px; border:1px solid var(--border); border-radius:6px; background:var(--bg-secondary); color:var(--text); cursor:pointer; font-size:0.85rem; }
+        .btn:hover { background:var(--hover); }
+        .btn-primary { background:var(--accent, #6a5acd); color:#fff; border-color:var(--accent, #6a5acd); }
+        .btn-primary:hover { opacity:0.9; }
+        .btn-danger { border-color:#e74c3c; color:#e74c3c; }
+        .btn-danger:hover { background:#e74c3c; color:#fff; }
+        .btn-sm { padding:4px 10px; font-size:0.8rem; }
+        .role-badge { padding:2px 8px; border-radius:4px; font-size:0.75rem; font-weight:600; }
+        .role-admin { background:rgba(231,76,60,0.15); color:#c0392b; }
+        .role-editor { background:rgba(52,152,219,0.15); color:#2980b9; }
+        .role-viewer { background:rgba(149,165,166,0.15); color:#7f8c8d; }
+    </style>
+
+    <script>
+    async function apiPost(url, data) {
+        const r = await fetch(url, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        return r;
+    }
+
+    function showMsg(id, text, ok) {
+        const el = document.getElementById(id);
+        el.textContent = text;
+        el.style.display = 'block';
+        el.style.background = ok ? 'rgba(39,174,96,0.15)' : 'rgba(231,76,60,0.15)';
+        el.style.color = ok ? '#27ae60' : '#e74c3c';
+        el.style.border = ok ? '1px solid rgba(39,174,96,0.3)' : '1px solid rgba(231,76,60,0.3)';
+        setTimeout(() => { el.style.display = 'none'; }, 4000);
+    }
+
+    async function createUser() {
+        const username = document.getElementById('new-username').value.trim();
+        const password = document.getElementById('new-password').value;
+        const role = document.getElementById('new-role').value;
+        if (!username || !password) { showMsg('create-msg', '用户名和密码不能为空', false); return; }
+
+        const r = await apiPost('/api/admin/users', {username, password, role});
+        const data = await r.json();
+        if (r.ok) {
+            showMsg('create-msg', '✅ 用户创建成功，请刷新页面查看', true);
+            document.getElementById('new-username').value = '';
+            document.getElementById('new-password').value = '';
+        } else {
+            showMsg('create-msg', '❌ ' + (data.error || '创建失败'), false);
+        }
+    }
+
+    async function resetPassword(username) {
+        const newPwd = prompt('请输入 ' + username + ' 的新密码（至少 6 位）：');
+        if (!newPwd || newPwd.length < 6) { if (newPwd !== null) alert('密码至少 6 位'); return; }
+
+        const r = await apiPost('/api/admin/users/' + encodeURIComponent(username) + '/reset-password', {new_password: newPwd});
+        const data = await r.json();
+        showMsg('action-msg', r.ok ? '✅ ' + username + ' 密码已重置' : '❌ ' + (data.error || '失败'), r.ok);
+    }
+
+    async function disableUser(username) {
+        if (!confirm('确认禁用用户 ' + username + '？')) return;
+
+        const r = await fetch('/api/admin/users/' + encodeURIComponent(username), {method: 'DELETE'});
+        const data = await r.json();
+        showMsg('action-msg', r.ok ? '✅ 用户 ' + username + ' 已禁用' : '❌ ' + (data.error || '失败'), r.ok);
+        if (r.ok) {
+            const row = document.getElementById('row-' + username);
+            if (row) row.style.opacity = '0.4';
+        }
+    }
+    </script>
+{% endblock %}

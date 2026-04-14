@@ -14,7 +14,9 @@ use obsidian_mirror::{
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
     auth_middleware::AuthMiddleware,
-    auth_handlers::{login_handler, logout_handler, change_password_handler, current_user_handler},
+    auth_handlers::{login_handler, logout_handler, change_password_handler, current_user_handler,
+        admin_users_page_handler, list_users_handler, create_user_handler,
+        delete_user_handler, reset_user_password_handler},
     share_db::ShareDatabase,
     share_handlers::{create_share_handler, access_share_handler, list_shares_handler, revoke_share_handler},
     reading_progress_db::ReadingProgressDatabase,
@@ -393,7 +395,13 @@ async fn start_http_server(
                 .route("/api/auth/login", web::post().to(login_handler))
                 .route("/api/auth/logout", web::post().to(logout_handler))
                 .route("/api/auth/change-password", web::post().to(change_password_handler))
-                .route("/api/auth/current-user", web::get().to(current_user_handler));
+                .route("/api/auth/current-user", web::get().to(current_user_handler))
+                // 管理员用户管理路由（v1.5.3）
+                .route("/admin/users", web::get().to(admin_users_page_handler))
+                .route("/api/admin/users", web::get().to(list_users_handler))
+                .route("/api/admin/users", web::post().to(create_user_handler))
+                .route("/api/admin/users/{username}", web::delete().to(delete_user_handler))
+                .route("/api/admin/users/{username}/reset-password", web::post().to(reset_user_password_handler));
         }
         
         // 添加通用路由

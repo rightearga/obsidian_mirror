@@ -285,6 +285,21 @@ impl ShareDatabase {
         Ok(removed)
     }
 
+    /// 列出所有用户的分享链接（管理员专用，全表扫描）
+    pub fn list_all_shares(&self) -> Result<Vec<ShareLink>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(SHARE_LINKS_TABLE)?;
+
+        let mut shares = Vec::new();
+        for item in table.iter()? {
+            let (_, json_value) = item?;
+            let share_link: ShareLink = serde_json::from_str(json_value.value())?;
+            shares.push(share_link);
+        }
+
+        Ok(shares)
+    }
+
     /// 清理过期的分享链接
     pub fn cleanup_expired(&self) -> Result<usize> {
         let mut expired_tokens = Vec::new();

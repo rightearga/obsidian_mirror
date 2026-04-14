@@ -394,11 +394,20 @@ pub async fn access_share_handler(
     }
 }
 
+/// 获取分享链接列表查询参数
+#[derive(Debug, serde::Deserialize)]
+pub struct ListSharesQuery {
+    /// 管理员专用：`true` 时返回所有用户的分享链接（v1.5.3）
+    #[serde(default)]
+    pub all: bool,
+}
+
 /// 获取用户的所有分享链接
 ///
-/// GET /api/share/list
+/// GET /api/share/list — 普通用户只看自己的分享；管理员可通过 `?all=true` 查看全部
 pub async fn list_shares_handler(
     req: HttpRequest,
+    query: web::Query<ListSharesQuery>,
     app_state: web::Data<Arc<AppState>>,
 ) -> HttpResponse {
     // 从请求扩展中获取用户名
@@ -411,20 +420,43 @@ pub async fn list_shares_handler(
         }
     };
 
-    // A1 修复：redb IO 移入 spawn_blocking，避免阻塞 Tokio 线程池
-    // 获取用户的所有分享链接
-    let db = Arc::clone(&app_state.share_db);
-    let uname = username.clone();
-    let shares = match tokio::task::spawn_blocking(move || db.get_user_shares(&uname))
-        .await
-        .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
-    {
-        Ok(shares) => shares,
-        Err(e) => {
-            error!("查询分享链接失败: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "查询分享链接失败"
+    // v1.5.3：admin 可通过 ?all=true 查看所有用户的分享链接
+    let shares = if query.all {
+        use crate::auth_db::UserRole;
+        let role = req.extensions().get::<UserRole>().cloned().unwrap_or(UserRole::Admin);
+        if !role.is_admin() {
+            return HttpResponse::Forbidden().json(serde_json::json!({
+                "error": "查看所有分享需要管理员权限"
             }));
+        }
+        let db = Arc::clone(&app_state.share_db);
+        match tokio::task::spawn_blocking(move || db.list_all_shares())
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+        {
+            Ok(s) => s,
+            Err(e) => {
+                error!("查询全部分享链接失败: {}", e);
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "查询分享链接失败"
+                }));
+            }
+        }
+    } else {
+        // A1 修复：redb IO 移入 spawn_blocking，避免阻塞 Tokio 线程池
+        let db = Arc::clone(&app_state.share_db);
+        let uname = username.clone();
+        match tokio::task::spawn_blocking(move || db.get_user_shares(&uname))
+            .await
+            .unwrap_or_else(|e| Err(anyhow::anyhow!("spawn_blocking panic: {}", e)))
+        {
+            Ok(s) => s,
+            Err(e) => {
+                error!("查询分享链接失败: {}", e);
+                return HttpResponse::InternalServerError().json(serde_json::json!({
+                    "error": "查询分享链接失败"
+                }));
+            }
         }
     };
 

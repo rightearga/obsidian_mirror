@@ -80,3 +80,16 @@ pub struct RecentNotesPageTemplate<'a> {
     /// 展示范围（天数）
     pub days: u64,
 }
+
+/// 管理员用户管理页面模板（v1.5.3）
+#[derive(Template)]
+#[template(path = "admin_users.html")]
+pub struct AdminUsersTemplate<'a> {
+    pub title: &'a str,
+    /// 侧边栏节点（layout.html 需要）
+    pub sidebar: &'a [crate::domain::FlatNode],
+    /// 反向链接（layout.html 需要，管理页传空切片）
+    pub backlinks: &'a [String],
+    /// (用户名, 角色字符串, 是否启用) 列表
+    pub users: &'a [(String, String, bool)],
+}

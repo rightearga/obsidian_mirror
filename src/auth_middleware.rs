@@ -12,6 +12,7 @@ use std::future::{ready, Ready};
 use std::rc::Rc;
 
 use crate::auth::JwtManager;
+use crate::auth_db::UserRole;
 
 /// 认证中间件工厂
 pub struct AuthMiddleware {
@@ -115,8 +116,10 @@ where
                 // 验证 token
                 match jwt_manager.verify_token(&token) {
                     Ok(claims) => {
-                        // Token 有效，将用户信息添加到请求扩展中
+                        // Token 有效，将用户名和角色注入请求扩展，供 handler 做权限检查
                         req.extensions_mut().insert(claims.sub.clone());
+                        // 注入角色（v1.5.3）：handler 通过 req.extensions().get::<UserRole>() 获取
+                        req.extensions_mut().insert(UserRole::parse(&claims.role));
                         
                         let service = self.service.clone();
                         Box::pin(async move {
