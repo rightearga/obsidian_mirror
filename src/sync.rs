@@ -557,7 +557,78 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     SYNC_DURATION_SECONDS.observe(total_time.as_secs_f64());
     SYNC_LAST_TIMESTAMP_SECONDS.set(now_ts);
 
+    // v1.6.2：后台生成离线搜索索引（JSON 格式），供 WASM NoteIndex 加载
+    {
+        let notes_for_index = data.notes.read().await.clone();
+        tokio::task::spawn(async move {
+            if let Ok(json) = generate_search_index_json(&notes_for_index) {
+                // 写入 static/wasm/index.json（Service Worker 会缓存此文件）
+                if let Err(e) = tokio::fs::write("static/wasm/index.json", json).await {
+                    warn!("⚠️  生成离线搜索索引失败: {:?}", e);
+                } else {
+                    info!("✅ 离线搜索索引已更新（static/wasm/index.json）");
+                }
+            }
+        });
+    }
+
     Ok(())
+}
+
+/// 生成离线搜索索引的 JSON 字节序列（供 WASM NoteIndex 加载，v1.6.2）
+///
+/// 每条笔记提取 title、path、tags 和内容摘要（前 300 字符），
+/// 序列化为 JSON 数组供浏览器端 `NoteIndex.loadJson()` 使用。
+fn generate_search_index_json(notes: &HashMap<String, Note>) -> anyhow::Result<Vec<u8>> {
+    use std::time::UNIX_EPOCH;
+
+    #[derive(serde::Serialize)]
+    struct IndexEntry<'a> {
+        title:   &'a str,
+        path:    &'a str,
+        tags:    &'a [String],
+        content: String,
+        mtime:   i64,
+    }
+
+    let entries: Vec<IndexEntry<'_>> = notes.values()
+        .map(|note| {
+            // 从 content_html 提取纯文本（去除 HTML 标签）
+            let plain_text = strip_html_tags(&note.content_html);
+            let content: String = plain_text.chars().take(300).collect();
+
+            let mtime = note.mtime
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+
+            IndexEntry {
+                title:   &note.title,
+                path:    &note.path,
+                tags:    &note.tags,
+                content,
+                mtime,
+            }
+        })
+        .collect();
+
+    let json = serde_json::to_vec(&entries)?;
+    Ok(json)
+}
+
+/// 从 HTML 中剥离所有标签，提取纯文本（用于索引内容摘要）
+fn strip_html_tags(html: &str) -> String {
+    let mut text = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => { in_tag = false; text.push(' '); }
+            _ if !in_tag => text.push(c),
+            _ => {}
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// 并行处理 Markdown 文件（使用 Rayon）

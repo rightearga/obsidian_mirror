@@ -8,6 +8,30 @@
 
 ---
 
+## [v1.6.2] — 2026-04-14
+
+PWA 离线搜索：自定义 WASM 全文索引 + Service Worker 拦截 /api/search。
+
+### Added
+- **WASM NoteIndex**（`crates/wasm/src/lib.rs`）：
+  - n-gram 分词器（ASCII 词切分 + CJK unigram/bigram，支持中文混合搜索）
+  - TF 评分（标题 ×10、标签 ×5、内容 ×1）+ 倒排索引加速候选筛选
+  - `NoteIndex.loadJson(json)` — 从服务端 index.json 加载索引
+  - `NoteIndex.searchJson(query, limit) -> String` — 返回标准 SearchResult JSON
+  - 4 个专项单元测试（加载/搜索/CJK/分词）
+- **服务端 index.json 生成**（`src/sync.rs`）：
+  - 每次同步完成后后台生成 `static/wasm/index.json`（`{title,path,tags,content,mtime}[]` 格式）
+  - 内容字段取笔记 HTML 剥离标签后的前 300 字符
+- **Service Worker 离线搜索拦截**（`static/sw.js`）：
+  - 升级 CACHE_NAME 至 v2，新增 WASM_ASSETS 独立缓存桶（WASM_CACHE_NAME）
+  - 拦截 `GET /api/search`：网络可用时正常转发，网络失败时从缓存 index.json 做 JS 文本搜索，返回与在线 API 格式一致的 JSON
+  - `X-Offline-Search` 响应头指示使用了离线搜索
+- **`WasmLoader.search()` + `WasmLoader.loadIndex()`**（`static/wasm/loader.js`）：
+  - WASM 加载完成后自动异步加载 index.json 并初始化 NoteIndex
+  - `search(query, limit)` 返回结果数组，NoteIndex 不可用时返回 null（调用方 fallback 到服务端）
+
+---
+
 ## [v1.6.1] — 2026-04-14
 
 Markdown 渲染客户端化：pulldown-cmark 编译为 WASM，浏览器端实时预览 < 5ms。

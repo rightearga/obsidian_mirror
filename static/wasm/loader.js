@@ -63,6 +63,9 @@
 
                 const version = wasmModule.wasm_version?.() || 'unknown';
                 console.log(`[WASM] 模块加载完成，耗时 ${this.loadTime.toFixed(1)}ms，版本 ${version}`);
+
+                // v1.6.2：WASM 加载完成后异步加载离线搜索索引
+                this.loadIndex().catch(() => {});
             } catch (e) {
                 // 加载失败：记录警告但不中断应用（渐进增强）
                 console.warn('[WASM] 模块加载失败，使用 JavaScript fallback:', e.message || e);
@@ -89,6 +92,59 @@
         },
 
         // ─── 公共函数（WASM 优先，fallback 到 JS 实现）──────────────────────
+
+        // ─── v1.6.2：离线搜索 ─────────────────────────────────────────────────
+
+        /** 已加载的 NoteIndex 实例（null 表示未加载或不可用）*/
+        noteIndex: null,
+        /** index.json 是否已加载 */
+        indexLoaded: false,
+
+        /**
+         * 加载离线搜索索引（从 /static/wasm/index.json）。
+         * 在 WASM 模块初始化完成后自动调用。
+         * @returns {Promise<boolean>} 是否成功加载
+         */
+        async loadIndex() {
+            if (this.indexLoaded) return this.noteIndex !== null;
+            if (!this.loaded || !this.module?.NoteIndex) return false;
+
+            try {
+                const resp = await fetch('/static/wasm/index.json');
+                if (!resp.ok) return false;
+
+                const json = await resp.text();
+                this.noteIndex = this.module.NoteIndex.loadJson(json);
+                this.indexLoaded = true;
+
+                const count = this.noteIndex?.noteCount?.() ?? 0;
+                console.log(`[WASM] 离线搜索索引加载完成，共 ${count} 条笔记`);
+                return true;
+            } catch (e) {
+                console.warn('[WASM] 离线搜索索引加载失败:', e.message || e);
+                return false;
+            }
+        },
+
+        /**
+         * 使用 WASM NoteIndex 搜索（离线可用，v1.6.2）。
+         * 返回与服务端 /api/search 格式一致的结果数组。
+         * 仅在 WASM 加载完成且索引已加载时有效，否则返回 null（调用方应 fallback 到服务端）。
+         *
+         * @param {string} query 搜索关键词
+         * @param {number} limit 最大结果数（默认 20）
+         * @returns {Array|null} 搜索结果数组，或 null 表示不可用
+         */
+        search(query, limit = 20) {
+            if (!this.loaded || !this.noteIndex) return null;
+            try {
+                const json = this.noteIndex.searchJson(query, limit);
+                return JSON.parse(json);
+            } catch (e) {
+                console.warn('[WASM] 搜索失败:', e);
+                return null;
+            }
+        },
 
         /**
          * 在文本中高亮关键词，用 <mark>...</mark> 包裹（大小写不敏感）。

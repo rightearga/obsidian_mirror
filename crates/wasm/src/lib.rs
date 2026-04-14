@@ -19,6 +19,11 @@
 
 use wasm_bindgen::prelude::*;
 
+// ─── v1.6.2：离线搜索相关导入 ───────────────────────────────────────────────
+
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
+
 // ─── v1.6.1：Markdown 渲染相关导入 ──────────────────────────────────────────
 
 use lazy_static::lazy_static;
@@ -241,11 +246,291 @@ fn html_escape_attr(s: &str) -> String {
         .replace('\n', "&#10;")
 }
 
+// ─── v1.6.2：离线全文搜索（WASM NoteIndex）──────────────────────────────────
+
+/// 离线搜索索引条目（与服务端 SearchIndexDump 格式一致）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteEntry {
+    /// 笔记标题
+    pub title: String,
+    /// 相对路径（如 "folder/note.md"）
+    pub path: String,
+    /// 标签列表
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// 笔记内容摘要（前 300 字符，用于搜索匹配和摘要展示）
+    #[serde(default)]
+    pub content: String,
+    /// 修改时间（Unix 时间戳秒，用于排序提示）
+    #[serde(default)]
+    pub mtime: i64,
+}
+
+/// 搜索结果（格式与服务端 `/api/search` 响应一致，前端无感知切换）
+#[derive(Debug, Serialize)]
+struct SearchResult {
+    title: String,
+    path: String,
+    snippet: String,
+    score: f32,
+    mtime: i64,
+    tags: Vec<String>,
+}
+
+/// 轻量笔记全文索引（WASM 版本，v1.6.2）
+///
+/// 使用 n-gram 分词 + TF 评分实现客户端离线搜索。
+/// 通过 `load_json` 从服务端生成的 `index.json` 初始化，
+/// 通过 `search_json` 返回与在线 API 格式一致的 JSON 搜索结果。
+#[wasm_bindgen]
+pub struct NoteIndex {
+    /// 所有笔记条目
+    notes: Vec<NoteEntry>,
+    /// 倒排索引：token → [note_index...]（加速搜索）
+    inverted: HashMap<String, Vec<usize>>,
+}
+
+#[wasm_bindgen]
+impl NoteIndex {
+    /// 从服务端 index.json 的 JSON 字符串加载索引。
+    ///
+    /// index.json 格式：`[{title, path, tags, content, mtime}, ...]`
+    #[wasm_bindgen(js_name = loadJson)]
+    pub fn load_json(json: &str) -> Result<NoteIndex, String> {
+        let notes: Vec<NoteEntry> = serde_json::from_str(json)
+            .map_err(|e| format!("索引解析失败: {}", e))?;
+
+        // 构建倒排索引
+        let mut inverted: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, note) in notes.iter().enumerate() {
+            // 标题 tokens（权重最高）
+            for token in tokenize_text(&note.title) {
+                inverted.entry(token).or_default().push(idx);
+            }
+            // 标签 tokens
+            for tag in &note.tags {
+                for token in tokenize_text(tag) {
+                    inverted.entry(token).or_default().push(idx);
+                }
+            }
+            // 内容 tokens
+            for token in tokenize_text(&note.content) {
+                inverted.entry(token).or_default().push(idx);
+            }
+        }
+
+        Ok(NoteIndex { notes, inverted })
+    }
+
+    /// 返回索引中的笔记总数
+    #[wasm_bindgen(js_name = noteCount)]
+    pub fn note_count(&self) -> usize {
+        self.notes.len()
+    }
+
+    /// 搜索笔记，返回 JSON 格式结果（与服务端 `/api/search` 响应格式一致）。
+    ///
+    /// # 评分规则
+    /// - 标题完全匹配每个 token：+10 分
+    /// - 标签匹配每个 token：+5 分
+    /// - 内容摘要匹配每个 token：+1 分
+    ///
+    /// # 返回格式
+    /// ```json
+    /// [{"title":"...","path":"...","snippet":"...","score":15.0,"mtime":0,"tags":["..."]}]
+    /// ```
+    #[wasm_bindgen(js_name = searchJson)]
+    pub fn search_json(&self, query: &str, limit: u32) -> String {
+        if query.trim().is_empty() {
+            return "[]".to_string();
+        }
+
+        let query_tokens: HashSet<String> = tokenize_text(query).into_iter().collect();
+        if query_tokens.is_empty() {
+            return "[]".to_string();
+        }
+
+        // 通过倒排索引快速找到候选笔记
+        let mut candidate_indices: HashSet<usize> = HashSet::new();
+        for token in &query_tokens {
+            if let Some(indices) = self.inverted.get(token) {
+                candidate_indices.extend(indices);
+            }
+        }
+
+        // 对候选笔记评分
+        let mut scored: Vec<(f32, &NoteEntry)> = candidate_indices.iter()
+            .filter_map(|&idx| self.notes.get(idx).map(|note| idx_with_note(idx, note)))
+            .map(|(_, note)| {
+                let title_tokens: HashSet<String> = tokenize_text(&note.title).into_iter().collect();
+                let tag_tokens: HashSet<String> = note.tags.iter()
+                    .flat_map(|t| tokenize_text(t))
+                    .collect();
+                let content_tokens: HashSet<String> = tokenize_text(&note.content).into_iter().collect();
+
+                let score: f32 = query_tokens.iter().map(|token| {
+                    let mut s = 0.0f32;
+                    if title_tokens.contains(token)   { s += 10.0; }
+                    if tag_tokens.contains(token)     { s += 5.0; }
+                    if content_tokens.contains(token) { s += 1.0; }
+                    s
+                }).sum();
+
+                (score, note)
+            })
+            .filter(|(score, _)| *score > 0.0)
+            .collect();
+
+        // 按分数降序，同分按 mtime 降序
+        scored.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(b.1.mtime.cmp(&a.1.mtime))
+        });
+        scored.truncate(limit as usize);
+
+        let results: Vec<SearchResult> = scored.into_iter().map(|(score, note)| {
+            // 生成包含查询词上下文的摘要
+            let snippet = make_snippet(&note.content, &query_tokens, 150);
+            SearchResult {
+                title: note.title.clone(),
+                path: note.path.clone(),
+                snippet,
+                score,
+                mtime: note.mtime,
+                tags: note.tags.clone(),
+            }
+        }).collect();
+
+        serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string())
+    }
+}
+
+/// 辅助：将 note 索引与引用配对
+fn idx_with_note(idx: usize, note: &NoteEntry) -> (usize, &NoteEntry) {
+    (idx, note)
+}
+
+/// n-gram 分词器（v1.6.2）
+///
+/// - ASCII：以非字母数字为分隔符切分单词（小写化）
+/// - CJK：生成单字 unigram + 相邻双字 bigram
+/// 支持中、日、韩文及 ASCII 混合文本的基本搜索。
+fn tokenize_text(text: &str) -> Vec<String> {
+    let lower = text.to_lowercase();
+    let mut tokens = Vec::new();
+
+    // ASCII 词切分（忽略单字符 token）
+    for word in lower.split(|c: char| !c.is_alphanumeric()) {
+        if word.len() >= 2 {
+            tokens.push(word.to_string());
+        }
+    }
+
+    // CJK unigram + bigram
+    let chars: Vec<char> = lower.chars().collect();
+    for i in 0..chars.len() {
+        let c = chars[i];
+        if is_cjk(c) {
+            tokens.push(c.to_string()); // unigram
+            if i + 1 < chars.len() && is_cjk(chars[i + 1]) {
+                let bigram: String = [c, chars[i + 1]].iter().collect();
+                tokens.push(bigram); // bigram（提高精确度）
+            }
+        }
+    }
+
+    tokens
+}
+
+/// 判断字符是否属于 CJK 范围（包含中文、日文假名、韩文）
+fn is_cjk(c: char) -> bool {
+    matches!(c,
+        '\u{4E00}'..='\u{9FFF}'  // 中文基本汉字
+        | '\u{3400}'..='\u{4DBF}' // 扩展汉字A
+        | '\u{3040}'..='\u{309F}' // 平假名
+        | '\u{30A0}'..='\u{30FF}' // 片假名
+        | '\u{AC00}'..='\u{D7AF}' // 韩文音节
+    )
+}
+
+/// 在内容中找到第一个 query token 的位置，提取上下文摘要
+fn make_snippet(content: &str, query_tokens: &HashSet<String>, max_len: usize) -> String {
+    let content_lower = content.to_lowercase();
+
+    // 找到第一个匹配位置
+    let first_match = query_tokens.iter()
+        .filter_map(|token| content_lower.find(token.as_str()))
+        .min();
+
+    let start = first_match
+        .map(|pos| pos.saturating_sub(30))
+        .unwrap_or(0);
+    let end = (start + max_len).min(content.len());
+
+    // 安全切断 UTF-8 边界
+    let mut s = start;
+    let mut e = end;
+    while s > 0 && !content.is_char_boundary(s) { s -= 1; }
+    while e < content.len() && !content.is_char_boundary(e) { e += 1; }
+
+    let snippet = &content[s..e];
+    let prefix = if s > 0 { "..." } else { "" };
+    let suffix = if e < content.len() { "..." } else { "" };
+    format!("{}{}{}", prefix, snippet, suffix)
+}
+
 // ─── 单元测试（运行于原生目标，无需 wasm-pack）──────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── NoteIndex 测试（v1.6.2）──────────────────────────────────────────────
+
+    #[test]
+    fn test_note_index_load_and_search() {
+        let json = r#"[
+            {"title":"Rust 编程指南","path":"rust.md","tags":["rust","编程"],"content":"Rust 是一门系统编程语言，强调安全性和性能。","mtime":0},
+            {"title":"Python 教程","path":"python.md","tags":["python"],"content":"Python 是一门简洁的脚本语言，广泛应用于数据科学。","mtime":0}
+        ]"#;
+        let idx = NoteIndex::load_json(json).expect("加载失败");
+        assert_eq!(idx.note_count(), 2, "应加载 2 条笔记");
+
+        let results: serde_json::Value = serde_json::from_str(&idx.search_json("rust", 10)).unwrap();
+        assert!(results.as_array().map_or(0, |a| a.len()) >= 1, "应找到 Rust 相关笔记");
+    }
+
+    #[test]
+    fn test_note_index_empty_query() {
+        let json = r#"[{"title":"笔记A","path":"a.md","tags":[],"content":"内容A","mtime":0}]"#;
+        let idx = NoteIndex::load_json(json).expect("加载失败");
+        let results_str = idx.search_json("", 10);
+        assert_eq!(results_str, "[]", "空查询应返回空数组");
+    }
+
+    #[test]
+    fn test_note_index_cjk_search() {
+        let json = r#"[
+            {"title":"笔记索引优化","path":"notes.md","tags":["优化"],"content":"笔记管理和索引优化是提高效率的关键。","mtime":0},
+            {"title":"Python 基础","path":"py.md","tags":[],"content":"基础语法和函数定义。","mtime":0}
+        ]"#;
+        let idx = NoteIndex::load_json(json).expect("加载失败");
+        let results: serde_json::Value = serde_json::from_str(&idx.search_json("优化", 10)).unwrap();
+        let arr = results.as_array().unwrap();
+        assert!(!arr.is_empty(), "应找到包含'优化'的笔记");
+    }
+
+    #[test]
+    fn test_tokenize_text() {
+        let tokens = tokenize_text("Hello World");
+        assert!(tokens.contains(&"hello".to_string()), "应包含 hello");
+        assert!(tokens.contains(&"world".to_string()), "应包含 world");
+
+        let cjk_tokens = tokenize_text("中文搜索");
+        assert!(cjk_tokens.contains(&"中".to_string()), "应包含单字 unigram");
+        assert!(cjk_tokens.contains(&"中文".to_string()), "应包含双字 bigram");
+    }
 
     // ─── render_markdown 测试 ───────────────────────────────────────────────
 
