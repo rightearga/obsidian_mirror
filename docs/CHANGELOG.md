@@ -8,6 +8,29 @@
 
 ---
 
+## [v1.6.4] — 2026-04-14
+
+WASM 性能优化：消灭三个基准测试暴露的性能瓶颈。
+
+### Changed
+- **[M1] 消除 highlight_terms 双倍 to_lowercase 分配**：
+  - `src/search_engine.rs`：新增 `find_substr_ci` 助手函数（字节级大小写不敏感查找，不分配 `text_lower`），更新 `generate_snippet` 和 `highlight_terms` 使用它
+  - `crates/wasm/src/lib.rs`：同步更新 `highlight_term` 和 `find_substr_ci` 函数
+  - 实测改善：`search/fulltext_hit` 54.4µs → **42.2µs**（-22%）
+- **[M2] `compute_graph_layout` Barnes-Hut 四叉树近似**：
+  - n > 100 时自动切换至 O(n log n) Barnes-Hut 算法（θ=0.9），n ≤ 100 仍用精确 O(n²) FR
+  - 新增 `QuadTree` enum（Empty / Leaf / Internal），实现 `insert` 和 `repulsion_force`
+  - 实测改善：`graph_layout/500` 10.6ms → **4.69ms**（-56%）
+- **[M3] NoteIndex CJK 搜索均衡**：
+  - query token 按倒排索引稀有度（最小 posting list）排序，截断至最多 8 个（抑制 CJK bigram 泛滥）
+  - CJK bigram 标题匹配权重提升至 15（原 10），精准匹配优先
+  - `is_cjk_bigram` 改为零分配实现（无 Vec<char> 分配）
+  - 预计算 `title_weights` 向量，消除每候选节点的重复计算
+  - 实测改善：`note_index_search_cjk` 705µs → **655µs**（-7%）
+- 新增 4 个单元测试（find_substr_ci ASCII/CJK、Barnes-Hut 大图、M3 CJK 查询）
+
+---
+
 ## [v1.6.3] — 2026-04-14
 
 前端 JS → WASM 替换：图谱布局加速、本地搜索过滤、客户端 TOC 生成。

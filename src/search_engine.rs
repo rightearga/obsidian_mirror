@@ -527,6 +527,30 @@ impl SearchEngine {
     }
 }
 
+/// 大小写不敏感子串查找（M1 优化，v1.6.4）：避免分配 `haystack.to_lowercase()`。
+///
+/// `needle_lower` 必须已预先转换为小写。对 ASCII（字节大小写折叠）和
+/// CJK（无大小写，直接字节比较）均正确工作。
+/// 返回 haystack 中第一个匹配的**字节偏移**（保证在 UTF-8 字符边界）。
+fn find_substr_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
+    if needle_lower.is_empty() { return Some(0); }
+    let h = haystack.as_bytes();
+    let n = needle_lower.as_bytes();
+    let hlen = h.len();
+    let nlen = n.len();
+    if hlen < nlen { return None; }
+
+    'outer: for i in 0..=(hlen - nlen) {
+        if !haystack.is_char_boundary(i) { continue; }
+        for j in 0..nlen {
+            let hb = if h[i + j] < 128 { h[i + j].to_ascii_lowercase() } else { h[i + j] };
+            if hb != n[j] { continue 'outer; }
+        }
+        return Some(i);
+    }
+    None
+}
+
 /// 生成搜索结果摘要片段，并用 `<mark>` 标签高亮命中词。
 ///
 /// 在内容中定位搜索词，提取 50 字符前缀 + 命中词 + 100 字符后缀，
@@ -539,11 +563,11 @@ fn generate_snippet(content: &str, search_term: &str, max_len: usize) -> String 
         .collect::<Vec<_>>()
         .join(" ");
 
-    let content_lower = cleaned_content.to_lowercase();
+    // M1 优化：只分配 search_lower（小），用 find_substr_ci 避免分配 content_lower（大）
     let search_lower = search_term.to_lowercase();
 
     if !search_lower.is_empty()
-        && let Some(pos) = content_lower.find(&search_lower) {
+        && let Some(pos) = find_substr_ci(&cleaned_content, &search_lower) {
         // 找到匹配位置，提取上下文窗口
         let start = pos.saturating_sub(50);
         let end = (pos + search_term.len() + 100).min(cleaned_content.len());
@@ -580,21 +604,21 @@ fn highlight_terms(text: &str, term: &str) -> String {
     if term.is_empty() {
         return text.to_string();
     }
+    // M1 优化：只分配 term_lower（小），用 find_substr_ci 避免分配 text_lower（大）
     let term_lower = term.to_lowercase();
-    let text_lower = text.to_lowercase();
 
-    let mut result = String::with_capacity(text.len() + 24); // 预留 <mark></mark> 空间
+    let mut result = String::with_capacity(text.len() + 24);
     let mut last_end = 0;
     let mut search_start = 0;
 
-    while let Some(rel_pos) = text_lower[search_start..].find(&term_lower) {
+    while let Some(rel_pos) = find_substr_ci(&text[search_start..], &term_lower) {
         let abs_pos = search_start + rel_pos;
         // 确保在字符边界上
         if !text.is_char_boundary(abs_pos) {
             search_start = abs_pos + 1;
             continue;
         }
-        let term_end = abs_pos + term.len();
+        let term_end = abs_pos + term_lower.len(); // 用 term_lower.len() 保持一致性
         if term_end > text.len() || !text.is_char_boundary(term_end) {
             search_start = abs_pos + 1;
             continue;

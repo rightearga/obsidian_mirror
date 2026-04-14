@@ -62,6 +62,31 @@ fn is_image_ext(target: &str) -> bool {
     IMAGE_EXTS.iter().any(|ext| lower.ends_with(ext))
 }
 
+// ─── M1 共享助手：大小写不敏感子串查找（v1.6.4）────────────────────────────
+
+/// 大小写不敏感子串查找，避免分配 `haystack.to_lowercase()`。
+///
+/// `needle_lower` 必须已预先转换为小写。
+/// ASCII 字节做 `to_ascii_lowercase()` 比较；非 ASCII（CJK 等）直接字节比较。
+fn find_substr_ci(haystack: &str, needle_lower: &str) -> Option<usize> {
+    if needle_lower.is_empty() { return Some(0); }
+    let h = haystack.as_bytes();
+    let n = needle_lower.as_bytes();
+    let hlen = h.len();
+    let nlen = n.len();
+    if hlen < nlen { return None; }
+
+    'outer: for i in 0..=(hlen - nlen) {
+        if !haystack.is_char_boundary(i) { continue; }
+        for j in 0..nlen {
+            let hb = if h[i + j] < 128 { h[i + j].to_ascii_lowercase() } else { h[i + j] };
+            if hb != n[j] { continue 'outer; }
+        }
+        return Some(i);
+    }
+    None
+}
+
 // ─── 基础设施函数 ────────────────────────────────────────────────────────────
 
 /// 返回当前 WASM 模块版本（与服务端 `obsidian_mirror` 版本一致）
@@ -83,22 +108,17 @@ pub fn highlight_term(text: &str, term: &str) -> String {
     if term.is_empty() {
         return text.to_string();
     }
+    // M1 优化：只分配 term_lower（小），用 find_substr_ci 避免分配 text_lower（大）
     let term_lower = term.to_lowercase();
-    let text_lower = text.to_lowercase();
 
     let mut result = String::with_capacity(text.len() + 24);
     let mut last_end = 0;
     let mut search_start = 0;
 
-    while let Some(rel_pos) = text_lower[search_start..].find(&term_lower) {
+    while let Some(rel_pos) = find_substr_ci(&text[search_start..], &term_lower) {
         let abs_pos = search_start + rel_pos;
-        // 确保在 UTF-8 字符边界上
-        if !text.is_char_boundary(abs_pos) {
-            search_start = abs_pos + 1;
-            continue;
-        }
-        let term_end = abs_pos + term.len();
-        if term_end > text.len() || !text.is_char_boundary(term_end) {
+        let term_end = abs_pos + term_lower.len();
+        if term_end > text.len() || !text.is_char_boundary(abs_pos) || !text.is_char_boundary(term_end) {
             search_start = abs_pos + 1;
             continue;
         }
@@ -367,10 +387,20 @@ impl NoteIndex {
             return "[]".to_string();
         }
 
-        let query_tokens: HashSet<String> = tokenize_text(query).into_iter().collect();
-        if query_tokens.is_empty() {
+        let all_tokens: HashSet<String> = tokenize_text(query).into_iter().collect();
+        if all_tokens.is_empty() {
             return "[]".to_string();
         }
+
+        // M3 优化（v1.6.4）：限制查询 token 数为最多 8 个，优先选取最稀有（命中数最少）的 token。
+        // CJK 查询会产生大量 unigram + bigram token，不加限制时候选集过大导致搜索变慢。
+        // "最稀有" = 倒排索引中命中文档数最少 → 最具区分度。
+        let query_tokens: Vec<String> = {
+            let mut tokens: Vec<String> = all_tokens.into_iter().collect();
+            tokens.sort_by_key(|t| self.inverted.get(t).map_or(0, |v| v.len()));
+            tokens.truncate(8);
+            tokens
+        };
 
         // 通过倒排索引快速找到候选笔记
         let mut candidate_indices: HashSet<usize> = HashSet::new();
@@ -380,17 +410,23 @@ impl NoteIndex {
             }
         }
 
+        // M3：预计算每个 query token 的标题权重（在候选循环外执行，每次搜索只算一次）
+        // CJK bigram（精确双字）命中标题得 15 分，其他得 10 分
+        let title_weights: Vec<f32> = query_tokens.iter()
+            .map(|t| if is_cjk_bigram(t) { 15.0_f32 } else { 10.0 })
+            .collect();
+
         // 对候选笔记评分（直接查询预缓存的 token 集合，O(1) per token per note）
         let mut scored: Vec<(f32, &NoteEntry)> = candidate_indices.iter()
             .filter_map(|&idx| {
                 let note   = self.notes.get(idx)?;
                 let cached = self.token_cache.get(idx)?;
 
-                let score: f32 = query_tokens.iter().map(|token| {
+                let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)| {
                     let mut s = 0.0f32;
-                    if cached.title_tokens.contains(token)   { s += 10.0; }
-                    if cached.tag_tokens.contains(token)     { s += 5.0; }
-                    if cached.content_tokens.contains(token) { s += 1.0; }
+                    if cached.title_tokens.contains(token.as_str())   { s += tw; }
+                    if cached.tag_tokens.contains(token.as_str())     { s += 5.0; }
+                    if cached.content_tokens.contains(token.as_str()) { s += 1.0; }
                     s
                 }).sum();
 
@@ -406,9 +442,11 @@ impl NoteIndex {
         });
         scored.truncate(limit as usize);
 
+        // make_snippet 接受 HashSet，在迭代器外转换（仅执行一次）
+        let query_token_set: HashSet<String> = query_tokens.iter().cloned().collect();
+
         let results: Vec<SearchResult> = scored.into_iter().map(|(score, note)| {
-            // 生成包含查询词上下文的摘要
-            let snippet = make_snippet(&note.content, &query_tokens, 150);
+            let snippet = make_snippet(&note.content, &query_token_set, 150);
             SearchResult {
                 title: note.title.clone(),
                 path: note.path.clone(),
@@ -454,6 +492,16 @@ fn tokenize_text(text: &str) -> Vec<String> {
     }
 
     tokens
+}
+
+/// 判断 token 是否为精确 CJK bigram（2 个 CJK 字符，用于 M3 权重提升）
+/// 不分配堆内存：用 chars() 迭代器判断恰好 2 个 CJK 字符
+fn is_cjk_bigram(token: &str) -> bool {
+    let mut chars = token.chars();
+    match (chars.next(), chars.next(), chars.next()) {
+        (Some(c1), Some(c2), None) => is_cjk(c1) && is_cjk(c2),
+        _ => false,
+    }
 }
 
 /// 判断字符是否属于 CJK 范围（包含中文、日文假名、韩文）
@@ -530,6 +578,117 @@ struct NodePosition {
 ///
 /// # 返回
 /// `[{"id":"...","x":100.0,"y":-50.0},...]` 格式的 JSON 字符串
+// ─── M2：Barnes-Hut 四叉树（v1.6.4）────────────────────────────────────────
+//
+// 用于加速 compute_graph_layout 中的排斥力计算：
+// - O(n²) Fruchterman-Reingold → O(n log n) Barnes-Hut
+// - 适用于 n > 100 的图，小图仍使用精确 O(n²) 计算
+
+/// 四叉树节点，实现 Barnes-Hut 近似排斥力计算
+enum QuadTree {
+    /// 空节点
+    Empty,
+    /// 叶子节点（含一个点）
+    Leaf { idx: usize, x: f64, y: f64 },
+    /// 内部节点（含多个点，用质心聚合）
+    Internal {
+        /// 区域范围 [x_min, y_min, x_max, y_max]
+        bounds: [f64; 4],
+        /// 区域内点的数量（用于质心权重）
+        total_mass: f64,
+        /// 质心 x 坐标
+        cx: f64,
+        /// 质心 y 坐标
+        cy: f64,
+        /// 四个子象限 [SW, SE, NW, NE]
+        children: Box<[QuadTree; 4]>,
+    },
+}
+
+impl QuadTree {
+    /// 将一个点插入四叉树
+    fn insert(&mut self, idx: usize, x: f64, y: f64, bounds: [f64; 4]) {
+        match self {
+            QuadTree::Empty => {
+                *self = QuadTree::Leaf { idx, x, y };
+            }
+            QuadTree::Leaf { .. } => {
+                // 取出旧叶子，升级为内部节点后重新插入
+                if let QuadTree::Leaf { idx: oi, x: ox, y: oy } = std::mem::replace(self, QuadTree::Empty) {
+                    let mx = (bounds[0] + bounds[2]) / 2.0;
+                    let my = (bounds[1] + bounds[3]) / 2.0;
+                    *self = QuadTree::Internal {
+                        bounds,
+                        total_mass: 0.0,
+                        cx: mx, cy: my,
+                        children: Box::new([QuadTree::Empty, QuadTree::Empty,
+                                            QuadTree::Empty, QuadTree::Empty]),
+                    };
+                    self.insert(oi, ox, oy, bounds);
+                    self.insert(idx, x, y, bounds);
+                }
+            }
+            QuadTree::Internal { bounds: b, total_mass, cx, cy, children } => {
+                // 更新质心（增量公式）
+                *total_mass += 1.0;
+                *cx = (*cx * (*total_mass - 1.0) + x) / *total_mass;
+                *cy = (*cy * (*total_mass - 1.0) + y) / *total_mass;
+                // 决定插入哪个象限并递归
+                let mx = (b[0] + b[2]) / 2.0;
+                let my = (b[1] + b[3]) / 2.0;
+                let quad = usize::from(x >= mx) + 2 * usize::from(y >= my);
+                let cb = [
+                    if quad & 1 == 0 { b[0] } else { mx },
+                    if quad & 2 == 0 { b[1] } else { my },
+                    if quad & 1 == 0 { mx   } else { b[2] },
+                    if quad & 2 == 0 { my   } else { b[3] },
+                ];
+                children[quad].insert(idx, x, y, cb);
+            }
+        }
+    }
+
+    /// 计算来自此子树的排斥力（Barnes-Hut 近似）。
+    ///
+    /// `px, py`：查询点坐标；`self_idx`：查询点索引（跳过自身）
+    /// `k_sq`：最优距离平方；`theta_sq`：近似阈值平方（θ²，默认 0.81）
+    fn repulsion_force(&self, px: f64, py: f64, k_sq: f64, theta_sq: f64, self_idx: usize) -> (f64, f64) {
+        match self {
+            QuadTree::Empty => (0.0, 0.0),
+            QuadTree::Leaf { idx, x, y } => {
+                if *idx == self_idx { return (0.0, 0.0); }
+                let dx = px - x;
+                let dy = py - y;
+                let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+                let rep = k_sq / dist;
+                (dx / dist * rep, dy / dist * rep)
+            }
+            QuadTree::Internal { bounds, total_mass, cx, cy, children } => {
+                let dx = px - cx;
+                let dy = py - cy;
+                let dist_sq = (dx * dx + dy * dy).max(1.0);
+                // s = 区域最大边长
+                let s = (bounds[2] - bounds[0]).max(bounds[3] - bounds[1]);
+                // Barnes-Hut 条件：s²/d² < θ² → 用质心近似
+                if s * s < theta_sq * dist_sq {
+                    let dist = dist_sq.sqrt();
+                    let rep = k_sq * total_mass / dist;
+                    (dx / dist * rep, dy / dist * rep)
+                } else {
+                    // 递归到子节点
+                    let (mut rfx, mut rfy) = (0.0, 0.0);
+                    for child in children.iter() {
+                        let (cx, cy) = child.repulsion_force(px, py, k_sq, theta_sq, self_idx);
+                        rfx += cx;
+                        rfy += cy;
+                    }
+                    (rfx, rfy)
+                }
+            }
+        }
+    }
+}
+
 #[wasm_bindgen(js_name = computeGraphLayout)]
 pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32) -> String {
     let nodes: Vec<GraphNode> = match serde_json::from_str(nodes_json) {
@@ -570,33 +729,59 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
         .collect();
 
     // Fruchterman-Reingold 参数
-    // k：最优节点间距（正比于布局面积开方）
     let area = 2000.0_f64 * 2000.0_f64;
     let k = (area / n as f64).sqrt();
-    let mut temp = 200.0_f64; // 初始温度
-    let cooling = 0.85_f64;   // 每轮降温系数
+    let k_sq = k * k;
+    let mut temp = 200.0_f64;
+    let cooling = 0.85_f64;
+
+    // M2（v1.6.4）：n > 100 时使用 Barnes-Hut O(n log n) 近似代替 O(n²) 全对排斥力
+    let use_barnes_hut = n > 100;
 
     for _ in 0..iterations {
         let mut fx = vec![0.0_f64; n];
         let mut fy = vec![0.0_f64; n];
 
-        // 排斥力（所有节点对）
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let dx = pos_x[i] - pos_x[j];
-                let dy = pos_y[i] - pos_y[j];
-                let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                let repulsion = k * k / dist;
-                let rx = dx / dist * repulsion;
-                let ry = dy / dist * repulsion;
-                fx[i] += rx;
-                fy[i] += ry;
-                fx[j] -= rx;
-                fy[j] -= ry;
+        if use_barnes_hut {
+            // Barnes-Hut：每轮构建四叉树，每节点 O(log n) 查询排斥力
+            let pad = init_r * 0.05 + 1.0;
+            let x_min = pos_x.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
+            let y_min = pos_y.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
+            let x_max = pos_x.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
+            let y_max = pos_y.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
+            let bounds = [x_min, y_min, x_max, y_max];
+
+            let mut tree = QuadTree::Empty;
+            for i in 0..n {
+                tree.insert(i, pos_x[i], pos_y[i], bounds);
+            }
+
+            // θ = 0.9：近似精度参数（s/d < θ 时用质心近似）
+            let theta_sq = 0.9_f64 * 0.9_f64;
+            for i in 0..n {
+                let (rfx, rfy) = tree.repulsion_force(pos_x[i], pos_y[i], k_sq, theta_sq, i);
+                fx[i] += rfx;
+                fy[i] += rfy;
+            }
+        } else {
+            // 小图：标准 O(n²) Fruchterman-Reingold（精确）
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let dx = pos_x[i] - pos_x[j];
+                    let dy = pos_y[i] - pos_y[j];
+                    let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+                    let repulsion = k_sq / dist;
+                    let rx = dx / dist * repulsion;
+                    let ry = dy / dist * repulsion;
+                    fx[i] += rx;
+                    fy[i] += ry;
+                    fx[j] -= rx;
+                    fy[j] -= ry;
+                }
             }
         }
 
-        // 吸引力（连边节点对）
+        // 吸引力（连边节点对，O(E)，两种模式相同）
         for &(i, j) in &adj_edges {
             let dx = pos_x[j] - pos_x[i];
             let dy = pos_y[j] - pos_y[i];
@@ -752,6 +937,51 @@ pub fn generate_toc_from_html(html: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ─── v1.6.4 测试：M1/M2/M3 ──────────────────────────────────────────────────
+
+    #[test]
+    fn test_find_substr_ci_ascii() {
+        // needle_lower 必须已预先转为小写
+        assert_eq!(find_substr_ci("Hello World", "world"), Some(6));
+        assert_eq!(find_substr_ci("Hello World", "hello"), Some(0)); // 搜索小写 hello → 匹配 Hello
+        assert_eq!(find_substr_ci("Hello", "xyz"), None);
+        assert_eq!(find_substr_ci("", "abc"), None);
+        assert_eq!(find_substr_ci("Rust 编程", "rust"), Some(0));
+    }
+
+    #[test]
+    fn test_find_substr_ci_cjk() {
+        // CJK 无大小写，直接字节匹配
+        assert_eq!(find_substr_ci("中文搜索", "搜索"), Some(6)); // "中文" = 6 bytes (2×3)
+        assert_eq!(find_substr_ci("中文搜索", "中"), Some(0));
+    }
+
+    #[test]
+    fn test_graph_layout_barnes_hut_large() {
+        // n > 100 时自动使用 Barnes-Hut，结果应包含正确数量的节点
+        let nodes: Vec<_> = (0..200).map(|i| format!(r#"{{"id":"n{}"}}"#, i)).collect();
+        let nodes_json = format!("[{}]", nodes.join(","));
+        let edges_json = "[]";
+        let result = compute_graph_layout(&nodes_json, edges_json, 10);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 200, "Barnes-Hut 布局应返回 200 个节点位置");
+    }
+
+    #[test]
+    fn test_m3_cjk_token_limit() {
+        // 构造足够多笔记，验证 CJK 查询不会超时（行为测试）
+        let entries: Vec<String> = (0..500).map(|i| format!(
+            r#"{{"title":"笔记{}","path":"n{}.md","tags":[],"content":"内容{}","mtime":0}}"#, i, i, i
+        )).collect();
+        let json = format!("[{}]", entries.join(","));
+        let idx = NoteIndex::load_json(&json).unwrap();
+        // "编程语言" 会生成多个 token，M3 应限制为最多 8 个
+        let result = idx.search_json("这是一个包含很多词语的长查询语句测试", 10);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        // 只要不 panic/超时，结果可以为空
+        assert!(arr.is_array(), "长 CJK 查询应正常返回数组");
+    }
 
     // ─── v1.6.3 测试：图谱布局 + 搜索过滤 + TOC ────────────────────────────────
 

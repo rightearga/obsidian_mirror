@@ -6,7 +6,7 @@ resolver = "3"
 
 [package]
 name = "obsidian_mirror"
-version = "1.6.3"
+version = "1.6.4"
 edition = "2024"
 
 [lib]
