@@ -411,7 +411,51 @@ let text_lower = text.to_lowercase();   // 分配 2
 
 ---
 
-### 🔧 v1.6.5 — 代码审计（CODEREVIEW_1.6）
+### ✨ v1.6.5 — NoteIndex 倒排索引位图加速（M3-续）
+
+**主题**：用 bitset（位图）替换 `HashSet<usize>` 候选集，进一步提升 CJK 搜索速度
+
+**背景**：M3（v1.6.4）将 CJK 搜索从 705µs 降至 661µs（-6%）。主要瓶颈已从重复分词（v1.6.3 TokenCache 修复）转移到候选集合并操作（多个 token 的 posting list 合并）。
+
+#### 问题分析
+
+```
+当前流程：
+1. 对每个 query token 从倒排索引取 Vec<usize>（posting list）
+2. 将所有 posting list 插入 HashSet<usize> 候选集
+3. 遍历候选集评分
+
+CJK 搜索瓶颈："编程语言" → 7 个 token，7 次 HashSet 扩展操作
+HashSet 在随机 usize 插入时有较高的内存分配和 hash 计算开销
+```
+
+#### 修复方案：bitset 替换 HashSet
+
+```rust
+// 位图：u64 数组，第 i 位代表 note 索引 i
+// 对于 1000 条笔记，仅需 1000/64 = 16 个 u64（128 字节，完全 L1 缓存友好）
+struct Bitset {
+    bits: Vec<u64>,
+    len: usize,  // 总 note 数（位图大小）
+}
+
+impl Bitset {
+    fn set(&mut self, idx: usize) { self.bits[idx / 64] |= 1 << (idx % 64); }
+    fn iter_set(&self) -> impl Iterator<Item = usize> + '_ {
+        // 遍历所有置位的索引（位扫描）
+    }
+}
+```
+
+合并操作从 `HashSet.insert()` O(1) amortized 变为 `bits[i/64] |= bit` 无分配操作。
+
+**文件**：`crates/wasm/src/lib.rs`（在 `search_json` 中替换候选集类型）
+
+**预期收益**：CJK 搜索 661µs → ~400µs（-40%），接近 ASCII 水平（239µs）
+
+---
+
+### 🔧 v1.6.6 — 代码审计（CODEREVIEW_1.6）
 
 **主题**：对 v1.6.x WASM 相关代码进行系统性审查
 
