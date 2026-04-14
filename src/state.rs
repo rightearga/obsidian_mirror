@@ -1,14 +1,15 @@
 // 应用状态定义
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicI64, AtomicU64, AtomicU8};
 use std::sync::{Arc, RwLock};
-use tokio::sync::{Mutex, RwLock as TokioRwLock};
+use tokio::sync::{broadcast, Mutex, RwLock as TokioRwLock};
 
 use crate::config::AppConfig;
 use crate::domain::{Note, SidebarNode};
 use crate::reading_progress_db::ReadingProgressDatabase;
 use crate::search_engine::SearchEngine;
 use crate::share_db::ShareDatabase;
+use crate::sync::{SyncProgressEvent, SyncRecord};
 
 /// 应用程序的全局状态
 pub struct AppState {
@@ -44,6 +45,27 @@ pub struct AppState {
     pub sync_status: AtomicU8,
     /// 应用启动时间，供 /health 端点计算真实运行时长
     pub start_time: std::time::Instant,
+
+    // ── v1.5.5 新增字段 ─────────────────────────────────────────────────────
+
+    /// SSE 同步进度广播发送端（v1.5.5）
+    ///
+    /// 订阅：`data.sync_progress_tx.subscribe()`；capacity=128 足以缓冲一次同步的全部事件。
+    /// 发送端在同步各阶段广播 `SyncProgressEvent`，`GET /api/sync/events` 订阅并返回 SSE 流。
+    pub sync_progress_tx: broadcast::Sender<SyncProgressEvent>,
+
+    /// 同步历史记录（最近 10 条，v1.5.5）
+    ///
+    /// 每次同步（无论成功或失败）在完成时追加一条 `SyncRecord`，
+    /// 超出 10 条时自动从头部删除最旧记录。
+    pub sync_history: TokioRwLock<VecDeque<SyncRecord>>,
+
+    /// 后台任务句柄集合（v1.5.5）
+    ///
+    /// 同步期间启动的 spawn_blocking 任务（Tantivy 重建、redb 持久化）
+    /// 的 `JoinHandle` 存储于此，优雅关闭时 await 全部完成（上限 30 秒）。
+    /// 使用 `std::sync::Mutex` 以便在 async 上下文中快速获取而不持有锁跨越 .await。
+    pub background_tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
 /// 同步状态常量
@@ -61,6 +83,9 @@ impl AppState {
         share_db: Arc<ShareDatabase>,
         reading_progress_db: Arc<ReadingProgressDatabase>,
     ) -> Self {
+        // broadcast channel：capacity=128，足以缓冲一次完整同步过程的所有进度事件
+        let (sync_progress_tx, _) = broadcast::channel(128);
+
         Self {
             config: RwLock::new(config),
             notes: TokioRwLock::new(HashMap::new()),
@@ -77,6 +102,9 @@ impl AppState {
             last_sync_duration_ms: AtomicU64::new(0),
             sync_status: AtomicU8::new(sync_status::IDLE),
             start_time: std::time::Instant::now(),
+            sync_progress_tx,
+            sync_history: TokioRwLock::new(VecDeque::new()),
+            background_tasks: std::sync::Mutex::new(Vec::new()),
         }
     }
 }

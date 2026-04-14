@@ -637,6 +637,11 @@ pub async fn health_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
         .await
         .unwrap_or_default();
 
+    // v1.5.5：附上最近一次同步历史记录
+    let last_sync_record = data.sync_history.read().await
+        .back()
+        .and_then(|r| serde_json::to_value(r).ok());
+
     let health_info = json!({
         "status": "healthy",
         "version": env!("CARGO_PKG_VERSION"),
@@ -645,6 +650,7 @@ pub async fn health_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
         "sync_status": sync_status_str,
         "last_sync_at": last_sync_at,
         "last_sync_duration_ms": last_sync_duration_ms,
+        "last_sync_record": last_sync_record,
         "git_commit": git_commit,
         "components": {
             "notes_index": "ok",
@@ -1008,6 +1014,54 @@ pub async fn titles_api_handler(data: web::Data<Arc<AppState>>) -> impl Responde
         "tags": tags,
         "note_items": note_items,
     }))
+}
+
+/// GET /api/sync/events — Server-Sent Events 端点，实时推送同步进度（v1.5.5）
+///
+/// 客户端连接后订阅 broadcast channel，同步执行期间接收各阶段进度事件（JSON Lines）。
+/// 连接在 broadcast sender 关闭（应用退出）时自动断开；"done" / "error" 事件后前端可主动关闭。
+#[get("/api/sync/events")]
+pub async fn sync_events_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    use actix_web::web::Bytes;
+    use futures_util::stream;
+    use tokio::sync::broadcast::error::RecvError;
+
+    let rx = data.sync_progress_tx.subscribe();
+
+    // 将 broadcast::Receiver 转为 Stream<Item = Result<Bytes, actix_web::Error>>
+    let event_stream = stream::unfold(rx, |mut rx| async move {
+        match rx.recv().await {
+            Ok(event) => {
+                let json = serde_json::to_string(&event).unwrap_or_default();
+                let sse_line = format!("data: {}\n\n", json);
+                Some((
+                    Ok::<Bytes, actix_web::Error>(Bytes::from(sse_line)),
+                    rx,
+                ))
+            }
+            Err(RecvError::Closed) => None,  // 发送端关闭，结束流
+            Err(RecvError::Lagged(n)) => {
+                // 接收过慢，跳过了若干消息，发送一条 lag 通知
+                let lag_msg = format!("data: {{\"stage\":\"lag\",\"progress\":0,\"message\":\"跳过 {} 条消息\"}}\n\n", n);
+                Some((Ok(Bytes::from(lag_msg)), rx))
+            }
+        }
+    });
+
+    HttpResponse::Ok()
+        .content_type("text/event-stream; charset=utf-8")
+        .insert_header(("Cache-Control", "no-cache, no-store"))
+        .insert_header(("X-Accel-Buffering", "no")) // 禁用 Nginx 缓冲，确保实时推送
+        .insert_header(("Connection", "keep-alive"))
+        .streaming(event_stream)
+}
+
+/// GET /api/sync/history — 返回最近 10 次同步的历史记录（v1.5.5）
+#[get("/api/sync/history")]
+pub async fn sync_history_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
+    let history = data.sync_history.read().await;
+    let records: Vec<&crate::sync::SyncRecord> = history.iter().rev().collect(); // 最新在前
+    HttpResponse::Ok().json(serde_json::json!({ "history": records }))
 }
 
 /// 搜索建议查询参数

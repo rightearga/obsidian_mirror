@@ -8,6 +8,23 @@
 
 ---
 
+## [v1.5.5] — 2026-04-14
+
+实时通知与运维增强：SSE 同步进度、优雅关闭、同步历史记录。
+
+### Added
+- **`GET /api/sync/events`** — Server-Sent Events 端点：同步期间通过 `tokio::sync::broadcast` 实时推送 `{stage, progress, message}` 事件（git/scan/markdown/index/search/persist/done）
+- **`GET /api/sync/history`** — 返回最近 10 次同步历史记录 `{started_at, finished_at, notes_count, status, duration_ms}`
+- **`SyncProgressEvent` / `SyncRecord`** 结构体（`sync.rs`），供 SSE 和历史记录使用
+- **`AppState` 新增字段**（`state.rs`）：`sync_progress_tx`（broadcast Sender）、`sync_history`（VecDeque，TokioRwLock）、`background_tasks`（Mutex<Vec<JoinHandle>>）
+
+### Changed
+- **`/health` 响应新增 `last_sync_record` 字段**：最近一次同步记录（`null` 表示从未同步）
+- **优雅关闭增强**（`main.rs`）：HTTP 服务器停止后，等待所有后台任务（Tantivy 重建、redb 持久化）完成，超时上限 30 秒后强制退出
+- `perform_sync` 将搜索索引重建和持久化任务的 `JoinHandle` 存入 `AppState.background_tasks`，过期句柄自动清理
+
+---
+
 ## [v1.5.4] — 2026-04-14
 
 Obsidian 语法完整支持：笔记内嵌、脚注、Mermaid 主题注入、Callout 折叠动画。

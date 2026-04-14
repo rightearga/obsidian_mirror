@@ -4,6 +4,58 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::SystemTime;
 use tracing::{info, warn, error};
+use serde::Serialize;
+
+/// SSE 同步进度事件（v1.5.5）
+///
+/// 通过 `AppState.sync_progress_tx` broadcast channel 发送，
+/// `GET /api/sync/events` 以 SSE 格式推送给前端。
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncProgressEvent {
+    /// 阶段标识：git / scan / markdown / index / search / persist / done / error
+    pub stage: String,
+    /// 进度百分比（0-100）
+    pub progress: u8,
+    /// 人类可读的进度说明
+    pub message: String,
+    /// 已处理笔记数（markdown 阶段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes_processed: Option<usize>,
+    /// 笔记总数（done 阶段）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_notes: Option<usize>,
+}
+
+impl SyncProgressEvent {
+    /// 快速构造进度事件
+    pub fn new(stage: &str, progress: u8, message: &str) -> Self {
+        Self {
+            stage: stage.to_string(),
+            progress,
+            message: message.to_string(),
+            notes_processed: None,
+            total_notes: None,
+        }
+    }
+}
+
+/// 同步历史记录（v1.5.5）
+#[derive(Debug, Clone, Serialize)]
+pub struct SyncRecord {
+    /// 开始时间（Unix 时间戳秒）
+    pub started_at: i64,
+    /// 结束时间（Unix 时间戳秒）
+    pub finished_at: i64,
+    /// 完成后笔记总数
+    pub notes_count: usize,
+    /// completed / failed
+    pub status: String,
+    /// 失败原因（仅 failed 时非空）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_msg: Option<String>,
+    /// 耗时（毫秒）
+    pub duration_ms: u64,
+}
 
 use crate::state::AppState;
 use crate::git::{GitClient, SyncResult};
@@ -41,6 +93,20 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     // 在同步开始前克隆配置快照，避免持有读锁跨越 .await 点
     // （config_reload_handler 可能在同步期间更新配置，本次同步使用启动时的快照）
     let config = data.config.read().unwrap().clone();
+
+    // v1.5.5：记录同步开始时间戳（用于 SyncRecord）
+    let sync_started_at = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // v1.5.5：发送 SSE 进度事件的辅助闭包（无订阅者时 send 返回 Err，可安全忽略）
+    let tx = data.sync_progress_tx.clone();
+    let emit = |stage: &str, progress: u8, message: &str| {
+        let _ = tx.send(SyncProgressEvent::new(stage, progress, message));
+    };
+
+    emit("starting", 5, "同步开始...");
 
     // 标记同步状态为 running，并注册 RAII 守卫：
     // 正常退出时在函数末尾手动设为 IDLE；异常（? 传播）退出时 guard Drop 将状态设为 FAILED。
@@ -108,6 +174,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 1. Git Pull/Clone 并检测变更
     info!("📥 步骤 1/9: Git 同步");
+    emit("git", 10, "执行 Git 同步...");
     let sync_result = GitClient::sync(&config.repo_url, &config.local_path).await?;
     
     // 获取当前 Git 提交
@@ -296,6 +363,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 3. Build file index (for all non-.md files like images, PDFs)
     info!("📦 步骤 3/8: 构建资源文件索引");
+    emit("scan", 25, "构建资源文件索引...");
     let mut file_index_write = data.file_index.write().await;
     *file_index_write = FileIndexBuilder::build(&config.local_path);
     drop(file_index_write);
@@ -315,6 +383,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 5. 并行处理 Markdown 文件
     info!("⚙️  步骤 4/8: 并行处理笔记");
+    emit("markdown", 40, "并行处理 Markdown 文件...");
     let process_start = std::time::Instant::now();
     
     let local_path = config.local_path.clone();
@@ -330,6 +399,7 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 6. 更新索引
     info!("📇 步骤 5/8: 更新索引和反向链接");
+    emit("index", 65, "更新反向链接和标签索引...");
     let mut notes_write = data.notes.write().await;
     let mut link_index_write = data.link_index.write().await;
 
@@ -370,12 +440,14 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
 
     // 8. 更新搜索索引（使用 Tantivy）
     info!("🔎 步骤 7/8: 更新搜索索引");
+    emit("search", 80, "更新搜索索引（后台进行）...");
 
     let search_engine = data.search_engine.clone();
-    if is_incremental {
+    // v1.5.5：保存 JoinHandle 以支持优雅关闭时等待任务完成
+    let search_handle = if is_incremental {
         // 增量同步：仅更新变更文件（有 content 的），删除已删除文件
         let deleted_for_search = files_to_delete.clone();
-        tokio::task::spawn_blocking(move || {
+        let h = tokio::task::spawn_blocking(move || {
             if let Err(e) = search_engine.update_documents(
                 search_data.into_iter(),
                 &deleted_for_search,
@@ -384,10 +456,10 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
             }
         });
         info!("✅ 搜索索引增量更新已启动（后台进行）");
+        Some(h)
     } else {
         // 全量同步：用本次处理的全量数据重建 Tantivy 索引
-        // （v1.4.9 起 content 不再存储于 Note，直接从 processed_notes 获取）
-        tokio::task::spawn_blocking(move || {
+        let h = tokio::task::spawn_blocking(move || {
             if let Err(e) = search_engine.rebuild_index(search_data.into_iter()) {
                 error!("  └─ 重建搜索索引失败: {:?}", e);
             } else {
@@ -395,20 +467,21 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
             }
         });
         info!("✅ 搜索索引全量重建已启动（后台进行）");
-    }
+        Some(h)
+    };
 
     // 9. 持久化索引到磁盘
     info!("💾 步骤 8/9: 持久化索引");
-    if let Ok(persistence) = IndexPersistence::open(&config.database.index_db_path) {
+    emit("persist", 90, "持久化索引到磁盘（后台进行）...");
+    let persist_handle = if let Ok(persistence) = IndexPersistence::open(&config.database.index_db_path) {
         let notes = data.notes.read().await.clone();
         let link_index = data.link_index.read().await.clone();
         let backlinks = data.backlinks.read().await.clone();
         let tag_index = data.tag_index.read().await.clone();
         let sidebar = data.sidebar.read().await.clone();
-        
-        // 在后台线程保存（避免阻塞主线程）
+
         let ignore_patterns = config.ignore_patterns.clone();
-        tokio::task::spawn_blocking(move || {
+        let h = tokio::task::spawn_blocking(move || {
             if let Err(e) = persistence.save_indexes(
                 &current_git_commit,
                 &ignore_patterns,
@@ -421,8 +494,21 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                 error!("  └─ 持久化索引失败: {:?}", e);
             }
         });
+        Some(h)
     } else {
         warn!("  └─ 无法打开持久化数据库，跳过保存");
+        None
+    };
+
+    // v1.5.5：将后台任务句柄存入 AppState，优雅关闭时等待完成
+    if let Ok(mut tasks) = data.background_tasks.lock() {
+        tasks.retain(|h| !h.is_finished()); // 清理已完成的旧句柄
+        if let Some(h) = search_handle {
+            tasks.push(h);
+        }
+        if let Some(h) = persist_handle {
+            tasks.push(h);
+        }
     }
 
     let total_time = sync_start.elapsed();
@@ -445,6 +531,26 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     data.last_sync_duration_ms.store(duration_ms, Ordering::Relaxed);
     data.sync_status.store(sync_status::IDLE, Ordering::Relaxed);
     _status_guard.completed = true; // 正常完成，阻止 Drop 设置 FAILED
+
+    // v1.5.5：广播 done 事件并追加同步历史记录
+    {
+        let mut done_event = SyncProgressEvent::new("done", 100, "同步完成");
+        done_event.total_notes = Some(note_count);
+        let _ = data.sync_progress_tx.send(done_event);
+    }
+    {
+        let record = SyncRecord {
+            started_at: sync_started_at,
+            finished_at: now_ts,
+            notes_count: note_count,
+            status: "completed".to_string(),
+            error_msg: None,
+            duration_ms,
+        };
+        let mut history = data.sync_history.write().await;
+        if history.len() >= 10 { history.pop_front(); }
+        history.push_back(record);
+    }
 
     // 更新 Prometheus 指标
     SYNC_TOTAL.inc();

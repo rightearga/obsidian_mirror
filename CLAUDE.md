@@ -133,6 +133,8 @@ docker compose up -d
 | GET | `/recent` | 最近更新笔记列表（`?days=` 参数） |
 | GET | `/api/titles` | 所有笔记标题/路径/标签（供前端自动补全，v1.5.2 新增 `note_items`） |
 | GET | `/api/suggest` | 搜索建议（`?q=`，内存前缀 + FuzzyTermQuery，返回 `[{title,path}]`）(v1.5.2) |
+| GET | `/api/sync/events` | SSE 同步进度流（`text/event-stream`，各阶段 JSON 事件）(v1.5.5) |
+| GET | `/api/sync/history` | 最近 10 次同步历史记录（v1.5.5） |
 | GET | `/admin/users` | 用户管理页面（需 admin）(v1.5.3) |
 | GET/POST | `/api/admin/users` | 用户列表/创建（需 admin）(v1.5.3) |
 | DELETE/POST | `/api/admin/users/{u}` | 禁用/重置密码（需 admin）(v1.5.3) |

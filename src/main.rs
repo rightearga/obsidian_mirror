@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::AppState,
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -426,6 +426,8 @@ async fn start_http_server(
             .service(recent_page_handler)
             .service(titles_api_handler)
             .service(suggest_handler)          // GET /api/suggest — 搜索建议（v1.5.2）
+            .service(sync_events_handler)      // GET /api/sync/events — SSE 同步进度（v1.5.5）
+            .service(sync_history_handler)     // GET /api/sync/history — 同步历史（v1.5.5）
             .service(global_graph_handler)
             // Webhook 触发同步（需在 config.webhook.enabled=true 时才有效）
             .route("/webhook/sync", web::post().to(webhook_sync_handler))
@@ -489,11 +491,25 @@ async fn start_http_server(
     
     // 停止接受新连接
     server_handle.stop(true).await;
-    
+
     // 等待服务器完全关闭
     server_task.await??;
-    
+
     info!("✅ HTTP 服务器已关闭");
+
+    // v1.5.5：等待后台任务（Tantivy 重建、redb 持久化）完成，上限 30 秒
+    info!("⏳ 等待后台任务完成...");
+    let bg_tasks: Vec<_> = {
+        let mut lock = app_state_for_shutdown.background_tasks.lock().unwrap();
+        lock.drain(..).collect()
+    };
+    if !bg_tasks.is_empty() {
+        let timeout = tokio::time::Duration::from_secs(30);
+        match tokio::time::timeout(timeout, futures_util::future::join_all(bg_tasks)).await {
+            Ok(_) => info!("✅ 所有后台任务已完成"),
+            Err(_) => warn!("⚠️ 后台任务等待超时（30 秒），强制退出"),
+        }
+    }
     
     // 保存持久化索引（如果需要）
     info!("💾 保存持久化索引...");
