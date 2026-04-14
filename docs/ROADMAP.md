@@ -2,8 +2,8 @@
 
 > 本文档规划 Obsidian Mirror 的功能演进和版本计划
 
-**当前版本**: v1.4.9 🎉  
-**最后更新**: 2026-04-13
+**当前版本**: v1.4.10 🎉  
+**最后更新**: 2026-04-14
 
 ---
 
@@ -1140,7 +1140,8 @@
 - 完成 v1.4.6（安全修复：Cookie 动态 Secure、Webhook HMAC、graph.js 调试清理）
 - 完成 v1.4.7（搜索优化：重启不重建索引、share_db 前缀查询、搜索结果增强）
 - 完成 v1.4.8（代码质量：clippy 零警告、search_engine 测试、handlers 集成测试）
-- 完成 v1.4.9（架构优化：content_text 移除、内存减半、CURRENT_VERSION 升至 3）
+- ✅ 完成 v1.4.9（架构优化：content_text 移除、内存减半、CURRENT_VERSION 升至 3）🎉
+- ✅ 完成 v1.4.10（代码审计修复：路径遍历 P0、sync_status 状态修复、API 认证 401 JSON）🎉
 
 ### 核心价值主张
 

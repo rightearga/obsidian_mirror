@@ -115,7 +115,7 @@ docker compose up -d
 | GET | `/doc/{path}` | 按路径或标题渲染笔记 |
 | GET | `/tags` | 标签列表页 |
 | GET | `/tag/{name}` | 某标签下的笔记列表 |
-| GET | `/assets/{filename}` | 提供笔记库中的图片/文件 |
+| GET | `/assets/{filename}` | 提供笔记库中的图片/文件（v1.4.10：canonicalize 路径遍历防护） |
 | GET | `/api/search` | Tantivy 搜索（参数：`q`、`sort_by`、`tags`、`folder`、`date_from`、`date_to`） |
 | GET | `/api/graph` | 笔记关系图谱（参数：`note`、`depth` 1–3） |
 | GET | `/api/preview` | 笔记预览 HTML 片段 |
@@ -143,13 +143,14 @@ docker compose up -d
 由 `security.auth_enabled` 控制的可选 JWT 认证：
 
 - `AuthMiddleware` 拦截所有请求；精确匹配公开路径（`/login`、`/api/auth/login`），前缀匹配（`/static/`、`/share/`）
+- 认证失败时：`/api/*` 路径返回 `401 + JSON {"error":"未认证"}`；页面路径重定向到 `/login`（v1.4.10）
 - Token 通过 Cookie（`auth_token`，含 `Secure` + `SameSite::Lax`）或 `Authorization: Bearer` 头传递
 - 用户以 bcrypt 哈希密码存储在 `redb` 中
 - 首次启动若数据库为空，自动创建默认管理员账户
 
 ### 持久化（`src/persistence.rs`）
 
-使用 **redb**（嵌入式键值存储）。`IndexPersistence` 用 **postcard**（二进制格式）序列化所有内存索引。启动时若已保存的 Git commit hash 与当前 HEAD 匹配，则直接恢复索引（跳过全量重处理）。以下情况会使缓存失效：Git commit 变更、`ignore_patterns` 变更、`CURRENT_VERSION`（当前为 **3**）升级。
+使用 **redb**（嵌入式键值存储）。`IndexPersistence` 用 **postcard**（二进制格式）序列化所有内存索引。启动时若已保存的 Git commit hash 与当前 HEAD 匹配，则直接恢复索引（跳过全量重处理）。以下情况会使缓存失效：Git commit 变更、`ignore_patterns` 变更、`CURRENT_VERSION`（当前为 **3**，v1.4.9 升级）升级。
 
 写入策略：笔记按 1000 条/事务分批提交，metadata 最后写入（作为原子完成标记）；中途崩溃时 metadata 未写入，下次启动安全触发全量重建。
 
