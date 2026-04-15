@@ -12,7 +12,7 @@
 
 ## 当前开发状态
 
-**当前版本：1.8.4**
+**当前版本：1.8.5**
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
@@ -158,25 +158,29 @@ cargo test markdown::tests
 
 ---
 
-## 依赖版本速查
+## 依赖版本速查（v1.8.5 更新）
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| actix-web | 4.12.1 | HTTP 服务器与路由 |
-| tokio | 1.49.0 | 异步运行时 |
-| tantivy | 0.25.0 | 全文搜索引擎 |
-| jieba-rs | 0.8.1 | 中文分词 |
-| redb | 3.1.0 | 嵌入式键值数据库 |
+| actix-web | 4.13.0 | HTTP 服务器与路由 |
+| tokio | 1.52.0 | 异步运行时 |
+| tantivy | 0.26.0 | 全文搜索引擎 |
+| jieba-rs | 0.9.0 | 中文分词 |
+| redb | 4.0.0 | 嵌入式键值数据库 |
 | postcard | 1.1.3 | 二进制序列化（持久化） |
-| pulldown-cmark | 0.13.0 | Markdown 渲染（SIMD） |
-| askama | 0.15.4 | 编译期 HTML 模板 |
-| rayon | 1.11 | 并行处理 |
-| jsonwebtoken | 9.3.0 | JWT 生成与验证 |
-| bcrypt | 0.18.0 | 密码哈希 |
+| pulldown-cmark | 0.13.3 | Markdown 渲染（SIMD） |
+| askama | 0.15.6 | 编译期 HTML 模板 |
+| rayon | 1.12.0 | 并行处理 |
+| jsonwebtoken | 10.3.0 | JWT 生成与验证 |
+| bcrypt | 0.19.0 | 密码哈希 |
 | prometheus | 0.14.0 | 指标采集 |
-| ron | 0.12.0 | 配置文件格式 |
-| serde + serde_json | 1.0 | 序列化 |
-| tracing + tracing-subscriber | 0.1 / 0.3 | 结构化日志 |
+| ron | 0.12.1 | 配置文件格式 |
+| serde + serde_json | 1.0.228 / 1.0.149 | 序列化 |
+| tracing + tracing-subscriber | 0.1.44 / 0.3.23 | 结构化日志 |
+| wasm-bindgen | 0.2.118 | Rust ↔ JS 互操作 |
+| hmac + sha2 | 0.13.0 / 0.11.0 | HMAC-SHA256 签名验证 |
+| zip | 8.5.1 | 静态站点 zip 打包 |
+| chrono | 0.4.44 | 日期时间处理 |
 
 ---
 

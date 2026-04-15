@@ -8,6 +8,26 @@
 
 ---
 
+## [v1.8.5] — 2026-04-15
+
+依赖升级验证：确认 v1.8.x 开发周期内自动升级的所有核心依赖兼容性，更新版本文档。
+
+### Changed
+- **依赖版本全面更新**：actix-web 4.12.1→4.13.0、tantivy 0.25.0→0.26.0、redb 3.1.0→4.0.0、tokio 1.49.0→1.52.0、pulldown-cmark 0.13.0→0.13.3、hmac 0.12→0.13.0、sha2 0.10→0.11.0、bcrypt 0.18→0.19.0、jieba-rs 0.8.1→0.9.0、rayon 1.11→1.12.0
+- **`CLAUDE.md` 关键依赖表**：更新至实际当前版本
+- **`.claude/project.md` 依赖版本速查**：更新至实际当前版本
+
+### 注记
+- `cargo-audit` 需手动安装后运行：`cargo install cargo-audit && cargo audit`
+- wasm-bindgen 0.2.118 保持不变（wasm-pack 兼容性约束）
+- hmac 0.13 API 变更（SimpleHmac + KeyInit）已在 v1.8.2 适配
+
+### 测试统计
+- 服务端：125/125 通过
+- WASM：38/38 通过
+
+---
+
 ## [v1.8.4] — 2026-04-15
 
 可视化增强：时间线视图、图谱热力图、洞察 Dashboard 最活跃笔记排行。
