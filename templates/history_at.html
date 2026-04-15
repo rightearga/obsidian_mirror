@@ -28,8 +28,8 @@
     <span class="snapshot-subject">{{ commit.subject }}</span>
   </div>
   <div class="snapshot-actions">
-    <a href="/doc/{{ note_path }}/history" class="btn-snapshot">历史列表</a>
-    <a href="/doc/{{ note_path }}/diff/{{ commit.hash }}" class="btn-snapshot">查看 Diff</a>
+    <a href="/doc/{{ note_path }}/history" class="btn-snapshot" data-no-preview>历史列表</a>
+    <a href="/doc/{{ note_path }}/diff/{{ commit.hash }}" class="btn-snapshot" data-no-preview>查看 Diff</a>
     <a href="/doc/{{ note_path }}" class="btn-snapshot btn-primary">当前版本</a>
   </div>
 </div>

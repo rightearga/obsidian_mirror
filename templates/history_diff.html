@@ -16,8 +16,8 @@
       <span class="diff-subject">{{ commit.subject }}</span>
     </div>
     <div class="diff-actions">
-      <a href="/doc/{{ note_path }}/at/{{ commit.hash }}" class="btn-diff-action">查看快照</a>
-      <a href="/doc/{{ note_path }}/history" class="btn-diff-action">历史列表</a>
+      <a href="/doc/{{ note_path }}/at/{{ commit.hash }}" class="btn-diff-action" data-no-preview>查看快照</a>
+      <a href="/doc/{{ note_path }}/history" class="btn-diff-action" data-no-preview>历史列表</a>
       <a href="/doc/{{ note_path }}" class="btn-diff-action btn-primary">当前版本</a>
     </div>
   </div>

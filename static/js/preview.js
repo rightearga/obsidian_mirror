@@ -61,16 +61,17 @@ const NotePreview = {
      */
     bindEvents() {
         // 使用事件委托监听所有链接
+        // data-no-preview 属性：标记不需要预览的链接（如历史页的查看/Diff 按钮）
         document.addEventListener('mouseover', (e) => {
             const link = e.target.closest('a[href^="/doc/"]');
-            if (link) {
+            if (link && !link.hasAttribute('data-no-preview')) {
                 this.onLinkEnter(link, e);
             }
         });
-        
+
         document.addEventListener('mouseout', (e) => {
             const link = e.target.closest('a[href^="/doc/"]');
-            if (link) {
+            if (link && !link.hasAttribute('data-no-preview')) {
                 this.onLinkLeave(link);
             }
         });
