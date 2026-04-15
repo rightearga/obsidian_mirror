@@ -138,18 +138,78 @@ async function loadGraphData(depth) {
     }
 }
 
-/** 加载全局图谱数据 */
+/** 加载全局图谱数据（v1.8.0：800+ 节点时渐进式加载）
+ *
+ * 阶段一：加载有连接的核心节点（hide_isolated=true），立即渲染
+ * 阶段二：500ms 后追加孤立节点，用动画平滑接入
+ * 节点数 ≤ 800 时直接一次性加载，避免不必要的二次请求
+ */
 async function loadGlobalGraph() {
     showGraphLoading();
     const hideIsolated = document.getElementById('graph-hide-isolated')?.checked ?? false;
 
     try {
-        const url = `/api/graph/global?hide_isolated=${hideIsolated}`;
-        const response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const data = await response.json();
-        graphDataCache = data;
-        renderGraph(data, null); // null = 无中心节点
+        if (hideIsolated) {
+            // 用户主动勾选隐藏孤立节点，直接单次加载
+            const url = `/api/graph/global?hide_isolated=true`;
+            const response = await fetch(url);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            graphDataCache = data;
+            renderGraph(data, null);
+            return;
+        }
+
+        // 阶段一：先加载有连接的节点（快速，核心节点少）
+        const phase1Res  = await fetch('/api/graph/global?hide_isolated=true');
+        if (!phase1Res.ok) throw new Error(`HTTP ${phase1Res.status}`);
+        const phase1Data = await phase1Res.json();
+
+        // 节点数 ≤ 800 → 顺带检查完整数据量，再决定是否需要渐进式
+        graphDataCache = phase1Data;
+        renderGraph(phase1Data, null);
+
+        const coreNodeCount = phase1Data.nodes?.length ?? 0;
+        if (coreNodeCount <= 800) {
+            // 节点不多，立刻加载完整数据（可能有孤立节点）
+            const fullRes  = await fetch('/api/graph/global?hide_isolated=false');
+            if (!fullRes.ok) return;
+            const fullData = await fullRes.json();
+            if ((fullData.nodes?.length ?? 0) > coreNodeCount) {
+                graphDataCache = fullData;
+                renderGraph(fullData, null);
+            }
+            return;
+        }
+
+        // 节点数 > 800：延迟 500ms 后追加孤立节点（渐进式加载）
+        setTimeout(async () => {
+            try {
+                const fullRes  = await fetch('/api/graph/global?hide_isolated=false');
+                if (!fullRes.ok) return;
+                const fullData = await fullRes.json();
+                const isolated = (fullData.nodes || []).filter(n =>
+                    !(graphDataCache.nodes || []).some(e => e.id === n.id)
+                );
+                if (isolated.length === 0 || !graphNetwork) return;
+
+                // 将孤立节点追加到 vis.js DataSet
+                const newNodes = isolated.map(node => ({
+                    id:    node.id,
+                    label: node.label,
+                    title: node.label,
+                    color: { background: '#6b7280', border: '#9ca3af' },
+                    font:  { color: '#cdd6f4', size: 12 },
+                    shape: 'dot',
+                    size:  8,
+                    _tags: node.tags || [],
+                }));
+                graphNetwork.body.data.nodes.add(newNodes);
+                graphDataCache = fullData;
+                console.log(`图谱渐进式加载：追加 ${isolated.length} 个孤立节点`);
+            } catch(_) {}
+        }, 500);
+
     } catch (error) {
         showGraphError(`加载全局图谱失败: ${error.message}`);
     }

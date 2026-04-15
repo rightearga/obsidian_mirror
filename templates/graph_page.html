@@ -209,23 +209,68 @@ function gpSetMode(mode) {
 // ──────────────────────────────────────────────────────────────────────────────
 // 数据加载
 // ──────────────────────────────────────────────────────────────────────────────
+// v1.8.0：渐进式加载阈值（超过此节点数时启用两阶段加载）
+const GP_PROGRESSIVE_THRESHOLD = 800;
+
 async function gpLoad() {
     gpShowLoading();
     try {
-        let url;
-        if (gpMode === 'global') {
-            const hide = document.getElementById('gp-hide-isolated').checked;
-            url = `/api/graph/global?hide_isolated=${hide}`;
-        } else {
+        if (gpMode !== 'global') {
             const noteTitle = document.getElementById('gp-note-input').value.trim();
             if (!noteTitle) { gpHideLoading(); return; }
             const depth = document.getElementById('gp-depth').value;
-            url = `/api/graph?note=${encodeURIComponent(noteTitle)}&depth=${depth}`;
+            const resp = await fetch(`/api/graph?note=${encodeURIComponent(noteTitle)}&depth=${depth}`);
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            gpRender(await resp.json());
+            return;
         }
-        const resp = await fetch(url);
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        const data = await resp.json();
-        gpRender(data);
+
+        const hide = document.getElementById('gp-hide-isolated').checked;
+        if (hide) {
+            // 用户主动隐藏孤立节点 → 单次加载
+            const resp = await fetch('/api/graph/global?hide_isolated=true');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            gpRender(await resp.json());
+            return;
+        }
+
+        // v1.8.0 渐进式加载（与 graph.js 逻辑一致）
+        const phase1 = await fetch('/api/graph/global?hide_isolated=true');
+        if (!phase1.ok) throw new Error(`HTTP ${phase1.status}`);
+        const phase1Data = await phase1.json();
+        gpRender(phase1Data);
+
+        if ((phase1Data.nodes?.length ?? 0) <= GP_PROGRESSIVE_THRESHOLD) {
+            // 节点不多，立刻追加完整数据
+            const full = await fetch('/api/graph/global?hide_isolated=false');
+            if (!full.ok) return;
+            const fullData = await full.json();
+            if ((fullData.nodes?.length ?? 0) > (phase1Data.nodes?.length ?? 0)) gpRender(fullData);
+            return;
+        }
+
+        // 节点数 > 阈值：延迟追加孤立节点
+        setTimeout(async () => {
+            try {
+                const full = await fetch('/api/graph/global?hide_isolated=false');
+                if (!full.ok) return;
+                const fullData = await full.json();
+                const isolated = (fullData.nodes || []).filter(n =>
+                    !(phase1Data.nodes || []).some(e => e.id === n.id)
+                );
+                if (isolated.length === 0 || !gpNetwork) return;
+                const newNodes = isolated.map(n => ({
+                    id: n.id, label: n.label, title: n.label,
+                    color: { background: '#6b7280', border: '#9ca3af' },
+                    font: { color: '#cdd6f4', size: 12 }, shape: 'dot', size: 8,
+                    _tags: n.tags || [],
+                }));
+                gpNetwork.body.data.nodes.add(newNodes);
+                gpRawNodes = gpRawNodes.concat(newNodes);
+                document.getElementById('graph-page-stats').textContent =
+                    `${fullData.nodes.length} 个节点  ${fullData.edges.length} 条边`;
+            } catch(_) {}
+        }, 500);
     } catch(e) {
         gpShowError('加载失败: ' + e.message);
     }

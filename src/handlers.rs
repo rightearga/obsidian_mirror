@@ -144,8 +144,17 @@ pub struct SearchQuery {
     #[serde(default)]
     pub date_from: Option<i64>, // 日期过滤：开始时间（Unix 时间戳秒）
     #[serde(default)]
-    pub date_to: Option<i64>, // 日期过滤：结束时间（Unix 时间戳秒）
+    pub date_to: Option<i64>,   // 日期过滤：结束时间（Unix 时间戳秒）
+    /// 页码，1-based（v1.8.0 分页）
+    #[serde(default = "default_page")]
+    pub page: usize,
+    /// 每页条数，最大 100（v1.8.0 分页）
+    #[serde(default = "default_per_page")]
+    pub per_page: usize,
 }
+
+fn default_page()     -> usize { 1  }
+fn default_per_page() -> usize { 20 }
 
 #[derive(Debug, Deserialize)]
 pub struct GraphQuery {
@@ -261,18 +270,28 @@ pub async fn sync_handler(req: actix_web::HttpRequest, data: web::Data<Arc<AppSt
     }
 }
 
-/// GET /api/search - 搜索笔记（使用 Tantivy 搜索引擎）
+/// GET /api/search — 搜索笔记，支持分页（v1.8.0）
+///
+/// 响应格式：
+/// ```json
+/// {"results":[...],"total":150,"page":1,"per_page":20,"total_pages":8}
+/// ```
+/// `page` 和 `per_page` 默认值分别为 1 和 20。空查询直接返回空结果页。
 #[get("/api/search")]
 pub async fn search_handler(
     query: web::Query<SearchQuery>,
     data: web::Data<Arc<AppState>>,
 ) -> impl Responder {
+    use crate::search_engine::SearchPage;
+
     let search_term = query.q.trim();
-    
+
     if search_term.is_empty() && query.tags.is_none() && query.folder.is_none() {
-        return HttpResponse::Ok().json(Vec::<crate::search_engine::SearchResult>::new());
+        return HttpResponse::Ok().json(SearchPage {
+            results: vec![], total: 0, page: 1, per_page: query.per_page, total_pages: 0,
+        });
     }
-    
+
     // 解析标签参数（逗号分隔）
     let tags = query.tags.as_ref().and_then(|t| {
         let tag_list: Vec<String> = t
@@ -280,24 +299,21 @@ pub async fn search_handler(
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect();
-        if tag_list.is_empty() {
-            None
-        } else {
-            Some(tag_list)
-        }
+        if tag_list.is_empty() { None } else { Some(tag_list) }
     });
-    
-    // 使用 Tantivy 进行高级搜索
-    match data.search_engine.advanced_search(
+
+    // v1.8.0：使用分页搜索
+    match data.search_engine.advanced_search_paginated(
         search_term,
-        50,
+        query.page,
+        query.per_page,
         query.sort_by,
         tags,
         query.folder.clone(),
         query.date_from,
         query.date_to,
     ) {
-        Ok(results) => HttpResponse::Ok().json(results),
+        Ok(page) => HttpResponse::Ok().json(page),
         Err(e) => {
             error!("搜索失败: {:?}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({

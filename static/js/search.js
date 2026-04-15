@@ -15,6 +15,14 @@ let isSearchModalOpen = false;
 let searchModal, searchModalInput, searchModalResults, searchModalClear;
 let currentSortBy = 'relevance'; // 当前排序方式：relevance 或 modified
 
+// v1.8.0 分页状态
+let searchCurrentPage   = 1;
+let searchTotalPages    = 1;
+let searchTotalResults  = 0;
+let searchLastQuery     = '';   // 上次搜索的 query 字符串
+let searchLastFilters   = null; // 上次搜索的 filters 对象
+let searchLoadingMore   = false;
+
 // ===== 搜索历史管理 =====
 
 /**
@@ -361,97 +369,84 @@ function changeSearchSort(sortBy) {
  */
 async function performModalSearch(query) {
     if (!query && !hasActiveFilters()) {
-        displaySearchHistory(); // 显示历史记录而不是空状态
+        displaySearchHistory();
         return;
     }
+    if (query) saveSearchHistory(query);
 
-    // 保存搜索历史
-    if (query) {
-        saveSearchHistory(query);
-    }
+    // 重置分页状态（全新搜索）
+    searchCurrentPage  = 1;
+    searchLastQuery    = query || '';
+    searchLastFilters  = getActiveFilters();
+    searchLoadingMore  = false;
 
-    // 显示加载状态
     searchModalResults.innerHTML = '<div class="search-modal-loading">搜索中...</div>';
+    await _fetchAndRenderSearch(1, false);
+}
 
+/**
+ * 执行搜索并渲染结果（内部方法，支持分页）
+ * @param {number} page      - 要加载的页码（1-based）
+ * @param {boolean} append   - true=追加到现有列表，false=替换
+ */
+async function _fetchAndRenderSearch(page, append) {
     try {
-        // 构建搜索 URL，包含过滤参数
         const searchParams = new URLSearchParams({
-            q: query || '',
-            sort_by: currentSortBy
+            q:        searchLastQuery,
+            sort_by:  currentSortBy,
+            page:     page,
+            per_page: 20,
         });
-
-        // 添加过滤参数
-        const filters = getActiveFilters();
-        if (filters.tags) {
-            searchParams.append('tags', filters.tags);
-        }
-        if (filters.folder) {
-            searchParams.append('folder', filters.folder);
-        }
-        if (filters.date_from) {
-            searchParams.append('date_from', filters.date_from);
-        }
-        if (filters.date_to) {
-            searchParams.append('date_to', filters.date_to);
+        if (searchLastFilters) {
+            if (searchLastFilters.tags)      searchParams.append('tags',      searchLastFilters.tags);
+            if (searchLastFilters.folder)    searchParams.append('folder',    searchLastFilters.folder);
+            if (searchLastFilters.date_from) searchParams.append('date_from', searchLastFilters.date_from);
+            if (searchLastFilters.date_to)   searchParams.append('date_to',   searchLastFilters.date_to);
         }
 
         const response = await fetch(`/api/search?${searchParams.toString()}`);
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('搜索响应错误:', response.status, errorText);
-            throw new Error(`搜索请求失败: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-        const results = await response.json();
-        displayModalSearchResults(results, query);
+        const data = await response.json();
+        // v1.8.0：响应格式为 {results, total, page, per_page, total_pages}
+        const results    = data.results    ?? data;    // 向后兼容旧格式（纯数组）
+        const total      = data.total      ?? results.length;
+        const totalPages = data.total_pages ?? 1;
+
+        searchCurrentPage  = page;
+        searchTotalPages   = totalPages;
+        searchTotalResults = total;
+
+        if (append) {
+            _appendSearchResults(results, searchLastQuery);
+        } else {
+            displayModalSearchResults(results, searchLastQuery, total, totalPages);
+        }
+        searchLoadingMore = false;
     } catch (error) {
         console.error('搜索错误:', error);
-        searchModalResults.innerHTML = `<div class="search-modal-no-results">搜索出错: ${error.message}</div>`;
+        if (!append) {
+            searchModalResults.innerHTML = `<div class="search-modal-no-results">搜索出错: ${error.message}</div>`;
+        }
+        searchLoadingMore = false;
     }
 }
 
 /**
- * 显示搜索结果
+ * 构建单条搜索结果的 HTML 字符串
  */
-function displayModalSearchResults(results, query) {
-    currentSearchResults = results;
-    selectedResultIndex = -1;
-
-    if (results.length === 0) {
-        searchModalResults.innerHTML = `
-            <div class="search-modal-no-results">
-                <p>未找到匹配的笔记</p>
-                <p style="font-size: 12px; margin-top: 8px; color: var(--text-faint);">尝试使用不同的关键词</p>
-            </div>
-        `;
-        return;
-    }
-
-    const queryLower = query.toLowerCase();
-    let html = '';
-
-    results.forEach((result, index) => {
-        const titleHtml = highlightText(result.title, queryLower);
-        const snippetHtml = highlightText(result.snippet, queryLower);
-
-        // 路径：显示文件夹部分（去掉文件名后缀）
-        const pathParts = (result.path || '').split('/');
-        const fileName = pathParts.pop().replace(/\.md$/, '');
-        const folderPath = pathParts.join(' / ');
-
-        // 标签：最多显示 3 个
-        const tags = (result.tags || []).slice(0, 3);
-        const tagsHtml = tags.length > 0
-            ? `<span class="result-tags">${tags.map(t => `<span class="result-tag">#${escapeHtml(t)}</span>`).join('')}</span>`
-            : '';
-
-        // 修改时间：相对时间
-        const mtimeHtml = result.mtime
-            ? `<span class="result-mtime">${formatRelativeTime(result.mtime)}</span>`
-            : '';
-
-        html += `
-            <a href="/doc/${encodeURIComponent(result.path)}"
+function _buildResultHtml(result, index, queryLower) {
+    const titleHtml   = highlightText(result.title, queryLower);
+    const snippetHtml = highlightText(result.snippet, queryLower);
+    const pathParts   = (result.path || '').split('/');
+    pathParts.pop();
+    const folderPath  = pathParts.join(' / ');
+    const tags        = (result.tags || []).slice(0, 3);
+    const tagsHtml    = tags.length > 0
+        ? `<span class="result-tags">${tags.map(t => `<span class="result-tag">#${escapeHtml(t)}</span>`).join('')}</span>`
+        : '';
+    const mtimeHtml   = result.mtime ? `<span class="result-mtime">${formatRelativeTime(result.mtime)}</span>` : '';
+    return `<a href="/doc/${encodeURIComponent(result.path)}"
                class="search-modal-result-item"
                data-index="${index}"
                onmouseenter="highlightModalSearchResult(${index})"
@@ -460,17 +455,110 @@ function displayModalSearchResults(results, query) {
                 ${folderPath ? `<div class="result-path">${escapeHtml(folderPath)}</div>` : ''}
                 <div class="search-modal-result-snippet">${snippetHtml}</div>
                 <div class="result-meta">${tagsHtml}${mtimeHtml}</div>
-            </a>
-        `;
+            </a>`;
+}
+
+/**
+ * 显示搜索结果（替换模式）
+ * @param {Array}  results     - 当前页结果列表
+ * @param {string} query       - 搜索词
+ * @param {number} total       - 命中总数
+ * @param {number} totalPages  - 总页数
+ */
+function displayModalSearchResults(results, query, total, totalPages) {
+    currentSearchResults = results;
+    selectedResultIndex  = -1;
+
+    if (results.length === 0) {
+        searchModalResults.innerHTML = `
+            <div class="search-modal-no-results">
+                <p>未找到匹配的笔记</p>
+                <p style="font-size: 12px; margin-top: 8px; color: var(--text-faint);">尝试使用不同的关键词</p>
+            </div>`;
+        return;
+    }
+
+    const queryLower = (query || '').toLowerCase();
+    let html = '';
+
+    // 结果总数提示（v1.8.0）
+    if (total > 0) {
+        html += `<div class="search-result-summary">共 ${total} 条结果${total > results.length ? `，当前显示前 ${results.length} 条` : ''}</div>`;
+    }
+
+    results.forEach((result, index) => {
+        html += _buildResultHtml(result, index, queryLower);
     });
+
+    // "加载更多"按钮（v1.8.0 分页）
+    if (totalPages > 1) {
+        html += _buildLoadMoreBtn(totalPages);
+    }
 
     searchModalResults.innerHTML = html;
 
-    // 为每个结果项设置错峰进入动画延迟（最多 8 项，之后延迟不再增加避免等待过长）
-    const items = searchModalResults.querySelectorAll('.search-modal-result-item');
-    items.forEach((item, i) => {
+    // 错峰动画
+    searchModalResults.querySelectorAll('.search-modal-result-item').forEach((item, i) => {
         item.style.animationDelay = Math.min(i, 7) * 20 + 'ms';
     });
+}
+
+/**
+ * 追加更多搜索结果到现有列表（"加载更多"）
+ */
+function _appendSearchResults(results, query) {
+    if (!results || results.length === 0) return;
+    const queryLower   = (query || '').toLowerCase();
+    const startIndex   = currentSearchResults.length;
+    currentSearchResults = currentSearchResults.concat(results);
+
+    // 移除旧的"加载更多"按钮和总数提示（如有）
+    const oldBtn     = searchModalResults.querySelector('.search-load-more-btn');
+    const oldSummary = searchModalResults.querySelector('.search-result-summary');
+    if (oldBtn)     oldBtn.remove();
+
+    let html = '';
+    results.forEach((result, i) => {
+        html += _buildResultHtml(result, startIndex + i, queryLower);
+    });
+
+    // 如果还有更多页，重新添加按钮
+    if (searchCurrentPage < searchTotalPages) {
+        html += _buildLoadMoreBtn(searchTotalPages);
+    }
+
+    searchModalResults.insertAdjacentHTML('beforeend', html);
+
+    // 更新总数
+    if (oldSummary) {
+        oldSummary.textContent = `共 ${searchTotalResults} 条结果，已显示 ${currentSearchResults.length} 条`;
+    }
+}
+
+/**
+ * 构建"加载更多"按钮的 HTML
+ */
+function _buildLoadMoreBtn(totalPages) {
+    return `<button class="search-load-more-btn"
+        onclick="loadMoreSearchResults()"
+        style="display:block;width:100%;padding:10px;margin-top:8px;
+               background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border-color,#313244);
+               border-radius:6px;color:var(--text-muted,#6c7086);cursor:pointer;font-size:0.85rem;">
+        加载更多（第 ${searchCurrentPage}/${totalPages} 页）
+    </button>`;
+}
+
+/**
+ * 加载下一页搜索结果（"加载更多"按钮触发）
+ */
+async function loadMoreSearchResults() {
+    if (searchLoadingMore || searchCurrentPage >= searchTotalPages) return;
+    searchLoadingMore = true;
+
+    const btn = searchModalResults.querySelector('.search-load-more-btn');
+    if (btn) btn.textContent = '加载中...';
+
+    await _fetchAndRenderSearch(searchCurrentPage + 1, true);
 }
 
 /**

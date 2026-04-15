@@ -73,6 +73,12 @@ body.sidebar-collapsed .sidebar-resizer {
 /* Sidebar Tree */
 .tree-item {
     display: block;
+    /* v1.8.0 虚拟渲染：浏览器跳过屏幕外条目的 layout/paint/composite，
+       显著降低 5000+ 文件时侧边栏初始化耗时和滚动帧率消耗。
+       contain-intrinsic-size 为浏览器提供尺寸估算（28px 为单行高度），
+       保证滚动条比例和跳转位置正确。 */
+    content-visibility: auto;
+    contain-intrinsic-size: 0 28px;
 }
 
 .tree-row {

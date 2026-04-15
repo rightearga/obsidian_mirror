@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::SystemTime;
-use tantivy::collector::TopDocs;
+use tantivy::collector::{Count, TopDocs};
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
@@ -21,6 +21,23 @@ pub enum SortBy {
     Modified,  // 按修改时间排序
 }
 
+
+/// 分页搜索响应（v1.8.0）
+///
+/// `search_handler` 始终返回此结构，前端按需使用 `page`/`total_pages` 渲染"加载更多"。
+#[derive(Debug, Serialize, Clone)]
+pub struct SearchPage {
+    /// 当前页的搜索结果列表
+    pub results:     Vec<SearchResult>,
+    /// 满足查询条件的结果总数
+    pub total:       usize,
+    /// 当前页码（1-based）
+    pub page:        usize,
+    /// 每页条数
+    pub per_page:    usize,
+    /// 总页数
+    pub total_pages: usize,
+}
 
 // 搜索结果
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -456,6 +473,149 @@ impl SearchEngine {
         Ok(results)
     }
 
+    /// 分页搜索（v1.8.0）
+    ///
+    /// 在 `advanced_search` 基础上支持分页，返回 `SearchPage`。
+    /// - `page`：1-based 页码；
+    /// - `per_page`：每页条数，超过 100 自动截断为 100。
+    /// - `SortBy::Relevance`：由 Tantivy 原生 offset/limit 完成，一次索引扫描同时获得 total。
+    /// - `SortBy::Modified`：先取相关度最高的 5000 条，Rust 层排序后分页。
+    #[allow(clippy::too_many_arguments)]
+    pub fn advanced_search_paginated(
+        &self,
+        query_str: &str,
+        page:      usize,
+        per_page:  usize,
+        sort_by:   SortBy,
+        tags:      Option<Vec<String>>,
+        folder:    Option<String>,
+        date_from: Option<i64>,
+        date_to:   Option<i64>,
+    ) -> Result<SearchPage> {
+        let per_page = per_page.clamp(1, 100);
+        let page     = page.max(1);
+        let offset   = (page - 1) * per_page;
+
+        let searcher = self.reader.searcher();
+        let query_parser =
+            QueryParser::for_index(&self.index, vec![self.title_field, self.content_field]);
+
+        // 构造文本查询（与 advanced_search 相同逻辑）
+        use tantivy::query::{AllQuery, BooleanQuery, Occur, TermQuery};
+        use tantivy::Term;
+
+        let text_query = if !query_str.trim().is_empty() {
+            match query_parser.parse_query(query_str) {
+                Ok(q) => Some(q),
+                Err(_) => {
+                    let escaped = query_str.replace(['\"', '\\'], "");
+                    query_parser.parse_query(&escaped).ok()
+                }
+            }
+        } else {
+            None
+        };
+
+        let mut subqueries: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+        if let Some(q) = text_query {
+            subqueries.push((Occur::Must, q));
+        } else {
+            subqueries.push((Occur::Must, Box::new(AllQuery)));
+        }
+        if let Some(tag_list) = tags
+            && !tag_list.is_empty() {
+                let mut tq: Vec<(Occur, Box<dyn tantivy::query::Query>)> = Vec::new();
+                for tag in tag_list {
+                    let term = Term::from_field_text(self.tags_field, &tag);
+                    tq.push((Occur::Should, Box::new(TermQuery::new(term, Default::default()))));
+                }
+                subqueries.push((Occur::Must, Box::new(BooleanQuery::new(tq))));
+            }
+        if let Some(folder_path) = folder
+            && !folder_path.is_empty() {
+                let term = Term::from_field_text(self.folder_field, &folder_path);
+                subqueries.push((Occur::Must, Box::new(TermQuery::new(term, Default::default()))));
+            }
+        if date_from.is_some() || date_to.is_some() {
+            use std::ops::Bound;
+            use tantivy::query::RangeQuery;
+            let lower = match date_from {
+                Some(ts) => Bound::Included(Term::from_field_i64(self.mtime_field, ts)),
+                None     => Bound::Unbounded,
+            };
+            let upper = match date_to {
+                Some(ts) => Bound::Included(Term::from_field_i64(self.mtime_field, ts)),
+                None     => Bound::Unbounded,
+            };
+            subqueries.push((Occur::Must, Box::new(RangeQuery::new(lower, upper))));
+        }
+        let final_query = BooleanQuery::new(subqueries);
+
+        // 获取结果总数（独立 Count 查询，速度很快）
+        let total: usize = searcher.search(&final_query, &Count)?;
+
+        // 根据排序方式取结果
+        let page_results: Vec<SearchResult> = match sort_by {
+            SortBy::Relevance => {
+                // Tantivy 原生 offset/limit，效率最高
+                let top_docs = searcher.search(
+                    &final_query,
+                    &TopDocs::with_limit(per_page).and_offset(offset).order_by_score(),
+                )?;
+                self.top_docs_to_results(top_docs, query_str, &searcher)?
+            }
+            SortBy::Modified => {
+                // 取相关度最高的 5000 条后 Rust 层排序、分页
+                let fetch = (offset + per_page).max(5000).min(total);
+                let top_docs = searcher.search(
+                    &final_query,
+                    &TopDocs::with_limit(fetch).order_by_score(),
+                )?;
+                let mut all = self.top_docs_to_results(top_docs, query_str, &searcher)?;
+                all.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+                all.into_iter().skip(offset).take(per_page).collect()
+            }
+        };
+
+        let total_pages = (total + per_page - 1) / per_page.max(1);
+        Ok(SearchPage { results: page_results, total, page, per_page, total_pages })
+    }
+
+    /// 将 Tantivy top_docs 转为 `Vec<SearchResult>`（内部辅助方法）
+    fn top_docs_to_results(
+        &self,
+        top_docs: Vec<(f32, tantivy::DocAddress)>,
+        query_str: &str,
+        searcher: &tantivy::Searcher,
+    ) -> Result<Vec<SearchResult>> {
+        let mut results = Vec::with_capacity(top_docs.len());
+        for (score, doc_address) in top_docs {
+            let doc: TantivyDocument = searcher.doc(doc_address)?;
+            let mut title   = String::new();
+            let mut path    = String::new();
+            let mut content = String::new();
+            let mut mtime   = 0i64;
+            let mut tags    = Vec::new();
+            for (field, value) in doc.field_values() {
+                if field == self.title_field {
+                    if let Some(t) = value.as_str() { title = t.to_string(); }
+                } else if field == self.path_field {
+                    if let Some(p) = value.as_str() { path = p.to_string(); }
+                } else if field == self.content_field {
+                    if let Some(c) = value.as_str() { content = c.to_string(); }
+                } else if field == self.mtime_field {
+                    if let Some(m) = value.as_i64() { mtime = m; }
+                } else if field == self.tags_field {
+                    if let Some(t) = value.as_str() { tags.push(t.to_string()); }
+                }
+            }
+            results.push(SearchResult {
+                title, path, snippet: generate_snippet(&content, query_str, 150), score, mtime, tags,
+            });
+        }
+        Ok(results)
+    }
+
     /// 强制刷新 IndexReader 缓存（测试/基准测试使用，确保 rebuild_index 后立即可搜索）
     pub fn reload_reader(&self) {
         self.reader.reload().expect("reload reader failed");
@@ -826,5 +986,82 @@ mod tests {
             !SearchEngine::schema_matches_pub(&schema1, &schema2),
             "字段类型不同时 schema_matches 应返回 false"
         );
+    }
+
+    // ── v1.8.0 测试：搜索分页 ──────────────────────────────────────────────────
+
+    /// 分页搜索：第一页应返回指定 per_page 数量的结果
+    #[test]
+    fn test_paginated_search_first_page() {
+        let (engine, _dir) = make_engine();
+        // 建立 25 条文档
+        let docs: Vec<_> = (1..=25)
+            .map(|i| make_doc(&format!("note{i}.md"), &format!("笔记 {i}"), "共同内容", 0, vec![]))
+            .collect();
+        engine.rebuild_index(docs).unwrap();
+        engine.reload_reader();
+
+        let page = engine.advanced_search_paginated(
+            "共同内容", 1, 10, SortBy::Relevance, None, None, None, None
+        ).unwrap();
+
+        assert_eq!(page.page,      1,  "页码应为 1");
+        assert_eq!(page.per_page,  10, "每页条数应为 10");
+        assert_eq!(page.total,     25, "总数应为 25");
+        assert_eq!(page.total_pages, 3, "总页数应为 3（25/10 = 3 页）");
+        assert_eq!(page.results.len(), 10, "第一页应有 10 条结果");
+    }
+
+    /// 分页搜索：最后一页结果数量可能少于 per_page
+    #[test]
+    fn test_paginated_search_last_page() {
+        let (engine, _dir) = make_engine();
+        let docs: Vec<_> = (1..=25)
+            .map(|i| make_doc(&format!("n{i}.md"), &format!("文档 {i}"), "测试", 0, vec![]))
+            .collect();
+        engine.rebuild_index(docs).unwrap();
+        engine.reload_reader();
+
+        let page = engine.advanced_search_paginated(
+            "测试", 3, 10, SortBy::Relevance, None, None, None, None
+        ).unwrap();
+
+        assert_eq!(page.page,         3, "页码应为 3");
+        assert_eq!(page.total,        25);
+        assert!(page.results.len() <= 10, "最后一页结果数 ≤ per_page");
+        assert_eq!(page.results.len(),  5, "第 3 页应有 5 条结果（25 - 20）");
+    }
+
+    /// 分页搜索：超出范围的页码应返回空结果
+    #[test]
+    fn test_paginated_search_out_of_range() {
+        let (engine, _dir) = make_engine();
+        engine.rebuild_index(vec![
+            make_doc("a.md", "笔记甲", "内容", 0, vec![]),
+        ]).unwrap();
+        engine.reload_reader();
+
+        let page = engine.advanced_search_paginated(
+            "内容", 99, 10, SortBy::Relevance, None, None, None, None
+        ).unwrap();
+
+        assert_eq!(page.total,          1, "总数仍为 1");
+        assert_eq!(page.results.len(),  0, "页码超出范围时结果为空");
+    }
+
+    /// per_page 超过最大值 100 时应被截断
+    #[test]
+    fn test_paginated_search_per_page_capped() {
+        let (engine, _dir) = make_engine();
+        engine.rebuild_index(vec![
+            make_doc("x.md", "测试", "内容", 0, vec![]),
+        ]).unwrap();
+        engine.reload_reader();
+
+        let page = engine.advanced_search_paginated(
+            "内容", 1, 999, SortBy::Relevance, None, None, None, None
+        ).unwrap();
+
+        assert_eq!(page.per_page, 100, "per_page 应被截断为 100");
     }
 }

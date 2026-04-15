@@ -8,6 +8,23 @@
 
 ---
 
+## [v1.8.0] — 2026-04-15
+
+规模化性能优化：侧边栏虚拟渲染、搜索结果分页、全局图谱渐进式加载。
+
+### Added
+- **搜索结果分页**（`src/search_engine.rs`、`src/handlers.rs`）：`/api/search` 新增 `page`（默认 1）和 `per_page`（默认 20，最大 100）参数；响应格式升级为 `{results, total, page, per_page, total_pages}`；新增 `advanced_search_paginated` 方法（`SortBy::Relevance` 使用 Tantivy 原生 offset，`SortBy::Modified` Rust 层排序后分页）
+- **搜索"加载更多"**（`static/js/search.js`）：结果底部加"加载更多"按钮（当 total_pages > 1），点击追加下一页结果；显示命中总数
+- **全局图谱渐进式加载**（`static/js/graph.js`、`templates/graph_page.html`）：超过 800 节点时先渲染有连接的核心节点，500ms 后追加孤立节点；节点数 ≤ 800 时直接全量加载
+
+### Changed
+- **侧边栏虚拟渲染**（`static/css/sidebar.css`、`static/js/init.js`）：`.tree-item` 加 `content-visibility: auto; contain-intrinsic-size: 0 28px`，浏览器自动跳过屏幕外元素的 layout/paint；大型文件树（>500 节点）通过 `requestIdleCallback` 延迟初始化，避免阻塞首屏
+
+### 测试统计
+- 服务端：119/119 通过（新增 4 个分页测试）
+
+---
+
 ## [v1.7.4] — 2026-04-15
 
 多仓库支持：单实例管理多个 Git 仓库，路由自动按仓库命名空间化。
