@@ -1,0 +1,12 @@
+# cargo-audit 项目级配置（.cargo/audit.toml）
+# 此文件被 cargo-audit CLI 和 Zed cargo-appraiser 读取
+
+[advisories]
+ignore = [
+    # RUSTSEC-2023-0071：rsa 0.9.10 Marvin Attack
+    # 来源：jsonwebtoken 间接依赖；项目仅使用 HS256，RSA 路径不执行；无修复版本
+    "RUSTSEC-2023-0071",
+    # RUSTSEC-2026-0097：rand unsound（自定义 logger + rand::rng()）
+    # 来源：jsonwebtoken -> rsa -> rand；RSA 路径不执行；无修复版本
+    "RUSTSEC-2026-0097",
+]

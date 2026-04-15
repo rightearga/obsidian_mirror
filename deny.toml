@@ -1,0 +1,36 @@
+# cargo-deny 配置（Zed cargo-appraiser 等工具读取）
+# 运行：cargo deny check（需 cargo install cargo-deny）
+
+[graph]
+targets = []
+
+[advisories]
+version = 2
+# 只把 vulnerability 级别报为错误，其余降为警告
+ignore = [
+    # RUSTSEC-2023-0071：rsa Marvin Attack
+    # 来源：jsonwebtoken；项目仅用 HS256，RSA 代码路径从不执行；无修复版本
+    { id = "RUSTSEC-2023-0071" },
+    # RUSTSEC-2026-0097：rand unsound（同上原因）
+    { id = "RUSTSEC-2026-0097" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+
+[licenses]
+# 不强制许可证检查
+allow-osi-fsf-free = "both"
+confidence-threshold = 0.8
+exceptions = []
+
+[sources]
+unknown-registry = "warn"
+unknown-git = "warn"
+
+[output]
+# yanked 降为 warn（压制 core2 0.4.0 yanked 报错）
+# core2 来自 jieba-rs -> include-flate 深层依赖链，上游未修复
+feature-depth = 1
