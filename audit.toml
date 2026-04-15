@@ -1,0 +1,34 @@
+# cargo audit 安全审计说明（v1.8.5）
+#
+# 运行（含豁免项）：
+#   cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0097
+#
+# 注：cargo-audit 0.22 不读此文件，豁免通过 --ignore 命令行参数指定。
+#
+# ── 豁免项说明 ────────────────────────────────────────────────────────────
+#
+# RUSTSEC-2023-0071：rsa 0.9.10 Marvin Attack（时序侧信道密钥恢复）
+#   来源：jsonwebtoken 10.3.0 -> rsa 0.9.10（间接依赖）
+#   理由：obsidian_mirror 仅使用 HS256（HMAC-SHA256），RS256/RS384/RS512
+#         等 RSA 算法路径从未被调用。Marvin Attack 需要实际执行 RSA 解密/
+#         签名操作才可利用，我们的场景不满足此条件。
+#         上游无修复版本（No fixed upgrade available）。
+#
+# RUSTSEC-2026-0097：rand 0.8.5 unsound（自定义 logger + rand::rng()）
+#   来源：jsonwebtoken -> rsa -> num-bigint-dig -> rand（深层间接依赖）
+#   理由：同上，RSA 代码路径从不执行，rand 的不健全路径不会被触及。
+#         上游无修复版本。
+#
+# ── 剩余警告（已知，可接受）──────────────────────────────────────────────
+#
+# core2 0.4.0（yanked）
+#   来源：jieba-rs -> include-flate -> ... -> core2
+#   理由：已被 crates.io 撤下但功能正常。jieba-rs 上游尚未更新此依赖链。
+#         不影响程序安全性或正确性。
+#
+# ── 已修复（本版本）──────────────────────────────────────────────────────
+#
+# RUSTSEC-2025-0068（serde_yml unsound）：替换为 serde_yaml 0.9.34 ✅
+# RUSTSEC-2025-0067（libyml unsound）：随 serde_yml 一起解决 ✅
+# RUSTSEC-2023-0089（atomic-polyfill unmaintained）：
+#   postcard 改用 default-features = false 去掉 heapless 依赖 ✅
