@@ -224,24 +224,29 @@ const GP_PALETTE = [
 // ──────────────────────────────────────────────────────────────────────────────
 // 初始化
 // ──────────────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // v1.9.4：检查 URL 中的 since/until 参数（来自时间线页面跳转）
     const _params = new URLSearchParams(location.search);
     const _since  = _params.get('since');  // "YYYY-MM-DD"
     const _until  = _params.get('until');  // "YYYY-MM-DD"
     if (_since || _until) {
-        // 设置为全局模式，加载完成后按时间范围过滤
+        // 设置为全局模式
         gpMode = 'global';
         document.getElementById('gp-mode-global').classList.add('active');
         document.getElementById('gp-mode-note').classList.remove('active');
-        // 显示时间范围提示
+        // 预留提示栏（稍后由 gpApplyTimeFilter 填充统计数字）
         const hint = document.createElement('div');
+        hint.id = 'gp-time-hint';
         hint.style.cssText = 'font-size:0.8rem;color:var(--text-muted,#6c7086);padding:4px 12px;background:var(--bg-secondary,#1e1e2e);border-bottom:1px solid var(--border-color,#313244);';
-        hint.textContent = `🕐 时间过滤：${_since || '…'} 至 ${_until || '…'}（非范围内节点半透明）`;
+        hint.textContent = `🕐 时间过滤：${_since || '…'} 至 ${_until || '…'}（加载中…）`;
         document.querySelector('.markdown-body')?.prepend(hint);
     }
-    // 初始加载全局图谱
-    gpLoad();
+    // 初始加载全局图谱（加载完毕后再执行时间过滤）
+    await gpLoad();
+    // 时间线跳转：用 /api/timeline 数据（frontmatter date）做准确的月份过滤
+    if (_since || _until) {
+        gpApplyTimeFilter(_since, _until);
+    }
     // 预取标题列表用于自动补全
     gpFetchTitles();
     // URL 参数：?note=xxx&depth=2 直接打开笔记子图
@@ -438,18 +443,7 @@ function gpRender(data) {
     document.getElementById('graph-page-stats').textContent =
         `${data.nodes.length} 个节点  ${data.edges.length} 条边`;
 
-    // v1.9.4：URL since/until 时间过滤（来自时间线页面跳转）
-    const _sp    = new URLSearchParams(location.search);
-    const _since = _sp.get('since');
-    const _until = _sp.get('until');
-    if ((_since || _until) && gpNetwork) {
-        const sinceTs = _since ? new Date(_since).getTime() / 1000 : 0;
-        const untilTs = _until ? new Date(_until + 'T23:59:59').getTime() / 1000 : Infinity;
-        const dimmed = gpRawNodes
-            .filter(n => n._mtime < sinceTs || n._mtime > untilTs)
-            .map(n => ({ id: n.id, color: { background: '#2d2d3a', border: '#3a3a4a' }, opacity: 0.3 }));
-        if (dimmed.length > 0) gpNetwork.body.data.nodes.update(dimmed);
-    }
+    // 时间过滤由 DOMContentLoaded 在 gpLoad() 完成后调用 gpApplyTimeFilter()，此处不再处理
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -706,6 +700,69 @@ function gpShowError(msg) {
     const el = document.getElementById('graph-page-error');
     el.textContent = msg;
     el.style.display = 'flex';
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.9.4：时间线跳转时的月份过滤（从 /api/timeline 获取 frontmatter date）
+// 使用 frontmatter date（而非 fs mtime）确保和时间线页面的分组逻辑一致。
+// ──────────────────────────────────────────────────────────────────────────────
+async function gpApplyTimeFilter(since, until) {
+    if (!gpNetwork) return;
+
+    // 用时间线 API 获取每篇笔记的准确日期（frontmatter date 优先）
+    let inRangePaths = null;
+    try {
+        const resp = await fetch('/api/timeline');
+        if (resp.ok) {
+            const timelineNotes = await resp.json();
+            inRangePaths = new Set(
+                timelineNotes
+                    .filter(n => {
+                        const d = n.date || '';
+                        return (!since || d >= since) && (!until || d <= until);
+                    })
+                    .map(n => n.path)
+            );
+        }
+    } catch(_) {}
+
+    // 若 API 失败，退回到 mtime 比较
+    if (!inRangePaths) {
+        const sinceTs = since ? new Date(since).getTime() / 1000 : 0;
+        const untilTs = until ? (new Date(until).getTime() / 1000 + 86399) : Infinity;
+        inRangePaths = new Set(
+            gpRawNodes
+                .filter(n => n._mtime > 0 && n._mtime >= sinceTs && n._mtime <= untilTs)
+                .map(n => n.id)
+        );
+    }
+
+    const inRange  = gpRawNodes.filter(n =>  inRangePaths.has(n.id));
+    const outRange = gpRawNodes.filter(n => !inRangePaths.has(n.id));
+
+    // 范围外：灰色半透明
+    if (outRange.length > 0) {
+        gpNetwork.body.data.nodes.update(outRange.map(n => ({
+            id:      n.id,
+            color:   { background: '#404055', border: '#505065' },
+            opacity: 0.15,
+            font:    { color: '#555577' },
+        })));
+    }
+    // 范围内：加金色边框突出显示
+    if (inRange.length > 0) {
+        gpNetwork.body.data.nodes.update(inRange.map(n => ({
+            id:          n.id,
+            color:       { ...n.color, border: '#f6c90e' },
+            borderWidth: 2.5,
+        })));
+    }
+
+    // 更新提示栏统计
+    const hint = document.getElementById('gp-time-hint');
+    if (hint) {
+        hint.textContent = `🕐 时间过滤：${since || '…'} 至 ${until || '…'}（${inRange.length} 篇在范围内，${outRange.length} 篇已淡化）`;
+    }
 }
 </script>
 {% endblock %}
