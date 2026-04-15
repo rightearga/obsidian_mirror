@@ -8,6 +8,63 @@ fn note_mtime_secs(note: &Note) -> i64 {
     note.mtime.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// 用标准 PageRank 算法计算节点影响力分数（v1.9.0）
+///
+/// # 参数
+/// * `node_ids` - 所有节点 ID 列表
+/// * `edges`    - 边列表 `(from_id, to_id)` 引用切片
+/// * `iters`    - 迭代次数（建议 20）
+/// * `damping`  - 阻尼因子（建议 0.85）
+///
+/// # 返回
+/// 节点 ID → PageRank 分数（归一化到 0.0–1.0）
+fn compute_pagerank(
+    node_ids: &[String],
+    edges:    &[(String, String)],
+    iters:    u32,
+    damping:  f32,
+) -> HashMap<String, f32> {
+    let n = node_ids.len();
+    if n == 0 { return HashMap::new(); }
+
+    // 初始分数均匀分配
+    let init = 1.0_f32 / n as f32;
+    let mut scores: HashMap<&str, f32> = node_ids.iter().map(|id| (id.as_str(), init)).collect();
+
+    // 构建入链映射和出度映射
+    let mut in_links: HashMap<&str, Vec<&str>> = node_ids.iter().map(|id| (id.as_str(), vec![])).collect();
+    let mut out_deg:  HashMap<&str, usize>      = node_ids.iter().map(|id| (id.as_str(), 0usize)).collect();
+    for (from, to) in edges {
+        if let Some(v) = in_links.get_mut(to.as_str())   { v.push(from.as_str()); }
+        if let Some(d) = out_deg.get_mut(from.as_str())  { *d += 1; }
+    }
+
+    let base = (1.0 - damping) / n as f32;
+
+    for _ in 0..iters {
+        let mut new_scores: HashMap<&str, f32> = HashMap::with_capacity(n);
+        for id in node_ids {
+            let id = id.as_str();
+            let mut rank = base;
+            if let Some(inbound) = in_links.get(id) {
+                for &src in inbound {
+                    let od = *out_deg.get(src).unwrap_or(&1) as f32;
+                    rank += damping * scores.get(src).copied().unwrap_or(init) / od.max(1.0);
+                }
+            }
+            new_scores.insert(id, rank);
+        }
+        scores = new_scores;
+    }
+
+    // 归一化到 0–1：除以最大值
+    let max = scores.values().cloned().fold(0.0_f32, f32::max);
+    node_ids.iter().map(|id| {
+        let s = scores.get(id.as_str()).copied().unwrap_or(0.0);
+        (id.clone(), if max > 0.0 { s / max } else { 0.0 })
+    }).collect()
+}
+
 /// 生成笔记的关系图谱数据
 ///
 /// # 参数
@@ -54,8 +111,9 @@ pub fn generate_graph(
             id:    current_path.clone(),
             label: current_note_title.to_string(),
             title: current_note_title.to_string(),
-            tags:  current_note.tags.clone(),
-            mtime: note_mtime_secs(current_note),
+            tags:     current_note.tags.clone(),
+            mtime:    note_mtime_secs(current_note),
+            pagerank: 0.0,  // 局部图谱不计算 PageRank
         },
     );
     visited.insert(current_path.clone());
@@ -91,16 +149,18 @@ pub fn generate_graph(
                             id: linked_path.clone(),
                             label: linked_title.clone(),
                             title: linked_title.clone(),
-                            tags:  linked_tags,
-                            mtime: notes.get(linked_path).map(note_mtime_secs).unwrap_or(0),
+                            tags:     linked_tags,
+                            mtime:    notes.get(linked_path).map(note_mtime_secs).unwrap_or(0),
+                            pagerank: 0.0,
                         },
                     );
                 }
 
-                // 添加边
+                // 添加边（局部图谱权重统一为 1）
                 graph_edges.push(GraphEdge {
-                    from: note_path.clone(),
-                    to: linked_path.clone(),
+                    from:   note_path.clone(),
+                    to:     linked_path.clone(),
+                    weight: 1,
                 });
 
                 // 将未访问的节点加入队列
@@ -124,18 +184,20 @@ pub fn generate_graph(
             graph_nodes.insert(
                 path.clone(),
                 GraphNode {
-                    id:    path.clone(),
-                    label: note.title.clone(),
-                    title: note.title.clone(),
-                    tags:  note.tags.clone(),
-                    mtime: note_mtime_secs(note),
+                    id:       path.clone(),
+                    label:    note.title.clone(),
+                    title:    note.title.clone(),
+                    tags:     note.tags.clone(),
+                    mtime:    note_mtime_secs(note),
+                    pagerank: 0.0,
                 },
             );
 
             // 添加反向链接边
             graph_edges.push(GraphEdge {
-                from: path.clone(),
-                to: current_path.clone(),
+                from:   path.clone(),
+                to:     current_path.clone(),
+                weight: 1,
             });
         }
     }
@@ -183,9 +245,23 @@ pub fn generate_global_graph(
                 connected.insert(note.path.clone());
                 connected.insert(linked_path.clone());
                 graph_edges.push(GraphEdge {
-                    from: note.path.clone(),
-                    to: linked_path.clone(),
+                    from:   note.path.clone(),
+                    to:     linked_path.clone(),
+                    weight: 1, // 初始权重=1，后续计算双向互引后升为 2
                 });
+            }
+        }
+    }
+
+    // v1.9.0：计算边权重——双向互引（A→B 且 B→A）weight=2，单向 weight=1
+    {
+        // 先收集所有 (from, to) 克隆，再更新（避免同时借用 &mut 和 &）
+        let edge_set: HashSet<(String, String)> = graph_edges.iter()
+            .map(|e| (e.from.clone(), e.to.clone()))
+            .collect();
+        for edge in &mut graph_edges {
+            if edge_set.contains(&(edge.to.clone(), edge.from.clone())) {
+                edge.weight = 2;
             }
         }
     }
@@ -194,7 +270,7 @@ pub fn generate_global_graph(
     let total = notes.len();
     let should_downsample = total > MAX_NODES;
 
-    // 第二遍：构建节点列表
+    // 第二遍：构建节点列表（pagerank 待计算，先设 0.0）
     for note in notes.values() {
         let is_isolated = !connected.contains(&note.path);
 
@@ -206,21 +282,34 @@ pub fn generate_global_graph(
         graph_nodes.insert(
             note.path.clone(),
             GraphNode {
-                id:    note.path.clone(),
-                label: note.title.clone(),
-                title: note.title.clone(),
-                tags:  note.tags.clone(),
+                id:       note.path.clone(),
+                label:    note.title.clone(),
+                title:    note.title.clone(),
+                tags:     note.tags.clone(),
                 // v1.8.6：从预计算 mtime_map 读取，避免重复调用 duration_since()
-                mtime: mtime_map.get(note.path.as_str()).copied().unwrap_or(0),
+                mtime:    mtime_map.get(note.path.as_str()).copied().unwrap_or(0),
+                pagerank: 0.0,
             },
         );
     }
 
     // 过滤掉引用了已被移除节点的边
-    let edges = graph_edges
+    let edges: Vec<GraphEdge> = graph_edges
         .into_iter()
         .filter(|e| graph_nodes.contains_key(&e.from) && graph_nodes.contains_key(&e.to))
         .collect();
+
+    // v1.9.0：计算 PageRank（仅在有节点时执行，20 轮，阻尼 0.85）
+    if !graph_nodes.is_empty() {
+        let node_ids: Vec<String> = graph_nodes.keys().cloned().collect();
+        let edge_pairs: Vec<(String, String)> = edges.iter()
+            .map(|e| (e.from.clone(), e.to.clone()))
+            .collect();
+        let pr = compute_pagerank(&node_ids, &edge_pairs, 20, 0.85);
+        for (path, node) in &mut graph_nodes {
+            node.pagerank = pr.get(path).copied().unwrap_or(0.0);
+        }
+    }
 
     GraphData {
         nodes: graph_nodes.into_values().collect(),

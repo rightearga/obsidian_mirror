@@ -1004,7 +1004,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
-### 🔧 v1.9.0 — 图谱影响力（方向 A·基础）
+### ✅ v1.9.0 (已发布 - 2026-04-15) — 图谱影响力（方向 A·基础）
 
 **主题**：用 PageRank 算法量化笔记重要性，让图谱节点尺寸反映真实知识权重
 
@@ -1025,6 +1025,16 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
   - 单向引用 A→B：weight=1
   - 双向互引 A↔B（同时存在 A→B 和 B→A）：weight=2
 - 图谱渲染时边宽度 = weight（双向链接更粗更突出）
+
+#### 实际交付物
+- 修改文件：`src/domain.rs`（GraphNode.pagerank、GraphEdge.weight）
+- 修改文件：`src/graph.rs`（边权重计算 + PageRank 服务端计算）
+- 修改文件：`crates/wasm/src/lib.rs`（computePagerank + 4 个测试）
+- 修改文件：`templates/graph_page.html`（影响力模式复选框 + JS）
+
+#### 测试结果
+- 服务端全量测试：**125/125 通过**
+- WASM 全量测试：**42/42 通过**（新增 4 个 PageRank 测试）
 
 ---
 

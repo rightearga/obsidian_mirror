@@ -105,6 +105,12 @@ pub struct GraphNode {
     /// 笔记最后修改时间（Unix 时间戳秒，v1.8.4 图谱热力图使用）
     #[serde(default)]
     pub mtime: i64,
+    /// PageRank 影响力分数（归一化 0.0–1.0，v1.9.0）
+    ///
+    /// 仅在 `generate_global_graph` 中计算（全局图谱）；
+    /// 局部图谱设为 0.0。前端通过"影响力模式"将此值映射为节点尺寸。
+    #[serde(default)]
+    pub pagerank: f32,
 }
 
 /// 图谱边（连接）
@@ -112,7 +118,13 @@ pub struct GraphNode {
 pub struct GraphEdge {
     pub from: String, // 源节点 ID
     pub to: String,   // 目标节点 ID
+    /// 边权重（v1.9.0）：单向引用=1，双向互引=2；前端渲染时映射为边宽度
+    #[serde(default = "default_edge_weight")]
+    pub weight: u32,
 }
+
+/// 边权重默认值：单向引用（v1.9.0）
+fn default_edge_weight() -> u32 { 1 }
 
 /// 图谱数据
 #[derive(Debug, Clone, Serialize, Deserialize)]

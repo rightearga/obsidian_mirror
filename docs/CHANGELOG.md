@@ -8,6 +8,22 @@
 
 ---
 
+## [v1.9.0] — 2026-04-15
+
+图谱影响力：PageRank 节点重要性量化 + 双向互引边权重可视化。
+
+### Added
+- **`GraphNode.pagerank: f32`**（`src/domain.rs`）：服务端 PageRank 分数（归一化 0–1），`generate_global_graph` 迭代 20 轮（阻尼 0.85）计算
+- **`GraphEdge.weight: u32`**（`src/domain.rs`）：单向引用=1，双向互引=2；图谱专页边宽度自动映射
+- **WASM `computePagerank()`**（`crates/wasm/src/lib.rs`）：客户端 PageRank 函数，接受节点/边 JSON，返回 `{node_id: score}` 对象
+- **图谱专页"影响力模式"**（`templates/graph_page.html`）：复选框开启后节点尺寸线性映射 pagerank（10–40px），颜色从冷蓝渐变为金色
+
+### 测试统计
+- 服务端：125/125 通过
+- WASM：42/42 通过（新增 4 个 PageRank 测试）
+
+---
+
 ## [v1.8.7] — 2026-04-15
 
 代码审计修复版本（CODEREVIEW_1.8）。

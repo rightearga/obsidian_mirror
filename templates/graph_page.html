@@ -151,6 +151,15 @@
             热度着色
         </label>
     </div>
+
+    <!-- 影响力模式（v1.9.0） -->
+    <div class="toolbar-sep"></div>
+    <div class="toolbar-group">
+        <label>
+            <input type="checkbox" id="gp-influence" onchange="gpApplyInfluence()">
+            影响力模式
+        </label>
+    </div>
 </div>
 
 <!-- 图谱画布 -->
@@ -330,18 +339,20 @@ function gpRender(data) {
             color,
             font: { color: '#cdd6f4', size: 13 },
             shape: 'dot',
-            size: sz,
-            _tags:  node.tags  || [],
-            _mtime: node.mtime || 0,  // v1.8.4：热力图使用
+            size:      sz,
+            _tags:     node.tags     || [],
+            _mtime:    node.mtime    || 0,       // v1.8.4：热力图使用
+            _pagerank: node.pagerank || 0,        // v1.9.0：影响力模式使用
         };
     });
 
     gpRawEdges = data.edges.map(e => ({
-        from: e.from,
-        to: e.to,
+        from:   e.from,
+        to:     e.to,
         arrows: 'to',
-        color: { color: '#6b7280', highlight: '#7aa2f7' },
-        width: 1.5,
+        color:  { color: '#6b7280', highlight: '#7aa2f7' },
+        // v1.9.0：边宽度映射边权重（双向互引更粗）
+        width:  (e.weight || 1) === 2 ? 3.0 : 1.5,
         smooth: { type: 'continuous' },
     }));
 
@@ -455,6 +466,49 @@ function gpApplyHeatmap() {
     } else {
         // 恢复正常着色
         gpApplyCluster();
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.9.0：影响力模式（节点尺寸 + 颜色 = PageRank 分数）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 影响力模式：节点尺寸映射 pagerank 分数（10–40px），颜色深蓝→金色 */
+function gpApplyInfluence() {
+    if (!gpNetwork) return;
+    const enabled = document.getElementById('gp-influence').checked;
+
+    if (enabled) {
+        // 获取最大 pagerank，防止全零（例如局部图谱）
+        const maxPR = Math.max(...gpRawNodes.map(n => n._pagerank || 0), 0.001);
+
+        const updated = gpRawNodes.map(n => {
+            const ratio = (n._pagerank || 0) / maxPR;           // 0.0–1.0
+            const size  = 10 + Math.round(ratio * 30);          // 10–40px
+            // 颜色：低影响力=冷蓝 #4a5568，高影响力=金色 #f6ad55
+            const r = Math.round(74  + ratio * (246 - 74));
+            const g = Math.round(85  + ratio * (173 - 85));
+            const b = Math.round(104 + ratio * (85  - 104));
+            const color = `rgb(${r},${g},${b})`;
+            // Tooltip 显示影响力分数和排名
+            const scoreText = (n._pagerank * 100).toFixed(1);
+            return {
+                id:    n.id,
+                size,
+                color: { background: color, border: color },
+                title: `${n.label}\n影响力分数：${scoreText}%`,
+            };
+        });
+        gpNetwork.body.data.nodes.update(updated);
+    } else {
+        // 恢复正常着色（复用 gpApplyCluster）
+        gpApplyCluster();
+        // 恢复默认尺寸
+        const restored = gpRawNodes.map(n => {
+            const deg = (gpRawEdges.filter(e => e.to === n.id).length);
+            return { id: n.id, size: 10 + Math.min(deg * 3, 25) };
+        });
+        gpNetwork.body.data.nodes.update(restored);
     }
 }
 

@@ -759,6 +759,86 @@ impl QuadTree {
     }
 }
 
+// ─── v1.9.0：PageRank 影响力计算 ─────────────────────────────────────────────
+
+/// 计算图谱节点的 PageRank 影响力分数（v1.9.0）
+///
+/// 接受与 `computeGraphLayout` 相同格式的 JSON 输入，
+/// 返回 `{node_id: score}` 格式的 JSON 对象（分数已归一化到 0.0–1.0）。
+///
+/// # 参数
+/// * `nodes_json`  - `[{"id": "..."},...]` 格式的节点数组
+/// * `edges_json`  - `[{"from": "...", "to": "..."},...]` 格式的边数组
+/// * `iterations`  - 迭代次数（建议 20，增加不显著提升精度）
+///
+/// # 示例（JS）
+/// ```js
+/// const scores = JSON.parse(WasmLoader.computePagerank(nodesJson, edgesJson, 20));
+/// // scores["folder/note.md"] → 0.75
+/// ```
+#[wasm_bindgen(js_name = computePagerank)]
+pub fn compute_pagerank(nodes_json: &str, edges_json: &str, iterations: u32) -> String {
+    let nodes: Vec<GraphNode> = match serde_json::from_str(nodes_json) {
+        Ok(v) => v,
+        Err(_) => return "{}".to_string(),
+    };
+    let edges: Vec<GraphEdge> = match serde_json::from_str(edges_json) {
+        Ok(v) => v,
+        Err(_) => return "{}".to_string(),
+    };
+
+    let n = nodes.len();
+    if n == 0 { return "{}".to_string(); }
+
+    let damping = 0.85_f64;
+    let init    = 1.0_f64 / n as f64;
+
+    // 初始化分数
+    let mut scores: HashMap<&str, f64> = nodes.iter().map(|nd| (nd.id.as_str(), init)).collect();
+
+    // 构建入链映射和出度映射
+    let mut in_links: HashMap<&str, Vec<&str>> = nodes.iter().map(|nd| (nd.id.as_str(), vec![])).collect();
+    let mut out_deg:  HashMap<&str, usize>      = nodes.iter().map(|nd| (nd.id.as_str(), 0usize)).collect();
+    for edge in &edges {
+        if let Some(v) = in_links.get_mut(edge.to.as_str())   { v.push(edge.from.as_str()); }
+        if let Some(d) = out_deg.get_mut(edge.from.as_str())  { *d += 1; }
+    }
+
+    let base = (1.0 - damping) / n as f64;
+    let iters = iterations.max(1).min(100) as usize;
+
+    for _ in 0..iters {
+        let mut new_scores: HashMap<&str, f64> = HashMap::with_capacity(n);
+        for nd in &nodes {
+            let id = nd.id.as_str();
+            let mut rank = base;
+            if let Some(inbound) = in_links.get(id) {
+                for &src in inbound {
+                    let od = *out_deg.get(src).unwrap_or(&1) as f64;
+                    rank += damping * scores.get(src).copied().unwrap_or(init) / od.max(1.0);
+                }
+            }
+            new_scores.insert(id, rank);
+        }
+        scores = new_scores;
+    }
+
+    // 归一化到 0–1
+    let max = scores.values().cloned().fold(0.0_f64, f64::max);
+
+    // 构建结果 JSON
+    let mut result = String::from("{");
+    for (i, nd) in nodes.iter().enumerate() {
+        let raw   = scores.get(nd.id.as_str()).copied().unwrap_or(0.0);
+        let norm  = if max > 0.0 { raw / max } else { 0.0 };
+        let key   = nd.id.replace('"', "\\\"");
+        result.push_str(&format!("\"{}\":{:.6}", key, norm));
+        if i + 1 < n { result.push(','); }
+    }
+    result.push('}');
+    result
+}
+
 #[wasm_bindgen(js_name = computeGraphLayout)]
 pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32) -> String {
     let nodes: Vec<GraphNode> = match serde_json::from_str(nodes_json) {
@@ -1389,5 +1469,55 @@ mod tests {
         let result = compute_graph_layout(&nodes_json, "[]", 20);
         let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
         assert_eq!(arr.as_array().unwrap().len(), 50, "小图应返回 50 个节点位置");
+    }
+
+    // ─── v1.9.0 测试：PageRank ────────────────────────────────────────────────
+
+    /// 链状图中末端节点 PageRank 最低，被多节点指向的节点最高
+    #[test]
+    fn test_compute_pagerank_chain() {
+        // A→B→C：B 有入链和出链，得分应介于 A 和 C 之间
+        let nodes = r#"[{"id":"A"},{"id":"B"},{"id":"C"}]"#;
+        let edges = r#"[{"from":"A","to":"B"},{"from":"B","to":"C"}]"#;
+        let result = compute_pagerank(nodes, edges, 20);
+        let scores: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(scores.get("A").is_some(), "A 应有分数");
+        assert!(scores.get("B").is_some(), "B 应有分数");
+        assert!(scores.get("C").is_some(), "C 应有分数");
+        // C 被 B 指向，得分最高；归一化后为 1.0
+        let c_score = scores["C"].as_f64().unwrap();
+        assert!((c_score - 1.0).abs() < 0.01, "C 应得分最高（归一化为 1.0），实际={}", c_score);
+    }
+
+    /// 空图返回空对象
+    #[test]
+    fn test_compute_pagerank_empty() {
+        let result = compute_pagerank("[]", "[]", 20);
+        assert_eq!(result, "{}", "空图应返回空 JSON 对象");
+    }
+
+    /// 孤立节点（无边）所有节点分数相等，归一化后均为 1.0
+    #[test]
+    fn test_compute_pagerank_isolated_nodes() {
+        let nodes = r#"[{"id":"X"},{"id":"Y"}]"#;
+        let result = compute_pagerank(nodes, "[]", 20);
+        let scores: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let x = scores["X"].as_f64().unwrap();
+        let y = scores["Y"].as_f64().unwrap();
+        assert!((x - y).abs() < 0.001, "孤立节点分数应相等，X={},Y={}", x, y);
+    }
+
+    /// 中心节点（被多节点指向）得分最高
+    #[test]
+    fn test_compute_pagerank_hub() {
+        // A→C，B→C，D→C：C 是中心节点
+        let nodes = r#"[{"id":"A"},{"id":"B"},{"id":"C"},{"id":"D"}]"#;
+        let edges = r#"[{"from":"A","to":"C"},{"from":"B","to":"C"},{"from":"D","to":"C"}]"#;
+        let result = compute_pagerank(nodes, edges, 20);
+        let scores: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let c = scores["C"].as_f64().unwrap();
+        let a = scores["A"].as_f64().unwrap();
+        assert!(c > a, "中心节点 C 得分应高于 A，C={},A={}", c, a);
+        assert!((c - 1.0).abs() < 0.01, "C 归一化后应为 1.0，实际={}", c);
     }
 }
