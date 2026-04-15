@@ -1060,9 +1060,15 @@ pub async fn titles_api_handler(data: web::Data<Arc<AppState>>) -> impl Responde
     // 保留向后兼容的 titles 字段
     let titles: Vec<&str> = notes.values().map(|n| n.title.as_str()).collect();
     let tags: Vec<&str> = tag_index.keys().map(|t| t.as_str()).collect();
-    // 新增 note_items 字段：包含 path 上下文，供更丰富的自动补全展示
+    // note_items：包含 title/path，v1.8.4 新增 mtime（供图谱热力图使用）
     let note_items: Vec<serde_json::Value> = notes.values()
-        .map(|n| serde_json::json!({"title": n.title, "path": n.path}))
+        .map(|n| {
+            let mtime = n.mtime
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            serde_json::json!({"title": n.title, "path": n.path, "mtime": mtime})
+        })
         .collect();
 
     HttpResponse::Ok().json(serde_json::json!({
@@ -1475,6 +1481,90 @@ pub async fn insights_stats_handler(
 ) -> impl Responder {
     let cache = data.insights_cache.read().await;
     HttpResponse::Ok().json(&*cache)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.8.4：可视化增强 — 时间线视图
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// 从笔记的 frontmatter `date` 字段提取日期字符串，若无则回退到 mtime
+fn extract_note_date_str(note: &crate::domain::Note) -> String {
+    use chrono::{DateTime, Utc};
+    // 尝试 frontmatter 中的 date 字段（支持 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS）
+    if let Some(date_val) = note.frontmatter.0.get("date") {
+        if let Some(s) = date_val.as_str() {
+            // 取前 10 个字符（YYYY-MM-DD）
+            return s[..s.len().min(10)].to_string();
+        }
+    }
+    // 回退到 mtime
+    let dt: DateTime<Utc> = note.mtime.into();
+    dt.format("%Y-%m-%d").to_string()
+}
+
+/// GET /timeline — 时间线视图页面（v1.8.4）
+///
+/// 展示按时间排列的笔记轴，前端 JS 从 `/api/timeline` 获取数据渲染。
+/// 支持按月/年折叠、标签过滤、悬停预览。
+#[get("/timeline")]
+pub async fn timeline_page_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+
+    let tmpl = crate::templates::TimelineTemplate {
+        title: "时间线",
+        sidebar: &flat_sidebar,
+        backlinks: &backlinks_empty,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("时间线模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
+    }
+}
+
+/// GET /api/timeline — 时间线数据 API（v1.8.4）
+///
+/// 返回所有笔记的时间线数据（按日期降序），每条包含：
+/// - `title`：笔记标题
+/// - `path`：笔记路径
+/// - `date`：`YYYY-MM-DD`（优先 frontmatter date，否则 mtime）
+/// - `tags`：标签列表
+/// - `mtime`：Unix 时间戳秒
+#[get("/api/timeline")]
+pub async fn timeline_api_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let notes = data.notes.read().await;
+
+    let mut items: Vec<serde_json::Value> = notes.values().map(|n| {
+        let date  = extract_note_date_str(n);
+        let mtime = n.mtime
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        serde_json::json!({
+            "title": n.title,
+            "path":  n.path,
+            "date":  date,
+            "tags":  n.tags,
+            "mtime": mtime,
+        })
+    }).collect();
+
+    // 按日期降序排列（最新在前）
+    items.sort_by(|a, b| {
+        let da = a["date"].as_str().unwrap_or("");
+        let db = b["date"].as_str().unwrap_or("");
+        db.cmp(da)
+    });
+
+    HttpResponse::Ok().json(items)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

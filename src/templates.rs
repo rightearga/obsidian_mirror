@@ -106,6 +106,17 @@ pub struct AdminUsersTemplate<'a> {
     pub users: &'a [(String, String, bool)],
 }
 
+/// 时间线视图模板（v1.8.4）
+///
+/// GET /timeline 路由的独立页面，图表数据由前端 JS 调用 /api/timeline 获取。
+#[derive(Template)]
+#[template(path = "timeline.html")]
+pub struct TimelineTemplate<'a> {
+    pub title:     &'a str,
+    pub sidebar:   &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+}
+
 /// 笔记洞察 Dashboard 模板（v1.7.3）
 ///
 /// GET /insights 路由的主页，图表数据由前端 JS 调用 /api/insights/stats 获取。

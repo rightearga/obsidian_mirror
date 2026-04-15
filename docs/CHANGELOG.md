@@ -8,6 +8,29 @@
 
 ---
 
+## [v1.8.4] — 2026-04-15
+
+可视化增强：时间线视图、图谱热力图、洞察 Dashboard 最活跃笔记排行。
+
+### Added
+- **时间线视图**（`GET /timeline` + `GET /api/timeline`）：按 frontmatter `date` 或 mtime 展示笔记时间轴，支持按月/年折叠、标签过滤；侧边栏新增时间线按钮
+- **图谱热力图**（`templates/graph_page.html`）："热度着色"复选框开启后，节点颜色按 mtime 新旧映射（蓝→红），`GraphNode` 新增 `mtime: i64` 字段
+- **最活跃笔记排行**（`src/insights.rs`）：洞察 Dashboard 新增被引用 Top 10 排行（基于 backlinks 入度），横向进度条可视化
+- **链接活跃度趋势**（`src/insights.rs`）：洞察 Dashboard 新增按月出链活动折线图（近 24 个月）
+- **`/api/titles` 新增 `mtime`**（`src/handlers.rs`）：供图谱热力图和其他客户端功能使用
+
+### Changed
+- `compute_insights` 新增 `backlinks` 参数，用于计算入度排行
+- `sync.rs` 传入 `backlinks` 到 `compute_insights`
+
+### 注记
+- "孤立笔记占比历史变化"需要历史数据，当前架构不支持，暂不实现
+
+### 测试统计
+- 服务端：125/125 通过（新增 2 个：most_linked_notes 排序/空值）
+
+---
+
 ## [v1.8.3] — 2026-04-15
 
 PWA 离线完善：扩展缓存策略、网络状态指示器、后台同步提示横幅。

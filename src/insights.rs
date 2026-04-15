@@ -53,6 +53,24 @@ pub struct DailyCount {
     pub count: usize,
 }
 
+/// 最活跃笔记条目（被引用最多，v1.8.4）
+#[derive(Debug, Clone, Serialize)]
+pub struct LinkedNoteEntry {
+    /// 笔记引用（标题 + 路径）
+    pub note:       NoteRef,
+    /// 被其他笔记引用的次数（入度）
+    pub link_count: usize,
+}
+
+/// 按月统计的链接数量（用于网络密度趋势折线图，v1.8.4）
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthlyLinkCount {
+    /// 格式：`"YYYY-MM"`
+    pub year_month: String,
+    /// 该月内最后修改的笔记的出链总数（近似"当月新增链接活动"）
+    pub link_count: usize,
+}
+
 /// 笔记洞察缓存（v1.7.3）
 ///
 /// 在每次 `perform_sync` 完成后由 `compute_insights` 重新计算并存入 `AppState`。
@@ -88,6 +106,12 @@ pub struct InsightsCache {
     pub monthly_counts: Vec<MonthlyCount>,
     /// 最近 30 天每天修改的笔记数（升序）
     pub daily_counts: Vec<DailyCount>,
+
+    // ── 可视化增强（v1.8.4）────────────────────────────────────────────────
+    /// 被引用最多的 Top 10 笔记（入度降序）
+    pub most_linked_notes: Vec<LinkedNoteEntry>,
+    /// 按月统计的出链活动数（最近 24 个月，近似网络密度趋势）
+    pub monthly_link_counts: Vec<MonthlyLinkCount>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -97,13 +121,15 @@ pub struct InsightsCache {
 /// 从现有内存索引计算完整的笔记洞察数据。
 ///
 /// # 参数
-/// * `notes` - 全量笔记映射（路径 → Note）
-/// * `link_index` - 标题/文件名 → 路径索引（用于断链检测）
+/// * `notes`     - 全量笔记映射（路径 → Note）
+/// * `link_index`- 标题/文件名 → 路径索引（用于断链检测）
 /// * `tag_index` - 标签名 → 笔记标题列表索引
+/// * `backlinks` - 笔记标题 → 链接到它的笔记标题列表（v1.8.4：计算入度）
 pub fn compute_insights(
     notes:      &HashMap<String, Note>,
     link_index: &HashMap<String, String>,
     tag_index:  &HashMap<String, Vec<String>>,
+    backlinks:  &HashMap<String, Vec<String>>,
 ) -> InsightsCache {
     let total_notes = notes.len();
     let total_tags  = tag_index.len();
@@ -167,6 +193,26 @@ pub fn compute_insights(
     // ── 写作趋势：按月 / 按天（基于 note.mtime）────────────────────────────
     let (monthly_counts, daily_counts) = build_time_series(notes);
 
+    // ── 最活跃笔记排行（入度 Top 10，v1.8.4）──────────────────────────────
+    let mut link_counts: Vec<(String, String, usize)> = notes.values().map(|n| {
+        // backlinks key = 笔记标题，value = 链接到它的笔记标题列表
+        let count = backlinks.get(&n.title).map(|v| v.len()).unwrap_or(0);
+        (n.title.clone(), n.path.clone(), count)
+    }).collect();
+    link_counts.sort_by(|a, b| b.2.cmp(&a.2));
+    let most_linked_notes: Vec<LinkedNoteEntry> = link_counts.into_iter()
+        .take(10)
+        .filter(|(_, _, count)| *count > 0)
+        .map(|(title, path, count)| LinkedNoteEntry {
+            note: NoteRef { title, path },
+            link_count: count,
+        })
+        .collect();
+
+    // ── 网络密度趋势：按月统计出链活动（近似，v1.8.4）─────────────────────
+    // 以每篇笔记的 mtime 所在月份累加其出链数，近似表示"当月笔记写作的链接活跃度"
+    let monthly_link_counts = build_monthly_link_series(notes);
+
     // ── 计算时间戳 ─────────────────────────────────────────────────────────
     let computed_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -186,6 +232,8 @@ pub fn compute_insights(
         tag_cloud,
         monthly_counts,
         daily_counts,
+        most_linked_notes,
+        monthly_link_counts,
     }
 }
 
@@ -285,6 +333,40 @@ fn build_time_series(notes: &HashMap<String, Note>) -> (Vec<MonthlyCount>, Vec<D
     (monthly_counts, daily_counts)
 }
 
+/// 构建按月出链活动数据（v1.8.4）
+///
+/// 对每篇笔记，将其 `outgoing_links` 数量累加到其 mtime 所在月份，
+/// 作为"当月链接活跃度"的近似指标（最近 24 个月，升序）。
+fn build_monthly_link_series(notes: &HashMap<String, Note>) -> Vec<MonthlyLinkCount> {
+    let mut month_map: HashMap<String, usize> = HashMap::new();
+    for note in notes.values() {
+        if let Some(month) = mtime_to_month(note.mtime) {
+            *month_map.entry(month).or_insert(0) += note.outgoing_links.len();
+        }
+    }
+
+    let today_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let today_days = today_secs / 86400;
+    let (ty, tm, _) = days_to_ymd(today_days);
+
+    let mut result: Vec<MonthlyLinkCount> = Vec::new();
+    for i in (0..24i32).rev() {
+        let mut month = tm as i32 - i;
+        let mut year  = ty;
+        while month <= 0 { month += 12; year -= 1; }
+        while month > 12 { month -= 12; year += 1; }
+        let key = format!("{:04}-{:02}", year, month);
+        result.push(MonthlyLinkCount {
+            year_month: key.clone(),
+            link_count: *month_map.get(&key).unwrap_or(&0),
+        });
+    }
+    result
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // 测试
 // ──────────────────────────────────────────────────────────────────────────────
@@ -316,7 +398,7 @@ mod tests {
         notes.insert("a.md".to_string(), make_note("A", "a.md", vec![], vec![], "hello"));
         notes.insert("b.md".to_string(), make_note("B", "b.md", vec![], vec![], "world"));
 
-        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new());
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(cache.orphan_notes.len(), 2, "A 和 B 都应为孤立笔记");
     }
 
@@ -326,7 +408,7 @@ mod tests {
         let mut notes = HashMap::new();
         notes.insert("a.md".to_string(), make_note("A", "a.md", vec![], vec!["不存在"], "x"));
 
-        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new());
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(cache.broken_links.len(), 1);
         assert_eq!(cache.broken_links[0].broken_target, "不存在");
     }
@@ -338,7 +420,7 @@ mod tests {
         let mut notes = HashMap::new();
         notes.insert("big.md".to_string(), make_note("Big", "big.md", vec![], vec![], &long_html));
 
-        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new());
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(cache.large_notes.len(), 1);
     }
 
@@ -352,7 +434,7 @@ mod tests {
         let mut notes = HashMap::new();
         notes.insert("structured.md".to_string(), note);
 
-        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new());
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(cache.large_notes.len(), 0, "有 TOC 的笔记不应被标记为超大笔记");
     }
 
@@ -362,7 +444,7 @@ mod tests {
         notes.insert("a.md".to_string(), make_note("A", "a.md", vec!["tag"], vec![], ""));
         notes.insert("b.md".to_string(), make_note("B", "b.md", vec![], vec![], ""));
 
-        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new());
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert_eq!(cache.untagged_count, 1);
         assert!((cache.untagged_ratio - 0.5).abs() < 0.01);
     }
@@ -373,7 +455,7 @@ mod tests {
         tag_index.insert("rust".to_string(), vec!["a".to_string(), "b".to_string(), "c".to_string()]);
         tag_index.insert("python".to_string(), vec!["x".to_string()]);
 
-        let cache = compute_insights(&HashMap::new(), &HashMap::new(), &tag_index);
+        let cache = compute_insights(&HashMap::new(), &HashMap::new(), &tag_index, &HashMap::new());
         assert_eq!(cache.tag_cloud[0].tag, "rust", "高频标签应排在前面");
         assert_eq!(cache.tag_cloud[0].count, 3);
     }
@@ -400,5 +482,35 @@ mod tests {
         assert!(y >= 2026 && y <= 2027);
         assert!(m >= 1 && m <= 12);
         assert!(d >= 1 && d <= 31);
+    }
+
+    // ─── v1.8.4 测试：最活跃笔记排行 ────────────────────────────────────────
+
+    /// most_linked_notes 应按入度降序排列
+    #[test]
+    fn test_most_linked_notes_sorted() {
+        let mut notes = HashMap::new();
+        notes.insert("a.md".to_string(), make_note("A", "a.md", vec![], vec![], ""));
+        notes.insert("b.md".to_string(), make_note("B", "b.md", vec![], vec![], ""));
+        notes.insert("c.md".to_string(), make_note("C", "c.md", vec![], vec![], ""));
+
+        // B 被 A 和 C 引用（入度 2），A 被 C 引用（入度 1）
+        let mut backlinks = HashMap::new();
+        backlinks.insert("B".to_string(), vec!["A".to_string(), "C".to_string()]);
+        backlinks.insert("A".to_string(), vec!["C".to_string()]);
+
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &backlinks);
+        assert!(!cache.most_linked_notes.is_empty(), "应有被引用的笔记");
+        assert_eq!(cache.most_linked_notes[0].note.title, "B", "B 入度最高，应排第一");
+        assert_eq!(cache.most_linked_notes[0].link_count, 2);
+    }
+
+    /// 无入链时 most_linked_notes 应为空
+    #[test]
+    fn test_most_linked_notes_empty_when_no_backlinks() {
+        let mut notes = HashMap::new();
+        notes.insert("x.md".to_string(), make_note("X", "x.md", vec![], vec![], ""));
+        let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert!(cache.most_linked_notes.is_empty(), "无入链时应为空列表");
     }
 }

@@ -583,7 +583,9 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         let notes     = data.notes.read().await;
         let link_idx  = data.link_index.read().await;
         let tag_idx   = data.tag_index.read().await;
-        let new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx);
+        let backlinks = data.backlinks.read().await;
+        // v1.8.4：传入 backlinks 用于计算最活跃笔记排行（入度）
+        let new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx, &backlinks);
         *data.insights_cache.write().await = new_cache;
         info!("✅ 笔记洞察缓存已更新");
     }

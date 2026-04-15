@@ -142,6 +142,15 @@
         <input type="text" id="gp-highlight" placeholder="节点名称…"
                oninput="gpHighlight()" style="width:140px">
     </div>
+
+    <!-- 热力图模式（v1.8.4） -->
+    <div class="toolbar-sep"></div>
+    <div class="toolbar-group">
+        <label>
+            <input type="checkbox" id="gp-heatmap" onchange="gpApplyHeatmap()">
+            热度着色
+        </label>
+    </div>
 </div>
 
 <!-- 图谱画布 -->
@@ -322,7 +331,8 @@ function gpRender(data) {
             font: { color: '#cdd6f4', size: 13 },
             shape: 'dot',
             size: sz,
-            _tags: node.tags || [],
+            _tags:  node.tags  || [],
+            _mtime: node.mtime || 0,  // v1.8.4：热力图使用
         };
     });
 
@@ -410,6 +420,42 @@ function gpApplyCluster() {
             : { background: '#6a5acd', border: '#8b7ae0' },
     }));
     gpNetwork.body.data.nodes.update(updated);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.8.4：热力图模式（节点颜色 = 修改时间新旧，蓝→绿→黄→红）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/** 根据 0.0–1.0 的热度值返回颜色（冷蓝 → 热红） */
+function gpHeatColor(ratio) {
+    const r = Math.round(ratio * 255);
+    const b = Math.round((1 - ratio) * 255);
+    return `rgb(${r},80,${b})`;
+}
+
+/** 热力图模式：节点颜色映射 mtime 相对新旧 */
+function gpApplyHeatmap() {
+    if (!gpNetwork) return;
+    const enabled = document.getElementById('gp-heatmap').checked;
+
+    if (enabled) {
+        // 计算 mtime 的最小/最大值用于归一化
+        const mtimes = gpRawNodes.map(n => n._mtime || 0).filter(m => m > 0);
+        if (mtimes.length === 0) return;
+        const minMtime = Math.min(...mtimes);
+        const maxMtime = Math.max(...mtimes);
+        const range = maxMtime - minMtime || 1;
+
+        const updated = gpRawNodes.map(n => {
+            const ratio = n._mtime > 0 ? (n._mtime - minMtime) / range : 0;
+            const color = gpHeatColor(ratio);
+            return { id: n.id, color: { background: color, border: color } };
+        });
+        gpNetwork.body.data.nodes.update(updated);
+    } else {
+        // 恢复正常着色
+        gpApplyCluster();
+    }
 }
 
 // ──────────────────────────────────────────────────────────────────────────────

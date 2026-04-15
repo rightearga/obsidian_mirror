@@ -102,6 +102,9 @@ pub struct GraphNode {
     /// 笔记所属标签列表（用于节点颜色分组，取第一个标签决定颜色）
     #[serde(default)]
     pub tags: Vec<String>,
+    /// 笔记最后修改时间（Unix 时间戳秒，v1.8.4 图谱热力图使用）
+    #[serde(default)]
+    pub mtime: i64,
 }
 
 /// 图谱边（连接）

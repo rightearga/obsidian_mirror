@@ -1,0 +1,185 @@
+{% extends "layout.html" %}
+
+{% block head %}
+<style>
+/* 时间线页面（v1.8.4）*/
+.timeline-page { padding: 24px 32px; max-width: 900px; }
+.timeline-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+.timeline-toolbar input[type="text"],
+.timeline-toolbar select {
+    padding: 5px 10px; border: 1px solid var(--border-color, #313244);
+    border-radius: 5px; background: var(--bg-secondary, #1e1e2e);
+    color: var(--text-primary, #cdd6f4); font-size: 0.88rem;
+}
+.timeline-toolbar input[type="text"] { width: 180px; }
+.tl-summary { font-size: 0.82rem; color: var(--text-muted, #6c7086); }
+/* 年份分组标题 */
+.tl-year { font-size: 1.1rem; font-weight: 700; color: var(--accent-color, #6a5acd);
+    margin: 24px 0 8px; border-bottom: 2px solid var(--accent-color, #6a5acd);
+    padding-bottom: 4px; cursor: pointer; user-select: none; }
+/* 月份分组标题 */
+.tl-month { font-size: 0.92rem; font-weight: 600; color: var(--text-muted, #6c7086);
+    margin: 14px 0 4px 16px; cursor: pointer; user-select: none; }
+.tl-month::before { content: "▾ "; font-size: 0.7rem; }
+.tl-month.collapsed::before { content: "▶ "; }
+/* 笔记卡片列表 */
+.tl-notes { margin-left: 32px; }
+.tl-notes.hidden { display: none; }
+.tl-note {
+    display: flex; align-items: baseline; gap: 10px; padding: 5px 8px;
+    border-radius: 4px; text-decoration: none;
+    color: var(--text-primary, #cdd6f4); font-size: 0.9rem;
+    transition: background 0.1s;
+}
+.tl-note:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); }
+.tl-note-date { font-size: 0.78rem; color: var(--text-muted, #6c7086);
+    white-space: nowrap; min-width: 80px; }
+.tl-note-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-note-tags { display: flex; gap: 4px; flex-shrink: 0; }
+.tl-tag { font-size: 0.72rem; padding: 1px 5px; border-radius: 3px;
+    background: rgba(106,90,205,0.18); color: var(--accent-color, #bb9af7); }
+#tl-loading { color: var(--text-muted, #6c7086); padding: 40px; text-align: center; }
+#tl-empty   { color: var(--text-muted, #6c7086); font-style: italic; padding: 20px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="timeline-page">
+    <!-- 工具栏 -->
+    <div class="timeline-toolbar">
+        <input type="text" id="tl-filter-title" placeholder="按标题过滤…" oninput="tlRender()">
+        <select id="tl-filter-tag" onchange="tlRender()">
+            <option value="">全部标签</option>
+        </select>
+        <select id="tl-group-by" onchange="tlRender()">
+            <option value="month">按月分组</option>
+            <option value="year">按年分组</option>
+        </select>
+        <span class="tl-summary" id="tl-summary"></span>
+    </div>
+
+    <div id="tl-loading">加载中…</div>
+    <div id="tl-empty" style="display:none">没有符合条件的笔记</div>
+    <div id="tl-content"></div>
+</div>
+
+<script>
+// ── 时间线视图脚本（v1.8.4）──────────────────────────────────────────────────
+let _tlAllNotes = [];
+let _tlCollapsed = new Set();   // 折叠的 year-month 键
+
+document.addEventListener('DOMContentLoaded', async () => {
+    try {
+        const r = await fetch('/api/timeline');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        _tlAllNotes = await r.json();
+
+        // 填充标签下拉
+        const tags = new Set();
+        _tlAllNotes.forEach(n => (n.tags || []).forEach(t => tags.add(t)));
+        const sel = document.getElementById('tl-filter-tag');
+        [...tags].sort().forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t; opt.textContent = '#' + t;
+            sel.appendChild(opt);
+        });
+
+        document.getElementById('tl-loading').style.display = 'none';
+        tlRender();
+    } catch(e) {
+        document.getElementById('tl-loading').textContent = '加载失败: ' + e.message;
+    }
+});
+
+function tlRender() {
+    const filterTitle = document.getElementById('tl-filter-title').value.toLowerCase().trim();
+    const filterTag   = document.getElementById('tl-filter-tag').value;
+    const groupBy     = document.getElementById('tl-group-by').value;
+
+    // 过滤
+    let filtered = _tlAllNotes.filter(n => {
+        if (filterTitle && !n.title.toLowerCase().includes(filterTitle)) return false;
+        if (filterTag && !(n.tags || []).includes(filterTag)) return false;
+        return true;
+    });
+
+    const summary = document.getElementById('tl-summary');
+    summary.textContent = `共 ${filtered.length} / ${_tlAllNotes.length} 篇`;
+
+    const empty = document.getElementById('tl-empty');
+    const content = document.getElementById('tl-content');
+    empty.style.display = filtered.length === 0 ? '' : 'none';
+    if (filtered.length === 0) { content.innerHTML = ''; return; }
+
+    // 分组
+    const groups = new Map();
+    filtered.forEach(n => {
+        const key = groupBy === 'year' ? n.date.slice(0, 4) : n.date.slice(0, 7);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(n);
+    });
+
+    // 渲染
+    let html = '';
+    let lastYear = '';
+    for (const [key, notes] of groups) {
+        const year = key.slice(0, 4);
+        if (groupBy === 'month') {
+            if (year !== lastYear) {
+                html += `<div class="tl-year" onclick="tlToggleYear('${year}')">${year} 年</div>`;
+                lastYear = year;
+            }
+            const collapsed = _tlCollapsed.has('m-' + key) ? 'collapsed' : '';
+            const hidden    = _tlCollapsed.has('m-' + key) ? 'hidden'    : '';
+            const monthName = key.slice(5) + ' 月';
+            html += `<div class="tl-month ${collapsed}" id="th-m-${key}" onclick="tlToggle('m-${key}')">${key.slice(0,4)}年${monthName}（${notes.length} 篇）</div>`;
+            html += `<div class="tl-notes ${hidden}" id="tn-m-${key}">`;
+        } else {
+            const collapsed = _tlCollapsed.has('y-' + key) ? 'collapsed' : '';
+            const hidden    = _tlCollapsed.has('y-' + key) ? 'hidden'    : '';
+            html += `<div class="tl-year ${collapsed}" id="th-y-${key}" onclick="tlToggle('y-${key}')">${key} 年（${notes.length} 篇）</div>`;
+            html += `<div class="tl-notes ${hidden}" id="tn-y-${key}">`;
+        }
+
+        notes.forEach(n => {
+            const tags = (n.tags || []).slice(0, 3).map(t =>
+                `<span class="tl-tag">#${esc(t)}</span>`).join('');
+            html += `<a href="/doc/${encodeURIComponent(n.path)}" class="tl-note" data-no-preview>
+                <span class="tl-note-date">${esc(n.date)}</span>
+                <span class="tl-note-title">${esc(n.title)}</span>
+                <span class="tl-note-tags">${tags}</span>
+            </a>`;
+        });
+        html += '</div>';
+    }
+
+    content.innerHTML = html;
+}
+
+function tlToggle(key) {
+    const type = key.startsWith('m-') ? 'm-' : 'y-';
+    const id   = key.slice(type.length);
+    if (_tlCollapsed.has(key)) {
+        _tlCollapsed.delete(key);
+    } else {
+        _tlCollapsed.add(key);
+    }
+    const hdr  = document.getElementById('th-' + key);
+    const body = document.getElementById('tn-' + key);
+    if (hdr)  hdr.classList.toggle('collapsed', _tlCollapsed.has(key));
+    if (body) body.classList.toggle('hidden',    _tlCollapsed.has(key));
+}
+
+function tlToggleYear(year) {
+    // 按年折叠时，折叠/展开该年下所有月份
+    const allKeys = [..._tlCollapsed];
+}
+
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+{% endblock %}

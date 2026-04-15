@@ -1,6 +1,12 @@
 // 图谱生成逻辑
 use crate::domain::{GraphData, GraphEdge, GraphNode, Note};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::UNIX_EPOCH;
+
+/// 从笔记的 mtime 获取 Unix 秒时间戳（v1.8.4 热力图使用）
+fn note_mtime_secs(note: &Note) -> i64 {
+    note.mtime.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+}
 
 /// 生成笔记的关系图谱数据
 ///
@@ -54,7 +60,8 @@ pub fn generate_graph(
             id: current_path.clone(),
             label: current_note_title.to_string(),
             title: current_note_title.to_string(),
-            tags: center_tags,
+            tags:  center_tags,
+            mtime: notes.get(&current_path).map(note_mtime_secs).unwrap_or(0),
         },
     );
     visited.insert(current_path.clone());
@@ -90,7 +97,8 @@ pub fn generate_graph(
                             id: linked_path.clone(),
                             label: linked_title.clone(),
                             title: linked_title.clone(),
-                            tags: linked_tags,
+                            tags:  linked_tags,
+                            mtime: notes.get(linked_path).map(note_mtime_secs).unwrap_or(0),
                         },
                     );
                 }
@@ -122,10 +130,11 @@ pub fn generate_graph(
             graph_nodes.insert(
                 path.clone(),
                 GraphNode {
-                    id: path.clone(),
+                    id:    path.clone(),
                     label: note.title.clone(),
                     title: note.title.clone(),
-                    tags: note.tags.clone(),
+                    tags:  note.tags.clone(),
+                    mtime: note_mtime_secs(note),
                 },
             );
 
@@ -197,10 +206,11 @@ pub fn generate_global_graph(
         graph_nodes.insert(
             note.path.clone(),
             GraphNode {
-                id: note.path.clone(),
+                id:    note.path.clone(),
                 label: note.title.clone(),
                 title: note.title.clone(),
-                tags: note.tags.clone(),
+                tags:  note.tags.clone(),
+                mtime: note_mtime_secs(note),
             },
         );
     }
