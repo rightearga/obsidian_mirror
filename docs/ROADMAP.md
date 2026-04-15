@@ -16,6 +16,7 @@
 - [v1.6.x 规划](#v16x-规划2026-q4)
 - [v1.7.x 规划](#v17x-规划2027-q1)
 - [v1.8.x 规划](#v18x-规划2027-q2)
+- [v1.9.x 规划](#v19x-规划2027-q3)
 - [功能分类](#功能分类)
 - [长期愿景](#长期愿景)
 - [迭代原则](#迭代原则)
@@ -994,6 +995,149 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
+## 🎨 v1.9.x 规划（2027 Q3）
+
+> v1.9 系列主题：**可视化深度**
+>
+> 覆盖四个可视化方向（A 图谱深度 / B 洞察深化 / C 知识地图 / D 时间线联动），
+> 每版聚焦单一主题，以代码审计收尾。
+
+---
+
+### 🔧 v1.9.0 — 图谱影响力（方向 A·基础）
+
+**主题**：用 PageRank 算法量化笔记重要性，让图谱节点尺寸反映真实知识权重
+
+#### PageRank 节点影响力
+
+- WASM crate 新增 `compute_pagerank(nodes, edges, iterations)` 函数
+  - 输入：图谱节点 ID 列表 + 边列表（`{from, to}`）
+  - 迭代 20 轮阻尼因子 0.85 的标准 PageRank
+  - 返回：`HashMap<node_id, score>`（归一化 0.0–1.0）
+- `GET /api/graph/global` 响应增加 `pagerank: f32` 字段（`GraphNode` 扩展）
+- 图谱专页（`/graph`）新增 **"影响力模式"** 开关：
+  - 节点尺寸 = pagerank 分数线性映射（10–40px）
+  - Tooltip 显示影响力分数和排名
+
+#### 边权重（互引次数）
+
+- `GraphEdge` 新增 `weight: u32` 字段：
+  - 单向引用 A→B：weight=1
+  - 双向互引 A↔B（同时存在 A→B 和 B→A）：weight=2
+- 图谱渲染时边宽度 = weight（双向链接更粗更突出）
+
+---
+
+### 🔧 v1.9.1 — 代码审计（CODEREVIEW_1.9）
+
+**主题**：对 v1.9.0 引入的新代码进行系统性审查
+
+- 审计重点：PageRank 数值溢出/收敛性、边权重计算正确性、新 GraphNode 字段安全性
+- 产出：`docs/CODEREVIEW_1.9.md`
+- 遵循审计流程（`/ob-review 1.9`）
+
+---
+
+### 🔧 v1.9.2 — 图谱路径查找（方向 A·进阶）
+
+**主题**：在图谱中找到两篇笔记之间的最短链接路径，支持知识导航
+
+#### 路由
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/graph/path?from={title}&to={title}` | 最短路径（BFS，返回路径节点+边列表） |
+
+#### 功能
+
+- 服务端 BFS 路径查找（`src/graph.rs`），最多 6 跳（防超时）
+- 图谱专页工具栏新增 **"路径查找"** 模式：
+  - 两个输入框（起点/终点，支持自动补全）
+  - 查找后路径节点高亮（金色边框），非路径节点半透明
+  - 显示跳数和路径节点列表（可点击跳转）
+- 无路径时友好提示"这两篇笔记之间暂无链接路径"
+
+---
+
+### 🔧 v1.9.3 — 洞察 Dashboard 深化（方向 B）
+
+**主题**：从现有数据中挖掘更深层的知识结构信息
+
+#### 标签共现矩阵
+
+- `InsightsCache` 新增 `tag_cooccurrence: Vec<TagPair>`（`tag_a`, `tag_b`, `count`）
+- 洞察页新增**热力矩阵图**（前 15 个标签的共现频率）：
+  - X/Y 轴均为标签名，颜色深浅 = 共现次数
+  - 纯 SVG 渲染，点击格子跳转对应标签页
+
+#### 笔记连通度评分
+
+- `InsightsCache` 新增 `connectivity_scores: Vec<ConnectivityEntry>`（笔记 + 得分）
+  - 得分 = (入度 × 2 + 出度) / log(总笔记数)（归一化）
+- 洞察页新增 **"连通度 Top 10"** 排行（柱状进度条），与现有"最活跃笔记"并排
+
+#### 阅读频率热力图
+
+- `GET /api/insights/stats` 新增 `reading_hotmap: Vec<{path, title, visit_count}>`
+  - 从 `reading_progress_db` 聚合访问次数（按 username+path 去重）
+- 洞察页新增 **"最常阅读笔记 Top 10"**（访问次数可视化）
+
+---
+
+### 🔧 v1.9.4 — 时间线联动深化（方向 D）
+
+**主题**：让时间线从"笔记列表"升级为"写作轨迹分析工具"
+
+#### 写作速度折线图
+
+- `InsightsCache.monthly_counts` 已有笔记数/月，补充 **月度字符数统计**：
+  - 新增 `monthly_char_counts: Vec<MonthlyCharCount>（year_month, char_count）`
+  - 计算方式：`count_visible_chars(content_html)` 按月汇总
+- 时间线页新增双 Y 轴折线图：左轴=笔记数，右轴=字符数
+
+#### 标签演化时序图
+
+- `GET /api/timeline` 响应增加每条笔记的 `tags` 字段（已有）
+- 时间线页新增 **"标签演化"** 视图：
+  - 按月统计前 8 个标签的出现次数
+  - 堆叠面积图展示标签比例随时间变化
+
+#### 时间线 ↔ 图谱联动
+
+- 时间线页每个月份标题旁加 **"在图谱中查看"** 按钮
+- 点击后跳转到 `/graph?since=YYYY-MM-01&until=YYYY-MM-31`
+- 图谱专页支持 `since`/`until` URL 参数，只显示该时间范围内修改的节点（其余半透明）
+
+---
+
+### 🔧 v1.9.5 — 知识地图（方向 C）
+
+**主题**：基于标签相似度聚类，将笔记库渲染为可漫游的"星图"
+
+#### 算法
+
+- WASM crate 新增 `compute_knowledge_map(notes_json)` 函数：
+  1. 构建标签相似度矩阵（Jaccard 系数：共享标签数 / 并集标签数）
+  2. 将相似度作为边权重，运行力导向布局（复用现有 Barnes-Hut，但边 = 相似度而非链接）
+  3. 返回 `{id, x, y, tags, cluster_id}[]`（cluster_id 由 K-means 聚类决定）
+- 聚类数 K 自动检测（min(标签数/3, 12)，不超过 12 个聚类）
+
+#### 路由
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/knowledge-map` | 知识地图专页 |
+| GET | `/api/knowledge-map` | 布局坐标 JSON（带 cluster_id） |
+
+#### 渲染
+
+- 独立全屏专页（复用 `/graph` 页面框架）
+- Canvas 渲染（非 Vis.js）：支持 10,000+ 节点流畅缩放
+- 颜色 = 主聚类标签（聚类内节点同色），大小 = pagerank 分数
+- 悬停显示笔记标题，点击跳转，支持按聚类筛选
+
+---
+
 ## 📦 功能分类
 
 ### 💡 未来探索方向
@@ -1032,6 +1176,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 | Q4 2026（已完成） | v1.6.0 – v1.6.6 | WASM 加速：客户端渲染 / 离线搜索 / JS 替换 |
 | Q1 2027（已完成） | v1.7.0 – v1.7.4 | 知识洞察：图谱聚类 / Git 历史 / Dashboard / 多仓库 |
 | Q2 2027（已完成） | v1.8.0 – v1.8.7 | 规模化 · 导出发布 · PWA 离线 · 可视化增强 · 依赖升级 |
+| Q3 2027（规划中） | v1.9.0 – v1.9.5 | 可视化深度：图谱影响力 / 路径查找 / 洞察深化 / 知识地图 |
 
 ### 核心价值主张
 
@@ -1098,6 +1243,13 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 | v1.7.2 | git2-rs / shell Git log 历史浏览，diff 渲染 |
 | v1.7.3 | InsightsCache，断链检测，标签云，写作趋势 |
 | v1.7.4 | 多仓库 VaultState，路由前缀，仓库切换器 |
+| v1.8.0 | 搜索分页 SearchPage，content-visibility 侧边栏，图谱渐进式加载 |
+| v1.8.4 | timeline 时间线，GraphNode.mtime 热力图，InsightsCache 影响力排行 |
+| v1.8.6 | WASM M4 回退（HashSet.contains），mtime_cache 热路径预计算 |
+| v1.9.0 | WASM PageRank，GraphEdge.weight 互引边权重 |
+| v1.9.2 | BFS 路径查找，/api/graph/path，图谱路径高亮 |
+| v1.9.3 | 标签共现矩阵，连通度评分，阅读频率热力图 |
+| v1.9.5 | 知识地图（标签相似度聚类 + Barnes-Hut + Canvas 渲染）|
 
 ### 明确不做的技术方向
 
