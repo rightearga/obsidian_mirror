@@ -493,7 +493,9 @@ impl SearchEngine {
         date_to:   Option<i64>,
     ) -> Result<SearchPage> {
         let per_page = per_page.clamp(1, 100);
-        let page     = page.max(1);
+        // v1.8.1 B1：加 page 上限（10000），防止超大值导致 usize 溢出
+        // Modified 排序时 offset = (page-1)*per_page，无上限时可能整数溢出
+        let page     = page.max(1).min(10_000);
         let offset   = (page - 1) * per_page;
 
         let searcher = self.reader.searcher();
