@@ -813,7 +813,7 @@ mod tests {
             tags: Vec::new(),
             toc: Vec::<TocItem>::new(),
             mtime,
-            frontmatter: Frontmatter(serde_yml::Value::Null),
+            frontmatter: Frontmatter(serde_yaml::Value::Null),
             outgoing_links: Vec::new(),
         }
     }

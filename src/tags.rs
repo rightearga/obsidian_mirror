@@ -10,18 +10,18 @@ lazy_static! {
 }
 
 /// 从 frontmatter 和正文中提取标签
-pub fn extract_tags(content: &str, frontmatter: &serde_yml::Value) -> Vec<String> {
+pub fn extract_tags(content: &str, frontmatter: &serde_yaml::Value) -> Vec<String> {
     let mut tags = Vec::new();
 
     // 1. 从 frontmatter 中提取标签
-    if let serde_yml::Value::Mapping(map) = frontmatter {
+    if let serde_yaml::Value::Mapping(map) = frontmatter {
         // 尝试获取 "tags" 字段
-        if let Some(tags_value) = map.get(serde_yml::Value::String("tags".to_string())) {
+        if let Some(tags_value) = map.get(serde_yaml::Value::String("tags".to_string())) {
             extract_tags_from_yaml_value(tags_value, &mut tags);
         }
 
         // 也尝试 "tag" 字段（单数形式）
-        if let Some(tag_value) = map.get(serde_yml::Value::String("tag".to_string())) {
+        if let Some(tag_value) = map.get(serde_yaml::Value::String("tag".to_string())) {
             extract_tags_from_yaml_value(tag_value, &mut tags);
         }
     }
@@ -40,12 +40,12 @@ pub fn extract_tags(content: &str, frontmatter: &serde_yml::Value) -> Vec<String
 }
 
 /// 从 YAML 值中提取标签
-fn extract_tags_from_yaml_value(value: &serde_yml::Value, tags: &mut Vec<String>) {
+fn extract_tags_from_yaml_value(value: &serde_yaml::Value, tags: &mut Vec<String>) {
     match value {
         // tags: [tag1, tag2, tag3]
-        serde_yml::Value::Sequence(seq) => {
+        serde_yaml::Value::Sequence(seq) => {
             for item in seq {
-                if let serde_yml::Value::String(tag) = item {
+                if let serde_yaml::Value::String(tag) = item {
                     let tag = tag.trim().to_string();
                     if !tag.is_empty() && !tags.contains(&tag) {
                         tags.push(tag);
@@ -54,7 +54,7 @@ fn extract_tags_from_yaml_value(value: &serde_yml::Value, tags: &mut Vec<String>
             }
         }
         // tags: tag1
-        serde_yml::Value::String(tag) => {
+        serde_yaml::Value::String(tag) => {
             let tag = tag.trim().to_string();
             if !tag.is_empty() && !tags.contains(&tag) {
                 tags.push(tag);
@@ -71,7 +71,7 @@ mod tests {
     #[test]
     fn test_hashtag_extraction() {
         let content = "This is a note with #tag1 and #tag2 in the text.";
-        let frontmatter = serde_yml::Value::Null;
+        let frontmatter = serde_yaml::Value::Null;
         let tags = extract_tags(content, &frontmatter);
 
         assert_eq!(tags.len(), 2);
@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn test_hashtag_chinese() {
         let content = "这是一个带有 #中文标签 和 #测试 的笔记。";
-        let frontmatter = serde_yml::Value::Null;
+        let frontmatter = serde_yaml::Value::Null;
         let tags = extract_tags(content, &frontmatter);
 
         assert_eq!(tags.len(), 2);
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_hashtag_with_numbers_and_hyphens() {
         let content = "Tags: #tag-123, #my_tag, #test2024";
-        let frontmatter = serde_yml::Value::Null;
+        let frontmatter = serde_yaml::Value::Null;
         let tags = extract_tags(content, &frontmatter);
 
         assert_eq!(tags.len(), 3);
@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn test_hashtag_not_markdown_heading() {
         let content = "## This is a heading\n\nThis has #tag but not the heading.";
-        let frontmatter = serde_yml::Value::Null;
+        let frontmatter = serde_yaml::Value::Null;
         let tags = extract_tags(content, &frontmatter);
 
         assert_eq!(tags.len(), 1);
@@ -117,7 +117,7 @@ mod tests {
         let yaml_str = r#"
 tags: [rust, programming, obsidian]
 "#;
-        let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+        let frontmatter: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let content = "Content here.";
 
         let tags = extract_tags(content, &frontmatter);
@@ -133,7 +133,7 @@ tags: [rust, programming, obsidian]
         let yaml_str = r#"
 tags: important
 "#;
-        let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+        let frontmatter: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let content = "Content here.";
 
         let tags = extract_tags(content, &frontmatter);
@@ -147,7 +147,7 @@ tags: important
         let yaml_str = r#"
 tag: [test, demo]
 "#;
-        let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+        let frontmatter: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let content = "Content here.";
 
         let tags = extract_tags(content, &frontmatter);
@@ -162,7 +162,7 @@ tag: [test, demo]
         let yaml_str = r#"
 tags: [frontmatter-tag]
 "#;
-        let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+        let frontmatter: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let content = "# My Note\n\nThis has #inline-tag and #another-tag.";
 
         let tags = extract_tags(content, &frontmatter);
@@ -178,7 +178,7 @@ tags: [frontmatter-tag]
         let yaml_str = r#"
 tags: [duplicate]
 "#;
-        let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+        let frontmatter: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let content = "This has #duplicate again.";
 
         let tags = extract_tags(content, &frontmatter);
@@ -193,7 +193,7 @@ tags: [duplicate]
         let yaml_str = r#"
 tags: []
 "#;
-        let frontmatter: serde_yml::Value = serde_yml::from_str(yaml_str).unwrap();
+        let frontmatter: serde_yaml::Value = serde_yaml::from_str(yaml_str).unwrap();
         let content = "No tags in content either.";
 
         let tags = extract_tags(content, &frontmatter);

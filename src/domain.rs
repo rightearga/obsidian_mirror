@@ -3,14 +3,14 @@ use std::time::SystemTime;
 
 /// Frontmatter 包装类型，用于支持 postcard 序列化
 #[derive(Debug, Clone)]
-pub struct Frontmatter(pub serde_yml::Value);
+pub struct Frontmatter(pub serde_yaml::Value);
 
 impl Serialize for Frontmatter {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        // 将 serde_yml::Value 转换为 JSON 字符串
+        // 将 serde_yaml::Value 转换为 JSON 字符串
         let json_str = serde_json::to_string(&self.0).unwrap_or_else(|_| "null".to_string());
         serializer.serialize_str(&json_str)
     }
@@ -21,9 +21,9 @@ impl<'de> Deserialize<'de> for Frontmatter {
     where
         D: Deserializer<'de>,
     {
-        // 从 JSON 字符串反序列化为 serde_yml::Value
+        // 从 JSON 字符串反序列化为 serde_yaml::Value
         let json_str = String::deserialize(deserializer)?;
-        let value: serde_yml::Value =
+        let value: serde_yaml::Value =
             serde_json::from_str(&json_str).map_err(serde::de::Error::custom)?;
         Ok(Frontmatter(value))
     }

@@ -2454,7 +2454,7 @@ mod tests {
             tags:         vec![],
             toc:          vec![],
             mtime:        SystemTime::UNIX_EPOCH,
-            frontmatter:  Frontmatter(serde_yml::Value::Null),
+            frontmatter:  Frontmatter(serde_yaml::Value::Null),
             outgoing_links: vec![],
         };
         let html = build_static_note_html(&note, &[("test.md", "测试笔记")]);

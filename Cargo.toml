@@ -39,7 +39,7 @@ chrono = { version = "0.4.44", features = ["serde"] }
 pathdiff = "0.2.3"
 regex = "1.12.3"
 tracing-log = "0.2.0"
-serde_yml = "0.0.12"
+serde_yaml = "0.9.33"  # 替换 serde_yml（RUSTSEC-2025-0068：unsound + unmaintained）
 num_cpus = "1.17.0"
 tantivy = "0.26.0"
 rayon = "1.12.0"

@@ -50,7 +50,7 @@ impl MarkdownProcessor {
         String,
         Vec<String>,
         Vec<String>,
-        serde_yml::Value,
+        serde_yaml::Value,
         Vec<TocItem>,
     ) {
         // 1. Extract Frontmatter
@@ -457,23 +457,23 @@ impl MarkdownProcessor {
         }
     }
 
-    fn extract_frontmatter(content: &str) -> (String, serde_yml::Value) {
+    fn extract_frontmatter(content: &str) -> (String, serde_yaml::Value) {
         if let Some(caps) = FRONTMATTER_REGEX.captures(content) {
             let yaml_text = caps.get(1).map_or("", |m| m.as_str());
             let body = caps.get(2).map_or("", |m| m.as_str());
 
-            match serde_yml::from_str(yaml_text) {
+            match serde_yaml::from_str(yaml_text) {
                 Ok(fm) => return (body.to_string(), fm),
                 Err(_e) => {
                     // tracing::warn!("Failed to parse YAML frontmatter: {}", e);
-                    return (body.to_string(), serde_yml::Value::Null);
+                    return (body.to_string(), serde_yaml::Value::Null);
                 }
             }
         }
 
         // Try simpler check if regex fails (e.g. file is ONLY frontmatter?)
         // Or if the file doesn't start with ---
-        (content.to_string(), serde_yml::Value::Null)
+        (content.to_string(), serde_yaml::Value::Null)
     }
 }
 
@@ -638,8 +638,8 @@ date: 2024-01-01
         assert_eq!(toc[0].text, "Content Here");
 
         // 验证 frontmatter 内容
-        if let serde_yml::Value::Mapping(map) = frontmatter {
-            assert!(map.contains_key(&serde_yml::Value::String("title".to_string())));
+        if let serde_yaml::Value::Mapping(map) = frontmatter {
+            assert!(map.contains_key(&serde_yaml::Value::String("title".to_string())));
         } else {
             panic!("frontmatter 应该是一个 mapping");
         }

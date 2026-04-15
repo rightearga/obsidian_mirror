@@ -252,7 +252,7 @@ mod tests {
             tags: Vec::new(),
             toc: Vec::<TocItem>::new(),
             mtime: SystemTime::UNIX_EPOCH,
-            frontmatter: Frontmatter(serde_yml::Value::Null),
+            frontmatter: Frontmatter(serde_yaml::Value::Null),
             outgoing_links: outgoing_links.into_iter().map(|s| s.to_string()).collect(),
         }
     }

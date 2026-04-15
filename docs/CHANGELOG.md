@@ -17,10 +17,14 @@
 - **`CLAUDE.md` 关键依赖表**：更新至实际当前版本
 - **`.claude/project.md` 依赖版本速查**：更新至实际当前版本
 
-### 注记
-- `cargo-audit` 需手动安装后运行：`cargo install cargo-audit && cargo audit`
+### Fixed（cargo audit）
+- **RUSTSEC-2025-0068 `serde_yml` unsound/unmaintained**：将直接依赖替换为 `serde_yaml 0.9.34`（使用安全的 `unsafe-libyaml` 后端），同步消除 `libyml` 相关 advisory
+- 全部 `serde_yml::` 引用（9 个文件，30+ 处）统一替换为 `serde_yaml::`
+
+### 注记（接受风险）
+- `rsa` Marvin Attack（RUSTSEC-2023-0071）：来自 `jsonwebtoken` 间接依赖，无可用修复；项目仅使用 HS256，RSA 代码路径不执行
+- `rand` unsound（RUSTSEC-2026-0097）：间接依赖，无可用修复
 - wasm-bindgen 0.2.118 保持不变（wasm-pack 兼容性约束）
-- hmac 0.13 API 变更（SimpleHmac + KeyInit）已在 v1.8.2 适配
 
 ### 测试统计
 - 服务端：125/125 通过
