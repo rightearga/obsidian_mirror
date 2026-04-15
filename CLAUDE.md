@@ -141,6 +141,9 @@ docker compose up -d
 | POST/GET/DELETE | `/api/search/history` | 搜索历史记录（需认证）(v1.5.2) |
 | GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
 | GET | `/graph` | 全局知识图谱专页（全屏，含工具栏、聚类着色，v1.7.0） |
+| GET | `/doc/{path}/history` | 笔记提交历史列表（git log --follow，v1.7.2） |
+| GET | `/doc/{path}/at/{commit}` | 历史版本快照（git show，Markdown 渲染，v1.7.2） |
+| GET | `/doc/{path}/diff/{commit}` | 提交 diff（行级 HTML，XSS 转义，v1.7.2） |
 | POST | `/webhook/sync` | Webhook 触发同步（GitHub/GitLab 签名验证，需 webhook.enabled=true） |
 | POST | `/api/config/reload` | 配置热重载（需认证，重新读取 config.ron 并触发同步） |
 

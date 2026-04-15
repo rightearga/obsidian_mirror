@@ -9,7 +9,8 @@ use askama::Template;
 use crate::state::AppState;
 use crate::sync::perform_sync;
 use crate::sidebar::{flatten_sidebar, find_first_file};
-use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate};
+use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate, NoteHistoryTemplate, NoteHistoryAtTemplate, NoteHistoryDiffTemplate};
+use crate::git::{GitClient, CommitInfo};
 use crate::search_engine::SortBy;
 use crate::graph::generate_graph;
 use crate::domain::BreadcrumbItem;
@@ -1378,6 +1379,298 @@ pub async fn graph_page_handler(
     }
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.7.2：Git 版本历史查看
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// 验证 commit hash 是否合法（仅允许十六进制字符，长度 4–64）。
+///
+/// 防止将用户输入的 commit 参数直接传入 git 命令时产生路径注入风险。
+fn is_valid_commit_hash(hash: &str) -> bool {
+    let len = hash.len();
+    len >= 4 && len <= 64 && hash.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// 将 unified diff 文本渲染为带颜色标记的 HTML 表格。
+///
+/// 新增行（`+`）渲染为绿色，删除行（`-`）渲染为红色，
+/// hunk 标头（`@@`）渲染为蓝色，上下文行为默认色。
+/// 所有内容均经过 HTML 转义，防止 XSS。
+fn render_diff_html(diff: &str) -> String {
+    use crate::markdown::MarkdownProcessor;
+    let mut html = String::from("<table class=\"diff-table\"><tbody>");
+    for line in diff.lines() {
+        // 跳过文件头行（--- / +++ / diff --git 等）
+        if line.starts_with("--- ") || line.starts_with("+++ ") || line.starts_with("diff ") {
+            continue;
+        }
+        if line.starts_with("@@ ") {
+            html.push_str(&format!(
+                "<tr class=\"diff-hunk\"><td colspan=\"2\"><code>{}</code></td></tr>",
+                MarkdownProcessor::html_escape_text(line)
+            ));
+        } else if let Some(rest) = line.strip_prefix('+') {
+            html.push_str(&format!(
+                "<tr class=\"diff-add\"><td class=\"diff-marker\">+</td><td><code>{}</code></td></tr>",
+                MarkdownProcessor::html_escape_text(rest)
+            ));
+        } else if let Some(rest) = line.strip_prefix('-') {
+            html.push_str(&format!(
+                "<tr class=\"diff-del\"><td class=\"diff-marker\">-</td><td><code>{}</code></td></tr>",
+                MarkdownProcessor::html_escape_text(rest)
+            ));
+        } else {
+            let text = line.strip_prefix(' ').unwrap_or(line);
+            html.push_str(&format!(
+                "<tr class=\"diff-ctx\"><td class=\"diff-marker\"> </td><td><code>{}</code></td></tr>",
+                MarkdownProcessor::html_escape_text(text)
+            ));
+        }
+    }
+    html.push_str("</tbody></table>");
+    html
+}
+
+/// GET /doc/{path}/history — 笔记提交历史列表（v1.7.2）
+///
+/// 展示指定笔记所有历史提交（时间降序）。
+/// 未被 Git 追踪的文件显示空列表。
+pub async fn note_history_handler(
+    req: actix_web::HttpRequest,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    // 从路径中提取笔记相对路径（去掉 /doc/ 前缀和 /history 后缀）
+    let full_path = req.path();
+    let note_path_raw = full_path
+        .strip_prefix("/doc/")
+        .and_then(|p| p.strip_suffix("/history"))
+        .unwrap_or("");
+
+    let note_path = percent_encoding::percent_decode_str(note_path_raw)
+        .decode_utf8()
+        .unwrap_or_default()
+        .replace('\\', "/");
+
+    if note_path.is_empty() {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "路径不能为空"}));
+    }
+
+    let local_path = data.config.read().unwrap().local_path.clone();
+    let commits = match GitClient::get_file_history(&note_path, &local_path).await {
+        Ok(v) => v,
+        Err(e) => {
+            error!("获取文件历史失败: {:?}", e);
+            vec![]
+        }
+    };
+
+    // 从 notes 获取标题（用于页面显示）
+    let note_title = {
+        let notes = data.notes.read().await;
+        notes.get(&note_path).map(|n| n.title.clone()).unwrap_or_else(|| note_path.clone())
+    };
+
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+    let page_title = format!("{} — 历史", note_title);
+
+    let tmpl = NoteHistoryTemplate {
+        title: &page_title,
+        sidebar: &flat_sidebar,
+        backlinks: &backlinks_empty,
+        note_title: &note_title,
+        note_path: &note_path,
+        commits: &commits,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("历史列表模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
+    }
+}
+
+/// GET /doc/{path}/at/{commit} — 历史版本快照（v1.7.2）
+///
+/// 展示指定提交时的笔记内容（Markdown → HTML 渲染）。
+/// commit 参数必须为合法十六进制字符串，否则返回 400。
+pub async fn note_history_at_handler(
+    req: actix_web::HttpRequest,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let full_path = req.path();
+
+    // 提取 note_path 和 commit（路径格式：/doc/{path}/at/{commit}）
+    let after_doc = match full_path.strip_prefix("/doc/") {
+        Some(s) => s,
+        None => return HttpResponse::BadRequest().finish(),
+    };
+    // 从右侧找 /at/
+    let at_pos = match after_doc.rfind("/at/") {
+        Some(p) => p,
+        None => return HttpResponse::BadRequest().finish(),
+    };
+    let note_path_raw = &after_doc[..at_pos];
+    let commit_raw = &after_doc[at_pos + 4..]; // 跳过 "/at/"
+
+    let note_path = percent_encoding::percent_decode_str(note_path_raw)
+        .decode_utf8()
+        .unwrap_or_default()
+        .replace('\\', "/");
+    let commit = percent_encoding::percent_decode_str(commit_raw)
+        .decode_utf8()
+        .unwrap_or_default()
+        .to_string();
+
+    if note_path.is_empty() || !is_valid_commit_hash(&commit) {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "参数无效"}));
+    }
+
+    let local_path = data.config.read().unwrap().local_path.clone();
+
+    // 获取历史内容
+    let raw_md = match GitClient::get_file_at_commit(&note_path, &commit, &local_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("获取历史快照失败: {:?}", e);
+            return HttpResponse::NotFound().json(serde_json::json!({"error": "无法获取该历史版本"}));
+        }
+    };
+
+    // 渲染 Markdown
+    let (content_html, _, _, _, toc) = crate::markdown::MarkdownProcessor::process(&raw_md);
+
+    // 获取提交元信息（从历史列表中查找；若找不到则构造最小信息）
+    let commits = GitClient::get_file_history(&note_path, &local_path).await.unwrap_or_default();
+    let commit_info = commits.iter()
+        .find(|c| c.hash.starts_with(&commit) || commit.starts_with(&c.hash))
+        .cloned()
+        .unwrap_or_else(|| CommitInfo {
+            hash: commit.clone(),
+            hash_short: commit.chars().take(8).collect(),
+            author: String::new(),
+            date: String::new(),
+            subject: String::new(),
+        });
+
+    let note_title = {
+        let notes = data.notes.read().await;
+        notes.get(&note_path).map(|n| n.title.clone()).unwrap_or_else(|| note_path.clone())
+    };
+
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+    let page_title = format!("{} @ {}", note_title, &commit_info.hash_short);
+
+    let tmpl = NoteHistoryAtTemplate {
+        title: &page_title,
+        sidebar: &flat_sidebar,
+        backlinks: &backlinks_empty,
+        note_title: &note_title,
+        note_path: &note_path,
+        commit: &commit_info,
+        content_html: &content_html,
+        toc: &toc,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("历史快照模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
+    }
+}
+
+/// GET /doc/{path}/diff/{commit} — 提交 diff 查看（v1.7.2）
+///
+/// 展示指定提交与其上一提交的行级差异，渲染为 HTML 表格。
+/// commit 参数必须为合法十六进制字符串，否则返回 400。
+pub async fn note_history_diff_handler(
+    req: actix_web::HttpRequest,
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let full_path = req.path();
+
+    let after_doc = match full_path.strip_prefix("/doc/") {
+        Some(s) => s,
+        None => return HttpResponse::BadRequest().finish(),
+    };
+    let diff_pos = match after_doc.rfind("/diff/") {
+        Some(p) => p,
+        None => return HttpResponse::BadRequest().finish(),
+    };
+    let note_path_raw = &after_doc[..diff_pos];
+    let commit_raw = &after_doc[diff_pos + 6..]; // 跳过 "/diff/"
+
+    let note_path = percent_encoding::percent_decode_str(note_path_raw)
+        .decode_utf8()
+        .unwrap_or_default()
+        .replace('\\', "/");
+    let commit = percent_encoding::percent_decode_str(commit_raw)
+        .decode_utf8()
+        .unwrap_or_default()
+        .to_string();
+
+    if note_path.is_empty() || !is_valid_commit_hash(&commit) {
+        return HttpResponse::BadRequest().json(serde_json::json!({"error": "参数无效"}));
+    }
+
+    let local_path = data.config.read().unwrap().local_path.clone();
+
+    let diff_text = match GitClient::get_file_diff(&note_path, &commit, &local_path).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("获取 diff 失败: {:?}", e);
+            return HttpResponse::NotFound().json(serde_json::json!({"error": "无法获取 diff"}));
+        }
+    };
+
+    let diff_html = render_diff_html(&diff_text);
+
+    // 获取提交元信息
+    let commits = GitClient::get_file_history(&note_path, &local_path).await.unwrap_or_default();
+    let commit_info = commits.iter()
+        .find(|c| c.hash.starts_with(&commit) || commit.starts_with(&c.hash))
+        .cloned()
+        .unwrap_or_else(|| CommitInfo {
+            hash: commit.clone(),
+            hash_short: commit.chars().take(8).collect(),
+            author: String::new(),
+            date: String::new(),
+            subject: String::new(),
+        });
+
+    let note_title = {
+        let notes = data.notes.read().await;
+        notes.get(&note_path).map(|n| n.title.clone()).unwrap_or_else(|| note_path.clone())
+    };
+
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+    let page_title = format!("{} — Diff {}", note_title, &commit_info.hash_short);
+
+    let tmpl = NoteHistoryDiffTemplate {
+        title: &page_title,
+        sidebar: &flat_sidebar,
+        backlinks: &backlinks_empty,
+        note_title: &note_title,
+        note_path: &note_path,
+        commit: &commit_info,
+        diff_html: &diff_html,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("Diff 模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1636,5 +1929,56 @@ mod tests {
     async fn test_hex_decode_valid() {
         // 合法十六进制解码
         assert_eq!(hex_decode("deadbeef"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
+    }
+
+    // ── v1.7.2：Git 历史相关单元测试 ──────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_is_valid_commit_hash_valid() {
+        // 合法 commit hash：40 位全小写十六进制
+        assert!(is_valid_commit_hash("a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"));
+        // 缩短 hash（8 位）也合法
+        assert!(is_valid_commit_hash("af605ea7"));
+        // 最小长度 4 位
+        assert!(is_valid_commit_hash("abcd"));
+    }
+
+    #[actix_web::test]
+    async fn test_is_valid_commit_hash_invalid() {
+        // 空字符串不合法
+        assert!(!is_valid_commit_hash(""));
+        // 包含非十六进制字符（g、空格）
+        assert!(!is_valid_commit_hash("g1b2c3d4"));
+        assert!(!is_valid_commit_hash("a1b2 c3d4"));
+        // 长度不足 4 位
+        assert!(!is_valid_commit_hash("abc"));
+        // 长度超过 64 位
+        assert!(!is_valid_commit_hash(&"a".repeat(65)));
+        // 路径注入尝试
+        assert!(!is_valid_commit_hash("HEAD~1"));
+        assert!(!is_valid_commit_hash("HEAD^"));
+        assert!(!is_valid_commit_hash("../secret"));
+    }
+
+    #[actix_web::test]
+    async fn test_render_diff_html_basic() {
+        // 验证 diff 渲染结果包含正确的 CSS class
+        let diff = "--- a/note.md\n+++ b/note.md\n@@ -1,2 +1,3 @@\n context\n-deleted\n+added\n";
+        let html = render_diff_html(diff);
+        assert!(html.contains("diff-add"), "新增行应有 diff-add class");
+        assert!(html.contains("diff-del"), "删除行应有 diff-del class");
+        assert!(html.contains("diff-hunk"), "hunk 标头应有 diff-hunk class");
+        assert!(html.contains("diff-ctx"), "上下文行应有 diff-ctx class");
+        // 文件头行（--- +++）应被跳过
+        assert!(!html.contains("--- a/"), "文件头行不应出现在渲染结果中");
+    }
+
+    #[actix_web::test]
+    async fn test_render_diff_html_xss_escaped() {
+        // diff 内容含 HTML 特殊字符时应被转义，防止 XSS
+        let diff = "+<script>alert(1)</script>\n";
+        let html = render_diff_html(diff);
+        assert!(!html.contains("<script>"), "script 标签应被 HTML 转义");
+        assert!(html.contains("&lt;script&gt;"), "尖括号应被转义为 &lt;/&gt;");
     }
 }

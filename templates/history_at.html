@@ -1,0 +1,68 @@
+{% extends "layout.html" %}
+
+{% block right_sidebar %}
+{% if !toc.is_empty() %}
+<div class="toc-sidebar" id="toc-sidebar">
+  <div class="toc-title">目录</div>
+  <ul class="toc-list">
+    {% for item in toc %}
+    <li class="toc-item toc-level-{{ item.level }}">
+      <a href="#{{ item.id }}" class="toc-link">{{ item.text }}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<!-- 历史快照标记横幅 -->
+<div class="history-snapshot-banner">
+  <div class="snapshot-info">
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline>
+    </svg>
+    <span>历史快照</span>
+    <code class="snapshot-hash">{{ commit.hash_short }}</code>
+    <span class="snapshot-date">{{ commit.date|truncate(19) }}</span>
+    <span class="snapshot-subject">{{ commit.subject }}</span>
+  </div>
+  <div class="snapshot-actions">
+    <a href="/doc/{{ note_path }}/history" class="btn-snapshot">历史列表</a>
+    <a href="/doc/{{ note_path }}/diff/{{ commit.hash }}" class="btn-snapshot">查看 Diff</a>
+    <a href="/doc/{{ note_path }}" class="btn-snapshot btn-primary">当前版本</a>
+  </div>
+</div>
+
+<div class="note-header">
+  <h1 class="note-title">{{ note_title }}</h1>
+</div>
+
+<div class="markdown-content">
+  {{ content_html|safe }}
+</div>
+
+<style>
+.history-snapshot-banner {
+  display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+  padding: 8px 16px; margin-bottom: 16px;
+  background: var(--bg-secondary, #1e1e2e);
+  border: 1px solid #e0af68; border-radius: 6px;
+  font-size: 0.85rem;
+}
+.snapshot-info { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.snapshot-info svg { color: #e0af68; flex-shrink: 0; }
+.snapshot-info span { color: #e0af68; font-weight: 600; }
+.snapshot-hash { font-family: monospace; background: var(--bg-primary, #181825); padding: 1px 6px; border-radius: 3px; color: var(--text-primary, #cdd6f4); }
+.snapshot-date { color: var(--text-muted, #6c7086) !important; font-weight: 400 !important; }
+.snapshot-subject { color: var(--text-primary, #cdd6f4) !important; font-weight: 400 !important; font-style: italic; }
+.snapshot-actions { display: flex; gap: 6px; }
+.btn-snapshot {
+  padding: 3px 10px; border: 1px solid var(--border-color, #313244);
+  border-radius: 4px; font-size: 0.82rem; text-decoration: none;
+  color: var(--text-primary, #cdd6f4); background: var(--bg-primary, #181825);
+}
+.btn-snapshot:hover { background: var(--bg-hover, rgba(255,255,255,0.07)); }
+.btn-snapshot.btn-primary { background: var(--accent-color, #6a5acd); border-color: var(--accent-color, #6a5acd); color: #fff; }
+</style>
+{% endblock %}

@@ -555,7 +555,7 @@ impl Bitset {
 
 ---
 
-### 🔧 v1.7.2 — Git 版本历史查看
+### ✅ v1.7.2 (已发布 - 2026-04-15) — Git 版本历史查看
 
 **主题**：基于 Git log 展示笔记的修改历史，让笔记内容演变可追溯
 
@@ -579,6 +579,17 @@ impl Bitset {
 - 只读：不支持回滚或手动提交
 - 仅对已在 Git 追踪的文件生效（新建未提交的文件无历史）
 - 认证：与 `/doc/{path}` 相同的访问控制
+
+#### 实际交付物
+- 修改文件：`src/git.rs`（`CommitInfo` + 3 个历史方法）
+- 修改文件：`src/templates.rs`（3 个新模板结构体）
+- 修改文件：`src/handlers.rs`（3 个新 handler + `is_valid_commit_hash` + `render_diff_html`）
+- 修改文件：`src/main.rs`（3 条新路由，注册在 doc_handler 之前）
+- 新增文件：`templates/history.html`、`templates/history_at.html`、`templates/history_diff.html`
+
+#### 测试结果
+- 服务端全量测试：**102/102 通过**
+- 新增测试：4 个（commit hash 验证 ×2、diff 渲染 XSS 防护 ×2）
 
 ---
 

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use tokio::process::Command;
 use tracing::{info, warn};
 use anyhow::{Result, Context};
+use serde::Serialize;
 
 #[derive(Debug, Clone)]
 pub enum SyncResult {
@@ -14,6 +15,21 @@ pub enum SyncResult {
     },
     /// 无变更
     NoChange,
+}
+
+/// 单次 Git 提交的元信息（v1.7.2：文件历史功能）
+#[derive(Debug, Clone, Serialize)]
+pub struct CommitInfo {
+    /// 完整提交 hash（40 位十六进制）
+    pub hash: String,
+    /// 缩短的 hash（前 8 位，用于 UI 显示）
+    pub hash_short: String,
+    /// 作者邮箱
+    pub author: String,
+    /// 提交日期（ISO 8601，如 "2026-04-15 10:00:00 +0800"）
+    pub date: String,
+    /// 提交说明（首行摘要）
+    pub subject: String,
 }
 
 pub struct GitClient;
@@ -164,6 +180,127 @@ impl GitClient {
         Ok(commit)
     }
     
+    /// 获取指定文件的 Git 提交历史（v1.7.2）
+    ///
+    /// 使用 `git log --follow` 追踪文件重命名历史，返回按时间降序排列的提交列表。
+    /// 文件未被 Git 追踪时返回空列表（不报错）。
+    pub async fn get_file_history(
+        file_rel_path: &str,
+        local_path: &Path,
+    ) -> Result<Vec<CommitInfo>> {
+        let output = Command::new("git")
+            .current_dir(local_path)
+            .args([
+                "-c", "core.quotePath=false",
+                "log",
+                "--follow",
+                "--format=%H|%ae|%ai|%s",
+                "--",
+                file_rel_path,
+            ])
+            .output()
+            .await
+            .context("git log 执行失败")?;
+
+        // 文件未被追踪时 git log 返回空输出（status=0），静默返回空列表
+        let out = String::from_utf8_lossy(&output.stdout);
+        let commits = out
+            .lines()
+            .filter(|l| !l.is_empty())
+            .filter_map(|line| {
+                // 格式：hash|author|date|subject（subject 可能包含 |，用 splitn(4)）
+                let parts: Vec<&str> = line.splitn(4, '|').collect();
+                if parts.len() < 4 {
+                    return None;
+                }
+                let hash = parts[0].trim().to_string();
+                let hash_short = hash.chars().take(8).collect();
+                Some(CommitInfo {
+                    hash_short,
+                    hash,
+                    author:  parts[1].trim().to_string(),
+                    date:    parts[2].trim().to_string(),
+                    subject: parts[3].trim().to_string(),
+                })
+            })
+            .collect();
+
+        Ok(commits)
+    }
+
+    /// 获取指定提交时的文件原始内容（v1.7.2）
+    ///
+    /// 使用 `git show {commit}:{path}` 读取历史快照内容。
+    /// 返回原始 Markdown 文本，调用方负责渲染。
+    pub async fn get_file_at_commit(
+        file_rel_path: &str,
+        commit: &str,
+        local_path: &Path,
+    ) -> Result<String> {
+        let spec = format!("{}:{}", commit, file_rel_path);
+        let output = Command::new("git")
+            .current_dir(local_path)
+            .args(["show", &spec])
+            .output()
+            .await
+            .context("git show 执行失败")?;
+
+        if !output.status.success() {
+            return Err(anyhow::anyhow!(
+                "无法获取提交 {} 时的文件内容（文件可能在该提交时不存在）",
+                commit
+            ));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    }
+
+    /// 获取指定提交相对于上一提交的 unified diff（v1.7.2）
+    ///
+    /// 使用 `git diff {commit}~1 {commit} -- {path}`。
+    /// 若为首次提交（无父提交），自动回退为与空树的 diff。
+    pub async fn get_file_diff(
+        file_rel_path: &str,
+        commit: &str,
+        local_path: &Path,
+    ) -> Result<String> {
+        let output = Command::new("git")
+            .current_dir(local_path)
+            .args([
+                "-c", "core.quotePath=false",
+                "diff",
+                &format!("{}~1", commit),
+                commit,
+                "--",
+                file_rel_path,
+            ])
+            .output()
+            .await
+            .context("git diff 执行失败")?;
+
+        if output.status.success() {
+            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+        }
+
+        // 首次提交无父节点，改用 4b825dc...（Git 空树 hash）做比较
+        let empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        let output2 = Command::new("git")
+            .current_dir(local_path)
+            .args([
+                "-c", "core.quotePath=false",
+                "diff",
+                empty_tree,
+                commit,
+                "--",
+                file_rel_path,
+            ])
+            .output()
+            .await
+            .context("git diff（首次提交）执行失败")?;
+
+        Ok(String::from_utf8_lossy(&output2.stdout).to_string())
+    }
+
     /// 获取两个提交之间变更的文件列表
     async fn get_changed_files(
         local_path: &Path,

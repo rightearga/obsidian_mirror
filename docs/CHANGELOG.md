@@ -8,6 +8,22 @@
 
 ---
 
+## [v1.7.2] — 2026-04-15
+
+Git 版本历史查看：基于 Git log 展示笔记修改历史、历史快照和提交 diff。
+
+### Added
+- **Git 历史 API**（`src/git.rs`）：新增 `CommitInfo` 结构体及 3 个异步方法：`get_file_history`（`git log --follow`）、`get_file_at_commit`（`git show`）、`get_file_diff`（`git diff {commit}~1 {commit}`，首次提交自动回退空树 hash）
+- **笔记提交历史页**（`GET /doc/{path}/history`）：展示时间降序提交列表，含 hash、作者、日期、说明及跳转操作
+- **历史版本快照页**（`GET /doc/{path}/at/{commit}`）：展示指定提交时的笔记渲染内容，顶部显示历史快照标记横幅
+- **提交 diff 页**（`GET /doc/{path}/diff/{commit}`）：行级 diff，新增绿色、删除红色，HTML 转义防 XSS
+- **commit hash 注入防护**（`is_valid_commit_hash`）：白名单验证（仅十六进制字符，4–64 位），拒绝 `HEAD~1`、`../` 等注入尝试
+
+### 测试统计
+- 服务端：102/102 通过（新增 4 个：commit hash 验证 ×2、diff 渲染 ×2）
+
+---
+
 ## [v1.7.1] — 2026-04-15
 
 代码审计修复版本（CODEREVIEW_1.7）。

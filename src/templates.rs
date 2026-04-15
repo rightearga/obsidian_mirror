@@ -1,6 +1,7 @@
 // Askama 模板定义
 use crate::domain::{BreadcrumbItem, FlatNode, TocItem};
 use askama::Template;
+use crate::git::CommitInfo;
 
 /// 页面模板（用于显示单个笔记）
 #[derive(Template)]
@@ -103,4 +104,55 @@ pub struct AdminUsersTemplate<'a> {
     pub backlinks: &'a [String],
     /// (用户名, 角色字符串, 是否启用) 列表
     pub users: &'a [(String, String, bool)],
+}
+
+/// 笔记提交历史列表页模板（v1.7.2）
+#[derive(Template)]
+#[template(path = "history.html")]
+pub struct NoteHistoryTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+    /// 笔记标题（用于页面顶部展示）
+    pub note_title: &'a str,
+    /// 笔记相对路径（用于跳转链接）
+    pub note_path: &'a str,
+    /// 提交历史列表（时间降序）
+    pub commits: &'a [CommitInfo],
+}
+
+/// 历史版本快照页模板（v1.7.2）
+#[derive(Template)]
+#[template(path = "history_at.html")]
+pub struct NoteHistoryAtTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+    /// 笔记标题
+    pub note_title: &'a str,
+    /// 笔记相对路径
+    pub note_path: &'a str,
+    /// 提交元信息（快照所属提交）
+    pub commit: &'a CommitInfo,
+    /// 已渲染的历史版本 HTML
+    pub content_html: &'a str,
+    /// 目录
+    pub toc: &'a [TocItem],
+}
+
+/// 提交 diff 页模板（v1.7.2）
+#[derive(Template)]
+#[template(path = "history_diff.html")]
+pub struct NoteHistoryDiffTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+    /// 笔记标题
+    pub note_title: &'a str,
+    /// 笔记相对路径
+    pub note_path: &'a str,
+    /// 提交元信息
+    pub commit: &'a CommitInfo,
+    /// 已渲染的 diff HTML（带行颜色标记）
+    pub diff_html: &'a str,
 }

@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::AppState,
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -451,6 +451,10 @@ async fn start_http_server(
             .route("/api/search/history", web::post().to(add_search_history_handler))
             .route("/api/search/history", web::get().to(get_search_history_handler))
             .route("/api/search/history", web::delete().to(clear_search_history_handler))
+            // Git 历史路由（v1.7.2）：必须在 doc_handler 之前注册，否则被 /doc/{path:.*} 吞掉
+            .route("/doc/{path:.*}/history",          web::get().to(note_history_handler))
+            .route("/doc/{path:.*}/at/{commit}",      web::get().to(note_history_at_handler))
+            .route("/doc/{path:.*}/diff/{commit}",    web::get().to(note_history_diff_handler))
             .service(doc_handler)
             .service(index_handler)
     })
