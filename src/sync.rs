@@ -585,7 +585,16 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         let tag_idx   = data.tag_index.read().await;
         let backlinks = data.backlinks.read().await;
         // v1.8.4：传入 backlinks 用于计算最活跃笔记排行（入度）
-        let new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx, &backlinks);
+        let mut new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx, &backlinks);
+
+        // v1.9.3：阅读频率热力图——从 reading_progress_db 聚合访问次数（需 spawn_blocking）
+        let rp_db = data.reading_progress_db.clone();
+        if let Ok(Ok(visit_counts)) = tokio::task::spawn_blocking(move || rp_db.get_all_visit_counts(10)).await {
+            new_cache.reading_hotmap = visit_counts.into_iter()
+                .map(|(path, title, count)| crate::insights::ReadingHotEntry { path, title, visit_count: count })
+                .collect();
+        }
+
         *data.insights_cache.write().await = new_cache;
         info!("✅ 笔记洞察缓存已更新");
 

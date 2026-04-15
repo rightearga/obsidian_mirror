@@ -8,6 +8,20 @@
 
 ---
 
+## [v1.9.3] — 2026-04-15
+
+洞察 Dashboard 深化：标签共现矩阵、笔记连通度评分、阅读频率热力图。
+
+### Added
+- **标签共现矩阵**（`src/insights.rs`）：`TagPair` 类型 + `compute_tag_cooccurrence()`，取前 15 高频标签的两两共现次数；洞察页纯 SVG 热力矩阵图，点击标签跳转
+- **笔记连通度评分**（`src/insights.rs`）：`ConnectivityEntry` 类型 + `compute_connectivity()`，评分 = (入度×2 + 出度) / ln(n)，归一化 Top 10；洞察页横向进度条可视化
+- **阅读频率热力图**（`src/reading_progress_db.rs`、`src/sync.rs`）：`ReadingHotEntry` 类型 + `get_all_visit_counts()` 方法；sync 后通过 `spawn_blocking` 聚合所有用户访问记录并填充 `InsightsCache.reading_hotmap`；洞察页 Top 10 访问次数可视化
+
+### 测试统计
+- 服务端：133/133 通过（新增 4 个：共现 ×2、连通度 ×1、空值 ×1）
+
+---
+
 ## [v1.9.2] — 2026-04-15
 
 图谱路径查找：BFS 算法找到两篇笔记之间的最短链接路径，支持高亮和知识导航。

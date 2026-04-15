@@ -3,7 +3,8 @@
 //! 管理用户的笔记阅读进度和历史记录
 
 use anyhow::{Context, Result};
-use redb::{Database, ReadableDatabase, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::SystemTime;
@@ -456,6 +457,35 @@ impl ReadingProgressDatabase {
         }
 
         Ok(removed_count)
+    }
+
+    /// 统计所有用户的笔记访问次数，返回 Top N（v1.9.3 阅读频率热力图）
+    ///
+    /// 扫描 `READING_HISTORY_TABLE` 全表，统计每个笔记路径的访问次数（跨所有用户）。
+    /// 返回按访问次数降序排列的 `(path, title, visit_count)` 列表。
+    pub fn get_all_visit_counts(&self, limit: usize) -> Result<Vec<(String, String, u32)>> {
+        let read_txn = self.db.begin_read()?;
+        let table = read_txn.open_table(READING_HISTORY_TABLE)
+            .context("打开阅读历史表失败")?;
+
+        // 按 (note_path, note_title) 聚合访问次数
+        let mut visit_map: HashMap<String, (String, u32)> = HashMap::new();
+
+        for entry in table.iter()? {
+            let (_, value) = entry?;
+            if let Ok(history) = serde_json::from_str::<ReadingHistory>(value.value()) {
+                let e = visit_map.entry(history.note_path.clone())
+                    .or_insert((history.note_title.clone(), 0));
+                e.1 += 1;
+            }
+        }
+
+        let mut result: Vec<(String, String, u32)> = visit_map.into_iter()
+            .map(|(path, (title, count))| (path, title, count))
+            .collect();
+        result.sort_by(|a, b| b.2.cmp(&a.2));
+        result.truncate(limit);
+        Ok(result)
     }
 }
 

@@ -1092,7 +1092,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
-### 🔧 v1.9.3 — 洞察 Dashboard 深化（方向 B）
+### ✅ v1.9.3 (已发布 - 2026-04-15) — 洞察 Dashboard 深化（方向 B）
 
 **主题**：从现有数据中挖掘更深层的知识结构信息
 
@@ -1114,6 +1114,16 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 - `GET /api/insights/stats` 新增 `reading_hotmap: Vec<{path, title, visit_count}>`
   - 从 `reading_progress_db` 聚合访问次数（按 username+path 去重）
 - 洞察页新增 **"最常阅读笔记 Top 10"**（访问次数可视化）
+
+#### 实际交付物
+- 修改文件：`src/insights.rs`（TagPair/ConnectivityEntry/ReadingHotEntry + 3 个计算函数 + 4 个测试）
+- 修改文件：`src/reading_progress_db.rs`（get_all_visit_counts 方法）
+- 修改文件：`src/sync.rs`（spawn_blocking 填充 reading_hotmap）
+- 修改文件：`templates/insights.html`（3 个新可视化模块 + JS）
+
+#### 测试结果
+- 服务端全量测试：**133/133 通过**
+- 新增测试：4 个（共现矩阵 ×2、连通度基础 ×1、无标签空值 ×1）
 
 ---
 

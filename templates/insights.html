@@ -146,6 +146,27 @@
             <svg id="link-trend-chart" height="100" viewBox="0 0 500 100" preserveAspectRatio="none"></svg>
         </div>
 
+        <!-- v1.9.3：标签共现矩阵 -->
+        <div class="section-card">
+            <h2>标签共现矩阵（Top 15 标签两两共现次数）</h2>
+            <div id="cooccurrence-container" style="overflow-x:auto;margin-top:8px;"></div>
+            <div id="cooccurrence-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">标签数量不足，无法生成共现矩阵</div>
+        </div>
+
+        <!-- v1.9.3：笔记连通度评分 -->
+        <div class="section-card">
+            <h2>笔记连通度 Top 10（知识网络枢纽度）</h2>
+            <div id="connectivity-list" style="font-size:0.88rem;"></div>
+            <div id="connectivity-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">暂无连通度数据</div>
+        </div>
+
+        <!-- v1.9.3：阅读频率热力图 -->
+        <div class="section-card">
+            <h2>最常阅读笔记 Top 10</h2>
+            <div id="reading-hot-list" style="font-size:0.88rem;"></div>
+            <div id="reading-hot-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">暂无阅读记录</div>
+        </div>
+
         <!-- 标签云 -->
         <div class="section-card">
             <h2>标签云</h2>
@@ -245,6 +266,11 @@
     // ── v1.8.4：最活跃笔记排行 + 链接趋势 ──────────────────────────────────
     renderMostLinked(stats.most_linked_notes);
     renderLinkTrend(stats.monthly_link_counts);
+
+    // ── v1.9.3：标签共现矩阵 + 连通度 + 阅读热力图 ──────────────────────────
+    renderCooccurrence(stats.tag_cooccurrence);
+    renderConnectivity(stats.connectivity_scores);
+    renderReadingHot(stats.reading_hotmap);
 
     // ── 标签云 ───────────────────────────────────────────────────────────────
     renderTagCloud(stats.tag_cloud);
@@ -377,6 +403,123 @@ function renderLinkTrend(monthly) {
 
 function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── v1.9.3：标签共现矩阵 ────────────────────────────────────────────────────
+function renderCooccurrence(pairs) {
+    const container = document.getElementById('cooccurrence-container');
+    if (!pairs || pairs.length === 0) {
+        document.getElementById('cooccurrence-empty').style.display = '';
+        return;
+    }
+
+    // 提取所有涉及的标签（按出现次数，最多 15 个）
+    const tagSet = new Set();
+    pairs.forEach(p => { tagSet.add(p.tag_a); tagSet.add(p.tag_b); });
+    const tags = [...tagSet].slice(0, 15);
+    const n = tags.length;
+    if (n < 2) { document.getElementById('cooccurrence-empty').style.display = ''; return; }
+
+    // 建立 cooc 查找 map
+    const coocMap = {};
+    pairs.forEach(p => {
+        coocMap[`${p.tag_a}|${p.tag_b}`] = p.count;
+        coocMap[`${p.tag_b}|${p.tag_a}`] = p.count; // 对称
+    });
+    const maxCount = Math.max(...pairs.map(p => p.count), 1);
+
+    const cellSize = 28;
+    const labelW   = 90;
+    const svgW     = labelW + n * cellSize + 4;
+    const svgH     = labelW + n * cellSize + 4;
+
+    let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" style="font-size:10px;font-family:sans-serif;">`;
+
+    // 列标签（旋转 -45°）
+    tags.forEach((tag, i) => {
+        const x = labelW + i * cellSize + cellSize / 2;
+        svg += `<text x="${x}" y="${labelW - 4}" transform="rotate(-45,${x},${labelW - 4})"
+                    fill="var(--text-muted,#6c7086)" text-anchor="start" font-size="9">${esc(tag)}</text>`;
+    });
+
+    // 行标签 + 格子
+    tags.forEach((tagA, i) => {
+        const y = labelW + i * cellSize + cellSize / 2 + 4;
+        svg += `<text x="${labelW - 4}" y="${y}" fill="var(--text-muted,#6c7086)" text-anchor="end" dominant-baseline="middle" font-size="9">${esc(tagA)}</text>`;
+
+        tags.forEach((tagB, j) => {
+            const count = coocMap[`${tagA}|${tagB}`] || 0;
+            const alpha = count === 0 ? 0.05 : 0.15 + (count / maxCount) * 0.85;
+            const cx = labelW + j * cellSize;
+            const cy = labelW + i * cellSize;
+            const tagUrl = tagA === tagB ? `/tag/${encodeURIComponent(tagA)}` : `/tag/${encodeURIComponent(tagA)}`;
+            svg += `<rect x="${cx}" y="${cy}" width="${cellSize - 1}" height="${cellSize - 1}"
+                        fill="rgba(106,90,205,${alpha.toFixed(2)})" rx="2"
+                        style="cursor:${count>0?'pointer':'default'}"
+                        onclick="${count>0 ? `window.location.href='/tag/${encodeURIComponent(tagA)}'` : ''}">
+                    <title>${esc(tagA)} ∩ ${esc(tagB)}: ${count}</title>
+                    </rect>`;
+            if (count > 0) {
+                svg += `<text x="${cx + cellSize/2}" y="${cy + cellSize/2 + 3}"
+                            text-anchor="middle" font-size="8" fill="${alpha > 0.5 ? '#fff' : 'var(--text-muted,#6c7086)'}">
+                            ${count}</text>`;
+            }
+        });
+    });
+
+    svg += '</svg>';
+    container.innerHTML = svg;
+}
+
+// ── v1.9.3：笔记连通度评分 ──────────────────────────────────────────────────
+function renderConnectivity(entries) {
+    const container = document.getElementById('connectivity-list');
+    if (!entries || entries.length === 0) {
+        document.getElementById('connectivity-empty').style.display = '';
+        return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">';
+    html += '<thead><tr><th style="text-align:left;padding:4px 8px;color:var(--text-muted)">笔记</th><th style="text-align:right;padding:4px 8px;color:var(--text-muted)">连通度</th></tr></thead><tbody>';
+    entries.forEach(e => {
+        const pct = Math.round(e.score * 100);
+        html += `<tr>
+            <td style="padding:4px 8px;border-bottom:1px solid var(--border-color,#313244)">
+              <a href="/doc/${encodeURIComponent(e.note.path)}" style="color:var(--accent-color,#7aa2f7);text-decoration:none;">${esc(e.note.title)}</a>
+            </td>
+            <td style="padding:4px 8px;text-align:right;border-bottom:1px solid var(--border-color,#313244)">
+              <span style="display:inline-block;width:${pct}px;max-width:120px;height:6px;background:#2ac3de;border-radius:3px;margin-right:6px;vertical-align:middle;"></span>
+              ${pct}%
+            </td>
+          </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+// ── v1.9.3：阅读频率热力图 ──────────────────────────────────────────────────
+function renderReadingHot(entries) {
+    const container = document.getElementById('reading-hot-list');
+    if (!entries || entries.length === 0) {
+        document.getElementById('reading-hot-empty').style.display = '';
+        return;
+    }
+    const maxV = Math.max(...entries.map(e => e.visit_count), 1);
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:0.88rem;">';
+    html += '<thead><tr><th style="text-align:left;padding:4px 8px;color:var(--text-muted)">笔记</th><th style="text-align:right;padding:4px 8px;color:var(--text-muted)">访问次数</th></tr></thead><tbody>';
+    entries.forEach(e => {
+        const pct = Math.round((e.visit_count / maxV) * 100);
+        html += `<tr>
+            <td style="padding:4px 8px;border-bottom:1px solid var(--border-color,#313244)">
+              <a href="/doc/${encodeURIComponent(e.path)}" style="color:var(--accent-color,#7aa2f7);text-decoration:none;">${esc(e.title || e.path)}</a>
+            </td>
+            <td style="padding:4px 8px;text-align:right;border-bottom:1px solid var(--border-color,#313244)">
+              <span style="display:inline-block;width:${pct}px;max-width:120px;height:6px;background:#9ece6a;border-radius:3px;margin-right:6px;vertical-align:middle;"></span>
+              ${e.visit_count}
+            </td>
+          </tr>`;
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
 }
 
 function renderTagCloud(tags) {

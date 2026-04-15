@@ -71,6 +71,37 @@ pub struct MonthlyLinkCount {
     pub link_count: usize,
 }
 
+/// 标签共现对（v1.9.3）：两个标签同时出现在同一笔记中的次数
+#[derive(Debug, Clone, Serialize)]
+pub struct TagPair {
+    /// 第一个标签（字典序较小）
+    pub tag_a: String,
+    /// 第二个标签（字典序较大）
+    pub tag_b: String,
+    /// 共现次数（出现在同一笔记中的次数）
+    pub count: u32,
+}
+
+/// 笔记连通度评分条目（v1.9.3）
+///
+/// 连通度评分 = (入度 × 2 + 出度) / ln(总笔记数 + 1)，归一化到 0–1。
+#[derive(Debug, Clone, Serialize)]
+pub struct ConnectivityEntry {
+    /// 笔记引用
+    pub note:  NoteRef,
+    /// 归一化连通度分数（0.0–1.0）
+    pub score: f32,
+}
+
+/// 阅读频率热力图条目（v1.9.3）：最常访问的笔记
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct ReadingHotEntry {
+    pub path:        String,
+    pub title:       String,
+    /// 所有用户的累计访问次数
+    pub visit_count: u32,
+}
+
 /// 笔记洞察缓存（v1.7.3）
 ///
 /// 在每次 `perform_sync` 完成后由 `compute_insights` 重新计算并存入 `AppState`。
@@ -112,6 +143,14 @@ pub struct InsightsCache {
     pub most_linked_notes: Vec<LinkedNoteEntry>,
     /// 按月统计的出链活动数（最近 24 个月，近似网络密度趋势）
     pub monthly_link_counts: Vec<MonthlyLinkCount>,
+
+    // ── 洞察深化（v1.9.3）──────────────────────────────────────────────────
+    /// 标签共现对列表（前 15 个高频标签间的共现次数，降序）
+    pub tag_cooccurrence: Vec<TagPair>,
+    /// 笔记连通度评分 Top 10（归一化，降序）
+    pub connectivity_scores: Vec<ConnectivityEntry>,
+    /// 阅读频率热力图 Top 10（由 sync.rs 异步填充，默认空列表）
+    pub reading_hotmap: Vec<ReadingHotEntry>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -210,8 +249,13 @@ pub fn compute_insights(
         .collect();
 
     // ── 网络密度趋势：按月统计出链活动（近似，v1.8.4）─────────────────────
-    // 以每篇笔记的 mtime 所在月份累加其出链数，近似表示"当月笔记写作的链接活跃度"
     let monthly_link_counts = build_monthly_link_series(notes);
+
+    // ── 标签共现矩阵（v1.9.3）────────────────────────────────────────────────
+    let tag_cooccurrence = compute_tag_cooccurrence(notes, tag_index);
+
+    // ── 笔记连通度评分（v1.9.3）──────────────────────────────────────────────
+    let connectivity_scores = compute_connectivity(notes, backlinks);
 
     // ── 计算时间戳 ─────────────────────────────────────────────────────────
     let computed_at = SystemTime::now()
@@ -234,6 +278,9 @@ pub fn compute_insights(
         daily_counts,
         most_linked_notes,
         monthly_link_counts,
+        tag_cooccurrence,
+        connectivity_scores,
+        reading_hotmap: vec![],  // 由 sync.rs 通过 spawn_blocking 异步填充
     }
 }
 
@@ -370,6 +417,88 @@ fn build_monthly_link_series(notes: &HashMap<String, Note>) -> Vec<MonthlyLinkCo
 // ──────────────────────────────────────────────────────────────────────────────
 // 测试
 // ──────────────────────────────────────────────────────────────────────────────
+
+/// 计算标签共现矩阵（v1.9.3）
+///
+/// 取最多 15 个高频标签，统计两两共现次数（同一笔记内同时出现）。
+/// 返回按共现次数降序排列的 `TagPair` 列表。
+fn compute_tag_cooccurrence(
+    notes:     &HashMap<String, Note>,
+    tag_index: &HashMap<String, Vec<String>>,
+) -> Vec<TagPair> {
+    const MAX_TAGS: usize = 15;
+
+    // 取出现频率最高的 MAX_TAGS 个标签
+    let mut tag_freq: Vec<(String, usize)> = tag_index.iter()
+        .map(|(tag, notes_list)| (tag.clone(), notes_list.len()))
+        .collect();
+    tag_freq.sort_by(|a, b| b.1.cmp(&a.1));
+    tag_freq.truncate(MAX_TAGS);
+    let top_tags: Vec<&str> = tag_freq.iter().map(|(t, _)| t.as_str()).collect();
+    let top_set: std::collections::HashSet<&str> = top_tags.iter().cloned().collect();
+
+    // 统计共现次数
+    let mut cooc: HashMap<(String, String), u32> = HashMap::new();
+    for note in notes.values() {
+        let tags_in_note: Vec<&str> = note.tags.iter()
+            .filter(|t| top_set.contains(t.as_str()))
+            .map(|t| t.as_str())
+            .collect();
+        for i in 0..tags_in_note.len() {
+            for j in (i + 1)..tags_in_note.len() {
+                // 保证 tag_a < tag_b（字典序），避免重复计数
+                let (a, b) = if tags_in_note[i] < tags_in_note[j] {
+                    (tags_in_note[i], tags_in_note[j])
+                } else {
+                    (tags_in_note[j], tags_in_note[i])
+                };
+                *cooc.entry((a.to_string(), b.to_string())).or_insert(0) += 1;
+            }
+        }
+    }
+
+    let mut pairs: Vec<TagPair> = cooc.into_iter()
+        .map(|((tag_a, tag_b), count)| TagPair { tag_a, tag_b, count })
+        .collect();
+    pairs.sort_by(|a, b| b.count.cmp(&a.count));
+    pairs
+}
+
+/// 计算笔记连通度评分 Top 10（v1.9.3）
+///
+/// 连通度 = (入度 × 2 + 出度) / ln(总笔记数 + 1)，归一化到 0–1。
+/// 综合衡量笔记在知识网络中的"枢纽程度"。
+fn compute_connectivity(
+    notes:     &HashMap<String, Note>,
+    backlinks: &HashMap<String, Vec<String>>,
+) -> Vec<ConnectivityEntry> {
+    let n = notes.len();
+    if n == 0 { return vec![]; }
+
+    let log_n = ((n as f32) + 1.0).ln().max(1.0);
+
+    let mut scores: Vec<(NoteRef, f32)> = notes.values().map(|note| {
+        let in_deg  = backlinks.get(&note.title).map(|v| v.len()).unwrap_or(0) as f32;
+        let out_deg = note.outgoing_links.len() as f32;
+        let raw = (in_deg * 2.0 + out_deg) / log_n;
+        (NoteRef { title: note.title.clone(), path: note.path.clone() }, raw)
+    }).collect();
+
+    // 归一化
+    let max = scores.iter().map(|(_, s)| *s).fold(0.0f32, f32::max);
+    if max > 0.0 {
+        for (_, s) in &mut scores {
+            *s /= max;
+        }
+    }
+
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    scores.into_iter()
+        .take(10)
+        .filter(|(_, s)| *s > 0.0)
+        .map(|(note, score)| ConnectivityEntry { note, score })
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -512,5 +641,57 @@ mod tests {
         notes.insert("x.md".to_string(), make_note("X", "x.md", vec![], vec![], ""));
         let cache = compute_insights(&notes, &HashMap::new(), &HashMap::new(), &HashMap::new());
         assert!(cache.most_linked_notes.is_empty(), "无入链时应为空列表");
+    }
+
+    // ─── v1.9.3 测试：标签共现矩阵 + 连通度 ─────────────────────────────────
+
+    #[test]
+    fn test_cooccurrence_basic() {
+        // 笔记 A 有标签 rust + async，笔记 B 有标签 rust + web
+        let mut notes = HashMap::new();
+        notes.insert("a.md".to_string(), make_note("A", "a.md", vec!["rust","async"], vec![], ""));
+        notes.insert("b.md".to_string(), make_note("B", "b.md", vec!["rust","web"], vec![], ""));
+
+        let mut tag_idx = HashMap::new();
+        tag_idx.insert("rust".to_string(),  vec!["A".to_string(), "B".to_string()]);
+        tag_idx.insert("async".to_string(), vec!["A".to_string()]);
+        tag_idx.insert("web".to_string(),   vec!["B".to_string()]);
+
+        let pairs = compute_tag_cooccurrence(&notes, &tag_idx);
+        // 每个笔记内两两共现：A→(rust,async)，B→(rust,web)
+        assert!(!pairs.is_empty(), "应有共现对");
+        // rust ∩ async = 1（来自 A），rust ∩ web = 1（来自 B），async ∩ web = 0
+        let rust_async = pairs.iter().find(|p|
+            (p.tag_a == "async" && p.tag_b == "rust") ||
+            (p.tag_a == "rust"  && p.tag_b == "async")
+        );
+        assert!(rust_async.is_some(), "rust 和 async 应有共现");
+        assert_eq!(rust_async.unwrap().count, 1);
+    }
+
+    #[test]
+    fn test_cooccurrence_empty_tags() {
+        // 无标签时共现矩阵为空
+        let notes: HashMap<String, crate::domain::Note> = HashMap::new();
+        let pairs = compute_tag_cooccurrence(&notes, &HashMap::new());
+        assert!(pairs.is_empty(), "无标签时应为空");
+    }
+
+    #[test]
+    fn test_connectivity_basic() {
+        // A→B，C→B：B 入度=2，A/C 出度=1
+        let mut notes = HashMap::new();
+        notes.insert("a.md".to_string(), make_note("A", "a.md", vec![], vec!["B"], ""));
+        notes.insert("b.md".to_string(), make_note("B", "b.md", vec![], vec![], ""));
+        notes.insert("c.md".to_string(), make_note("C", "c.md", vec![], vec!["B"], ""));
+
+        let mut backlinks = HashMap::new();
+        backlinks.insert("B".to_string(), vec!["A".to_string(), "C".to_string()]);
+
+        let scores = compute_connectivity(&notes, &backlinks);
+        assert!(!scores.is_empty(), "应有连通度评分");
+        // B 入度最高，应排第一
+        assert_eq!(scores[0].note.title, "B", "B 应连通度最高");
+        assert!((scores[0].score - 1.0).abs() < 0.01, "最高节点归一化为 1.0");
     }
 }
