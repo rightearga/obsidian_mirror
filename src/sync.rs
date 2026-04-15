@@ -81,6 +81,34 @@ use crate::persistence::IndexPersistence;
 /// 7. 增量更新反向链接
 /// 8. 重建侧边栏树
 /// 9. 增量更新搜索索引
+/// 计算并更新笔记洞察缓存（供所有 perform_sync 退出路径共用）
+///
+/// 在 NoChange/持久化命中等提前返回路径中同样需要调用，
+/// 确保 `/api/insights/stats` 不会因未经历完整 sync 而返回零值。
+async fn update_insights_cache(data: &Arc<AppState>) {
+    let notes     = data.notes.read().await;
+    let link_idx  = data.link_index.read().await;
+    let tag_idx   = data.tag_index.read().await;
+    let backlinks = data.backlinks.read().await;
+
+    if notes.is_empty() {
+        return; // 无笔记数据，跳过（避免全零写入覆盖旧缓存）
+    }
+
+    let mut new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx, &backlinks);
+
+    // 阅读频率热力图（需 redb IO，使用 spawn_blocking）
+    let rp_db = data.reading_progress_db.clone();
+    if let Ok(Ok(visit_counts)) = tokio::task::spawn_blocking(move || rp_db.get_all_visit_counts(10)).await {
+        new_cache.reading_hotmap = visit_counts.into_iter()
+            .map(|(path, title, count)| crate::insights::ReadingHotEntry { path, title, visit_count: count })
+            .collect();
+    }
+
+    *data.insights_cache.write().await = new_cache;
+    tracing::info!("✅ 笔记洞察缓存已更新（notes={}）", notes.len());
+}
+
 pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
     use crate::state::sync_status;
     use crate::metrics::{SYNC_TOTAL, SYNC_DURATION_SECONDS, SYNC_LAST_TIMESTAMP_SECONDS};
@@ -205,6 +233,8 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                 }
                 
                 info!("========================================");
+                // 即使无变更，也更新洞察缓存（修复 insights 全零 bug）
+                update_insights_cache(data).await;
                 return Ok(());
             } else {
                 info!("⚠️  无 Git 变更，但内存为空，尝试加载持久化索引");
@@ -251,7 +281,9 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
                                 info!("  ├─ 资源文件总数: {}", file_count);
                                 info!("  └─ 总耗时: {:.2}s", total_time.as_secs_f64());
                                 info!("========================================");
-                                
+
+                                // 持久化命中后也计算洞察缓存（修复 insights 全零 bug）
+                                update_insights_cache(data).await;
                                 return Ok(());
                             }
                             Ok(None) => {
@@ -578,25 +610,11 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         }
     }
 
-    // v1.7.3：同步完成后重新计算笔记洞察缓存
+    // v1.7.3：同步完成后重新计算笔记洞察缓存（使用公共 helper，与早期退出路径共用）
+    update_insights_cache(data).await;
     {
-        let notes     = data.notes.read().await;
-        let link_idx  = data.link_index.read().await;
-        let tag_idx   = data.tag_index.read().await;
-        let backlinks = data.backlinks.read().await;
-        // v1.8.4：传入 backlinks 用于计算最活跃笔记排行（入度）
-        let mut new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx, &backlinks);
-
-        // v1.9.3：阅读频率热力图——从 reading_progress_db 聚合访问次数（需 spawn_blocking）
-        let rp_db = data.reading_progress_db.clone();
-        if let Ok(Ok(visit_counts)) = tokio::task::spawn_blocking(move || rp_db.get_all_visit_counts(10)).await {
-            new_cache.reading_hotmap = visit_counts.into_iter()
-                .map(|(path, title, count)| crate::insights::ReadingHotEntry { path, title, visit_count: count })
-                .collect();
-        }
-
-        *data.insights_cache.write().await = new_cache;
-        info!("✅ 笔记洞察缓存已更新");
+        // v1.8.6：mtime 缓存仍需内联计算（需持有 notes 读锁）
+        let notes = data.notes.read().await;
 
         // v1.8.6：填充 mtime 秒缓存，避免图谱构建热路径重复调用 SystemTime::duration_since()
         let new_mtime: std::collections::HashMap<String, i64> = notes.iter()
