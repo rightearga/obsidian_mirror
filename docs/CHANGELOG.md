@@ -8,6 +8,22 @@
 
 ---
 
+## [v1.7.1] — 2026-04-15
+
+代码审计修复版本（CODEREVIEW_1.7）。
+
+### Fixed
+- **[B1] ReloadPolicy::OnCommitWithDelay 在 Windows 上产生文件锁冲突**（`src/search_engine.rs`）：将 `ReloadPolicy::OnCommitWithDelay` 改为 `ReloadPolicy::Manual`，消灭 commit 后自动启动的 reload 后台线程；在 `rebuild_index` 和 `update_documents` 的 `commit()` 后显式调用 `self.reader.reload()`。修复 Windows 强制文件锁（error code 5）导致段合并写入失败的生产 Bug。
+- **[Q1] WASM crate 模块版本号未更新**（`crates/wasm/src/lib.rs`）：顶部注释从 `v1.6.5` 更新为 `v1.7.0`。
+
+### 审计统计
+- 🟠 P1 修复：1 项（B1）
+- 🔵 P3 修复：1 项（Q1）
+- 接受为设计限制：1 项（I1 vis.js tooltip，与 graph.js 一致）
+- 发现问题总计：2 项
+
+---
+
 ## [v1.7.0] — 2026-04-14
 
 全局知识图谱专页 + WASM M4/M5 性能优化。

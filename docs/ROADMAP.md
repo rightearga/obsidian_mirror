@@ -537,13 +537,21 @@ impl Bitset {
 
 ---
 
-### 🔧 v1.7.1 — 代码审计（CODEREVIEW_1.7）
+### ✅ v1.7.1 (已发布 - 2026-04-15) — 代码审计（CODEREVIEW_1.7）
 
 **主题**：对 v1.7.0 引入的新代码进行系统性审查
 
-- 审计重点：图谱聚类算法的正确性、CJK 评分 Bitset 的边界安全、新路由认证配置
-- 产出：`docs/CODEREVIEW_1.7.md`
-- 遵循审计流程（`/ob-review 1.7`）
+#### 修复内容
+- ✅ **[B1] ReloadPolicy::OnCommitWithDelay Windows 文件锁冲突**：改为 `ReloadPolicy::Manual`，commit 后显式 `reader.reload()`，修复生产环境 PermissionDenied (os error 5)
+- ✅ **[Q1] WASM 模块注释版本号未更新**：`v1.6.5` → `v1.7.0`
+
+#### 设计限制（已知接受）
+- ⏸ I1：vis.js tooltip innerHTML 自内容 XSS，与 graph.js 已有行为一致
+
+#### 测试结果
+- 服务端全量测试：**98/98 通过**
+- WASM 全量测试：**38/38 通过**
+- 新增测试：0 个（审计修复，无新逻辑）
 
 ---
 

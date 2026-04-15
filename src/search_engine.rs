@@ -100,10 +100,16 @@ impl SearchEngine {
             Index::create_in_dir(index_dir, schema.clone())?
         };
 
-        // 初始化并缓存 IndexReader，后续搜索直接复用，避免重复创建
+        // 初始化并缓存 IndexReader，后续搜索直接复用，避免重复创建。
+        // 使用 ReloadPolicy::Manual（非 OnCommitWithDelay）：
+        //   OnCommitWithDelay 会在 commit 后启动后台线程自动重载，
+        //   该后台线程与 IndexWriter 的段合并操作在 Windows 上争抢相同文件的读/写锁，
+        //   导致 "拒绝访问（error code 5）"。
+        //   Manual 模式下无后台线程，rebuild_index / update_documents 在 commit 后
+        //   手动调用 reader.reload()，保证写入完全完成后再开放读取。
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .reload_policy(ReloadPolicy::Manual)
             .try_into()?;
 
         Ok(Self {
@@ -211,6 +217,11 @@ impl SearchEngine {
         // 最终提交
         info!("  ├─ 提交索引...");
         index_writer.commit()?;
+        // 手动刷新 IndexReader（Manual 模式下 commit 不自动触发刷新）。
+        // 必须在 index_writer drop 之前或 drop 之后均可——writer 锁和 reader 刷新互不干扰。
+        if let Err(e) = self.reader.reload() {
+            warn!("  ⚠ IndexReader 刷新失败（搜索将返回旧结果直到下次同步）: {:?}", e);
+        }
         info!("  └─ 索引重建完成，共 {} 条笔记", count);
 
         Ok(())
@@ -271,6 +282,10 @@ impl SearchEngine {
         }
 
         index_writer.commit()?;
+        // 手动刷新 IndexReader，与 rebuild_index 保持一致
+        if let Err(e) = self.reader.reload() {
+            warn!("  ⚠ IndexReader 刷新失败（搜索将返回旧结果直到下次同步）: {:?}", e);
+        }
         info!(
             "  └─ 搜索索引增量更新完成：{} 条更新，{} 条删除",
             updated,
