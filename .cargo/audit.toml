@@ -10,3 +10,8 @@ ignore = [
     # 来源：jsonwebtoken -> rsa -> rand；RSA 路径不执行；无修复版本
     "RUSTSEC-2026-0097",
 ]
+
+# core2 0.4.0 yanked 说明：
+# cargo-audit 0.22 不支持按包名忽略 yanked（无 RUSTSEC advisory ID），
+# yanked 在 cargo-audit 中默认为 warning（不影响 exit code，不需要额外配置）。
+# Zed cargo-appraiser 通过 deny.toml 的 yanked = "allow" 配置压制内联提示。

@@ -6,7 +6,9 @@ targets = []
 
 [advisories]
 version = 2
-# 只把 vulnerability 级别报为错误，其余降为警告
+# yanked = "allow"：压制 core2 0.4.0 yanked 警告
+# core2 来自 jieba-rs -> include-flate 深层依赖链，功能正常，上游未修复
+yanked = "allow"
 ignore = [
     # RUSTSEC-2023-0071：rsa Marvin Attack
     # 来源：jsonwebtoken；项目仅用 HS256，RSA 代码路径从不执行；无修复版本
