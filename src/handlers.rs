@@ -1391,6 +1391,62 @@ pub async fn config_reload_handler(
     }
 }
 
+/// 图谱最短路径 API 查询参数（v1.9.2）
+#[derive(Debug, Deserialize)]
+pub struct PathQuery {
+    /// 起点笔记标识符（标题或路径）
+    pub from: String,
+    /// 终点笔记标识符（标题或路径）
+    pub to: String,
+}
+
+/// GET /api/graph/path — BFS 最短路径查找（v1.9.2）
+///
+/// 在笔记链接图中寻找 `from` 到 `to` 的最短路径（最多 6 跳）。
+///
+/// 响应格式：
+/// ```json
+/// {"nodes":[...],"edges":[...],"hops":3,"message":null}
+/// // 无路径时：
+/// {"nodes":[],"edges":[],"hops":0,"message":"这两篇笔记之间暂无链接路径（最多 6 跳）"}
+/// ```
+#[get("/api/graph/path")]
+pub async fn graph_path_handler(
+    query: web::Query<PathQuery>,
+    data:  web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let from = query.from.trim();
+    let to   = query.to.trim();
+
+    if from.is_empty() || to.is_empty() {
+        return HttpResponse::BadRequest().json(
+            serde_json::json!({"error": "from 和 to 参数不能为空"})
+        );
+    }
+
+    let notes      = data.notes.read().await;
+    let link_index = data.link_index.read().await;
+
+    match crate::graph::find_shortest_path(from, to, &notes, &link_index, 6) {
+        Some((graph_data, hops)) => {
+            HttpResponse::Ok().json(serde_json::json!({
+                "nodes":   graph_data.nodes,
+                "edges":   graph_data.edges,
+                "hops":    hops,
+                "message": serde_json::Value::Null,
+            }))
+        }
+        None => {
+            HttpResponse::Ok().json(serde_json::json!({
+                "nodes":   [],
+                "edges":   [],
+                "hops":    0,
+                "message": "这两篇笔记之间暂无链接路径（最多 6 跳）",
+            }))
+        }
+    }
+}
+
 /// GET /graph — 全局知识图谱专页（v1.7.0）
 ///
 /// 独立全屏图谱页面，支持全局图谱与单笔记子图切换。

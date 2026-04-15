@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::{AppState, VaultRegistry},
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler, vaults_list_handler, feed_handler, export_html_handler, timeline_page_handler, timeline_api_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler, vaults_list_handler, feed_handler, export_html_handler, timeline_page_handler, timeline_api_handler, graph_path_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -565,6 +565,7 @@ async fn start_http_server(
             .service(sync_events_handler)
             .service(sync_history_handler)
             .service(global_graph_handler)
+            .service(graph_path_handler)         // GET /api/graph/path（v1.9.2）
             .service(graph_page_handler)
             .service(insights_page_handler)
             .service(insights_stats_handler)

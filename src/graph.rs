@@ -65,6 +65,104 @@ fn compute_pagerank(
     }).collect()
 }
 
+/// 将路径节点列表（路径列）转换为 `GraphData`（仅含路径上的节点和边）
+fn build_path_graph(path_ids: &[String], notes: &HashMap<String, Note>) -> GraphData {
+    let nodes: Vec<GraphNode> = path_ids.iter()
+        .filter_map(|p| notes.get(p))
+        .map(|note| GraphNode {
+            id:       note.path.clone(),
+            label:    note.title.clone(),
+            title:    note.title.clone(),
+            tags:     note.tags.clone(),
+            mtime:    note_mtime_secs(note),
+            pagerank: 0.0,
+        })
+        .collect();
+
+    let edges: Vec<GraphEdge> = path_ids.windows(2)
+        .map(|w| GraphEdge { from: w[0].clone(), to: w[1].clone(), weight: 1 })
+        .collect();
+
+    GraphData { nodes, edges }
+}
+
+/// 用 BFS 在笔记链接图中寻找两节点间的最短路径（v1.9.2）
+///
+/// # 参数
+/// * `from_id`   - 起点笔记标识符（标题或路径，通过 `link_index` 解析）
+/// * `to_id`     - 终点笔记标识符（同上）
+/// * `notes`     - 全量笔记映射
+/// * `link_index`- 标题/文件名 → 路径索引
+/// * `max_hops`  - 最大跳数上限（防止超时，建议 6）
+///
+/// # 返回
+/// `Some((GraphData, hops))`：路径图谱 + 跳数；`None`：无路径
+pub fn find_shortest_path(
+    from_id:    &str,
+    to_id:      &str,
+    notes:      &HashMap<String, Note>,
+    link_index: &HashMap<String, String>,
+    max_hops:   usize,
+) -> Option<(GraphData, usize)> {
+    // 解析起终点路径（支持标题或路径两种形式）
+    let from_path = link_index.get(from_id)
+        .cloned()
+        .or_else(|| if notes.contains_key(from_id) { Some(from_id.to_string()) } else { None })?;
+    let to_path = link_index.get(to_id)
+        .cloned()
+        .or_else(|| if notes.contains_key(to_id) { Some(to_id.to_string()) } else { None })?;
+
+    // 起终点相同：返回单节点路径
+    if from_path == to_path {
+        let gd = build_path_graph(&[from_path], notes);
+        return Some((gd, 0));
+    }
+
+    // BFS：predecessor 映射（node_path → 前驱 node_path）
+    let mut predecessors: HashMap<String, String> = HashMap::new();
+    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+
+    predecessors.insert(from_path.clone(), String::new()); // 起点前驱为空串
+    queue.push_back((from_path.clone(), 0));
+
+    while let Some((current, hops)) = queue.pop_front() {
+        if hops >= max_hops {
+            continue; // 超过最大跳数，放弃此分支
+        }
+
+        let note = match notes.get(&current) {
+            Some(n) => n,
+            None    => continue,
+        };
+
+        for linked_title in &note.outgoing_links {
+            let Some(linked_path) = link_index.get(linked_title) else { continue };
+            if predecessors.contains_key(linked_path.as_str()) { continue; }
+
+            predecessors.insert(linked_path.clone(), current.clone());
+
+            if linked_path == &to_path {
+                // 找到！反向重建路径
+                let mut path = vec![to_path.clone()];
+                let mut node = to_path.clone();
+                loop {
+                    let prev = predecessors.get(&node).unwrap();
+                    if prev.is_empty() { break; } // 到达起点
+                    path.push(prev.clone());
+                    node = prev.clone();
+                }
+                path.reverse();
+                let hop_count = path.len() - 1;
+                return Some((build_path_graph(&path, notes), hop_count));
+            }
+
+            queue.push_back((linked_path.clone(), hops + 1));
+        }
+    }
+
+    None // 无路径
+}
+
 /// 生成笔记的关系图谱数据
 ///
 /// # 参数
@@ -499,5 +597,55 @@ mod tests {
             a_node.unwrap().tags.contains(&"rust".to_string()),
             "A 节点应携带 rust 标签"
         );
+    }
+
+    // ── v1.9.2 测试：最短路径查找 ──────────────────────────────────────────────
+
+    #[test]
+    fn test_path_direct_link() {
+        // A→B 直接链接：路径为 [A, B]，跳数=1
+        let (notes, link_index) = build_notes_and_index(&[("A", vec!["B"]), ("B", vec![])]);
+        let (gd, hops) = find_shortest_path("A", "B", &notes, &link_index, 6).unwrap();
+        assert_eq!(hops, 1, "直接链接应为 1 跳");
+        assert_eq!(gd.nodes.len(), 2, "路径应含 2 个节点");
+        assert_eq!(gd.edges.len(), 1, "路径应含 1 条边");
+    }
+
+    #[test]
+    fn test_path_two_hops() {
+        // A→B→C：最短路径 2 跳
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec!["C"]), ("C", vec![])]);
+        let (gd, hops) = find_shortest_path("A", "C", &notes, &link_index, 6).unwrap();
+        assert_eq!(hops, 2, "两跳路径");
+        assert_eq!(gd.nodes.len(), 3);
+    }
+
+    #[test]
+    fn test_path_no_route() {
+        // A→B，C 孤立：A→C 无路径
+        let (notes, link_index) =
+            build_notes_and_index(&[("A", vec!["B"]), ("B", vec![]), ("C", vec![])]);
+        let result = find_shortest_path("A", "C", &notes, &link_index, 6);
+        assert!(result.is_none(), "无路径应返回 None");
+    }
+
+    #[test]
+    fn test_path_same_node() {
+        // 起终点相同：返回单节点路径，0 跳
+        let (notes, link_index) = build_notes_and_index(&[("A", vec![])]);
+        let (gd, hops) = find_shortest_path("A", "A", &notes, &link_index, 6).unwrap();
+        assert_eq!(hops, 0, "相同节点应为 0 跳");
+        assert_eq!(gd.nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_path_max_hops_respected() {
+        // A→B→C→D：路径 3 跳，但 max_hops=2 时应返回 None
+        let (notes, link_index) = build_notes_and_index(&[
+            ("A", vec!["B"]), ("B", vec!["C"]), ("C", vec!["D"]), ("D", vec![]),
+        ]);
+        let result = find_shortest_path("A", "D", &notes, &link_index, 2);
+        assert!(result.is_none(), "超过 max_hops 应返回 None");
     }
 }

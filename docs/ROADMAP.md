@@ -1061,7 +1061,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
-### 🔧 v1.9.2 — 图谱路径查找（方向 A·进阶）
+### ✅ v1.9.2 (已发布 - 2026-04-15) — 图谱路径查找（方向 A·进阶）
 
 **主题**：在图谱中找到两篇笔记之间的最短链接路径，支持知识导航
 
@@ -1079,6 +1079,16 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
   - 查找后路径节点高亮（金色边框），非路径节点半透明
   - 显示跳数和路径节点列表（可点击跳转）
 - 无路径时友好提示"这两篇笔记之间暂无链接路径"
+
+#### 实际交付物
+- 修改文件：`src/graph.rs`（find_shortest_path + build_path_graph + 5 个测试）
+- 修改文件：`src/handlers.rs`（graph_path_handler + PathQuery）
+- 修改文件：`src/main.rs`（路由注册）
+- 修改文件：`templates/graph_page.html`（路径查找面板 + JS）
+
+#### 测试结果
+- 服务端全量测试：**130/130 通过**
+- 新增测试：5 个（直接链接/两跳/无路径/同节点/max_hops 限制）
 
 ---
 
