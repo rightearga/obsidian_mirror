@@ -60,4 +60,48 @@
     }
 
     registerServiceWorker();
+    initNetworkStatus();
+    initSyncCompleteListener();
 })();
+
+// ==========================================
+// v1.8.3：网络状态指示器
+// ==========================================
+
+/** 初始化网络状态监听，同步更新状态栏图标和搜索框提示 */
+function initNetworkStatus() {
+    function update() {
+        const online = navigator.onLine;
+        const dot  = document.getElementById('network-dot');
+        const text = document.getElementById('network-status-text');
+        if (dot)  dot.classList.toggle('offline', !online);
+        if (text) text.textContent = online ? '在线' : '离线';
+        // 离线时在搜索模态框中显示提示
+        const hint = document.getElementById('offline-search-hint');
+        if (hint) hint.style.display = online ? 'none' : '';
+    }
+
+    window.addEventListener('online',  update);
+    window.addEventListener('offline', update);
+    // DOMContentLoaded 后执行一次（DOM 可能还未就绪）
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', update);
+    } else {
+        update();
+    }
+}
+
+// ==========================================
+// v1.8.3：Service Worker 同步完成通知监听
+// ==========================================
+
+/** 监听 Service Worker 发来的 SYNC_COMPLETE 消息，显示刷新横幅 */
+function initSyncCompleteListener() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.addEventListener('message', (event) => {
+        if (event.data && event.data.type === 'SYNC_COMPLETE') {
+            const banner = document.getElementById('sync-refresh-banner');
+            if (banner) banner.classList.add('visible');
+        }
+    });
+}

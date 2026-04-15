@@ -407,6 +407,13 @@ async function _fetchAndRenderSearch(page, append) {
         const response = await fetch(`/api/search?${searchParams.toString()}`);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
+        // v1.8.3：Service Worker 离线搜索时设置 X-Offline-Search 响应头
+        const isOfflineSearch = response.headers.get('X-Offline-Search');
+        const offlineHint = document.getElementById('offline-search-hint');
+        if (offlineHint && isOfflineSearch) {
+            offlineHint.style.display = '';  // 离线时显示提示
+        }
+
         const data = await response.json();
         // v1.8.0：响应格式为 {results, total, page, per_page, total_pages}
         const results    = data.results    ?? data;    // 向后兼容旧格式（纯数组）

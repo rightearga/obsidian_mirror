@@ -60,10 +60,49 @@
 
     <!-- v1.8.2 打印/导出 PDF 专用样式 -->
     <link rel="stylesheet" href="/static/css/print.css?v=20260415">
+    <style>
+    /* v1.8.3：后台同步完成横幅 */
+    #sync-refresh-banner {
+        display: none;
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        z-index: 10000;
+        background: var(--accent-color, #6a5acd);
+        color: #fff;
+        text-align: center;
+        padding: 8px 16px;
+        font-size: 0.88rem;
+        gap: 12px;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+    }
+    #sync-refresh-banner.visible { display: flex; }
+    #sync-refresh-banner button {
+        background: rgba(255,255,255,0.25);
+        border: 1px solid rgba(255,255,255,0.5);
+        border-radius: 4px; color: #fff;
+        padding: 2px 8px; cursor: pointer; font-size: 0.82rem;
+    }
+    /* v1.8.3：网络状态指示器（状态栏） */
+    .statusbar-network { display: flex; align-items: center; gap: 4px; }
+    .network-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: #9ece6a; transition: background 0.4s;
+    }
+    .network-dot.offline { background: #f7768e; }
+    </style>
     <!-- 子模板可以通过 block head 添加额外的 head 内容 -->
     {% block head %}{% endblock %}
 </head>
 <body>
+    <!-- v1.8.3：后台同步完成横幅（初始隐藏，SW 通知后显示） -->
+    <div id="sync-refresh-banner" role="alert" onclick="window.location.reload()">
+        <span>✅ 笔记已更新，点击刷新页面</span>
+        <button onclick="event.stopPropagation(); document.getElementById('sync-refresh-banner').classList.remove('visible')" title="关闭">×</button>
+    </div>
+
     <!-- 跳过导航链接（无障碍：键盘用户可跳过侧边栏直达主内容） -->
     <a href="#main-content" class="skip-link">跳至主要内容</a>
 
@@ -376,6 +415,14 @@
             <div class="statusbar-item statusbar-version">
                 <span id="statusbar-version">v1.2.0</span>
             </div>
+
+            <div class="statusbar-separator"></div>
+
+            <!-- v1.8.3：网络状态指示器 -->
+            <div class="statusbar-item statusbar-network" id="network-status-item" title="网络状态">
+                <div class="network-dot" id="network-dot"></div>
+                <span id="network-status-text" style="font-size:0.78rem">在线</span>
+            </div>
         </div>
     </div>
 
@@ -430,6 +477,13 @@
                         <line x1="6" y1="6" x2="18" y2="18"></line>
                     </svg>
                 </button>
+            </div>
+
+            <!-- v1.8.3：离线搜索提示（在线时隐藏） -->
+            <div id="offline-search-hint" style="display:none;padding:4px 12px;font-size:0.78rem;
+                 color:var(--text-muted,#6c7086);background:var(--bg-secondary,#1e1e2e);
+                 border-bottom:1px solid var(--border-color,#313244);">
+                📴 离线模式：使用本地索引搜索（结果可能不完整）
             </div>
 
             <!-- 排序选择器 -->
@@ -675,7 +729,7 @@
     <script src="/static/js/init.js?v=20260130"></script>
     <!-- v1.4.4 新增：触屏手势 + PWA 注册（defer 不阻塞首屏渲染） -->
     <script defer src="/static/js/gestures.js?v=20260413"></script>
-    <script defer src="/static/js/pwa.js?v=20260413"></script>
+    <script defer src="/static/js/pwa.js?v=20260415"></script>
     <!-- v1.6.0: WASM 模块加载器（渐进增强，WebAssembly 不可用时自动 fallback 到 JS）-->
     <script defer src="/static/wasm/loader.js?v=20260414"></script>
     <!-- v1.6.1: WASM 实时预览面板（需 WASM 模块加载完成后激活）-->

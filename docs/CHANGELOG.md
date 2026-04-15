@@ -8,6 +8,26 @@
 
 ---
 
+## [v1.8.3] — 2026-04-15
+
+PWA 离线完善：扩展缓存策略、网络状态指示器、后台同步提示横幅。
+
+### Added
+- **`/api/titles` + `/api/graph/global` Stale-While-Revalidate**（`static/sw.js`）：新增 `DATA_CACHE_NAME` 独立数据缓存，这两个接口离线时立即返回缓存，后台静默刷新
+- **POST /sync BroadcastChannel 通知**（`static/sw.js`）：同步成功后向所有客户端广播 `SYNC_COMPLETE`，页面顶部显示"✅ 笔记已更新，点击刷新页面"横幅
+- **网络状态指示器**（`templates/layout.html`、`static/js/pwa.js`）：状态栏右侧加绿点（在线）/红点（离线）指示器，切换时动画过渡
+- **离线搜索提示**（`templates/layout.html`、`static/js/search.js`）：Service Worker 返回 `X-Offline-Search` 头时或 `navigator.onLine = false` 时搜索框下方显示"📴 离线模式"提示
+
+### Changed
+- **离线搜索响应格式升级**（`static/sw.js`）：JS fallback 搜索的响应格式更新为 v1.8.0 分页格式 `{results, total, page, per_page, total_pages}`
+- **SW 缓存版本**：`CACHE_NAME` 从 `v2` 升级到 `v3`，`activate` 阶段清理所有旧版本缓存
+- `pwa.js` 版本号 `?v=20260413` → `?v=20260415`
+
+### 测试统计
+- 服务端：123/123 通过（纯前端变更，无新后端测试）
+
+---
+
 ## [v1.8.2] — 2026-04-15
 
 导出与发布：PDF 打印样式、Atom 订阅、静态站点 zip 导出。

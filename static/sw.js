@@ -1,13 +1,21 @@
 // ==========================================
-// Service Worker — Obsidian Mirror v1.6.2
+// Service Worker — Obsidian Mirror v1.8.3
 // 策略：静态资源缓存优先，动态内容网络优先
 // v1.6.2 新增：WASM 离线搜索（拦截 /api/search，使用 NoteIndex WASM 模块）
+// v1.8.3 新增：
+//   - /api/titles、/api/graph/global 使用 Stale-While-Revalidate 策略，离线可用
+//   - POST /sync 成功后通过 postMessage 通知所有客户端（Broadcast 刷新提示）
+//   - 搜索离线响应格式升级为 v1.8.0 分页格式
 // ==========================================
 
-const CACHE_NAME = 'obsidian-mirror-static-v2';
+// v1.8.3：版本号升 v3，清理旧版缓存（v2 静态资源 + v1 WASM）
+const CACHE_NAME = 'obsidian-mirror-static-v3';
 
 // WASM 离线搜索索引缓存（与主缓存分离，方便单独更新）
 const WASM_CACHE_NAME = 'obsidian-mirror-wasm-v1';
+
+// v1.8.3：API 数据缓存（/api/titles、/api/graph/global 等半静态数据）
+const DATA_CACHE_NAME = 'obsidian-mirror-data-v1';
 
 // 需要预缓存的静态资源（CSS / JS，不含内容页面）
 const PRECACHE_ASSETS = [
@@ -45,6 +53,8 @@ const PRECACHE_ASSETS = [
     '/static/wasm/loader.js',
     // v1.6.1：WASM 预览 JS/CSS
     '/static/js/wasm-preview.js',
+    // v1.8.2：打印样式
+    '/static/css/print.css',
 ];
 
 // v1.6.2：WASM 模块和离线搜索索引资源（单独缓存，随每次同步更新）
@@ -78,11 +88,13 @@ self.addEventListener('install', (event) => {
 // 激活阶段：清理旧缓存
 // ==========================================
 self.addEventListener('activate', (event) => {
+    // v1.8.3：保留当前版本的所有已知缓存，清理其他旧版缓存
+    const KNOWN_CACHES = new Set([CACHE_NAME, WASM_CACHE_NAME, DATA_CACHE_NAME]);
     event.waitUntil(
         caches.keys().then((keys) =>
             Promise.all(
                 keys
-                    .filter((k) => k !== CACHE_NAME)
+                    .filter((k) => !KNOWN_CACHES.has(k))
                     .map((k) => caches.delete(k))
             )
         ).then(() => self.clients.claim())
@@ -105,6 +117,35 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
+    // v1.8.3：POST /sync 成功后通知所有客户端（"有新内容"横幅）
+    if (url.pathname === '/sync' && request.method === 'POST') {
+        event.respondWith(
+            fetch(request).then(response => {
+                if (response.ok) {
+                    // 同步成功：通知所有客户端刷新提示
+                    self.clients.matchAll({ includeUncontrolled: true, type: 'window' })
+                        .then(clients => clients.forEach(c => c.postMessage({ type: 'SYNC_COMPLETE' })));
+                }
+                return response;
+            }).catch(() =>
+                new Response(JSON.stringify({ error: '网络不可用，同步失败' }), {
+                    status: 503,
+                    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+                })
+            )
+        );
+        return;
+    }
+
+    // v1.8.3：侧边栏数据 + 全局图谱 → Stale-While-Revalidate（离线可用）
+    if (
+        (url.pathname === '/api/titles' || url.pathname.startsWith('/api/graph')) &&
+        request.method === 'GET'
+    ) {
+        event.respondWith(staleWhileRevalidate(request));
+        return;
+    }
+
     // v1.6.2：WASM 索引文件缓存优先（单独缓存桶，方便更新）
     if (url.pathname.startsWith('/static/wasm/')) {
         event.respondWith(wasmCacheFirst(request));
@@ -123,7 +164,7 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 动态内容（笔记页面、API）：网络优先（Network First）
+    // 动态内容（笔记页面、API）：网络优先（Network First），缓存成功响应供离线使用
     event.respondWith(networkFirst(request));
 });
 
@@ -141,6 +182,33 @@ async function cacheFirst(request) {
     } catch (e) {
         return new Response('离线模式：静态资源不可用', { status: 503 });
     }
+}
+
+/** Stale-While-Revalidate 策略（v1.8.3）
+ *
+ * 立即返回缓存（如有），同时在后台刷新缓存。
+ * 适用于半静态 API 数据：/api/titles、/api/graph/global 等。
+ * 离线时返回缓存；首次访问（无缓存）时阻塞等待网络。
+ */
+async function staleWhileRevalidate(request) {
+    const cache  = await caches.open(DATA_CACHE_NAME);
+    const cached = await cache.match(request);
+
+    // 后台刷新（fire-and-forget）
+    const fetchPromise = fetch(request).then(response => {
+        if (response.ok) cache.put(request, response.clone());
+        return response;
+    }).catch(() => null);
+
+    // 有缓存：立即返回，后台刷新
+    if (cached) return cached;
+
+    // 无缓存：等待网络（首次访问）
+    const networkResp = await fetchPromise;
+    return networkResp || new Response('{}', {
+        status: 503,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
 }
 
 /** 网络优先策略 */
@@ -275,16 +343,22 @@ async function searchWithFallback(request, url) {
         const limit = parseInt(url.searchParams.get('limit') || '20', 10);
 
         const results = await offlineTextSearch(q, limit);
+
+        // v1.8.3：响应格式升级为 v1.8.0 分页格式 {results, total, page, per_page, total_pages}
+        const page   = parseInt(url.searchParams.get('page')     || '1',  10);
+        const perPg  = parseInt(url.searchParams.get('per_page') || '20', 10);
+
         if (results === null) {
-            // 无缓存索引，返回空结果
-            return new Response(JSON.stringify([]), {
+            const empty = { results: [], total: 0, page, per_page: perPg, total_pages: 0 };
+            return new Response(JSON.stringify(empty), {
                 status: 200,
                 headers: { 'Content-Type': 'application/json; charset=utf-8',
                            'X-Offline-Search': 'no-index' }
             });
         }
 
-        return new Response(JSON.stringify(results), {
+        const pagedPage = { results, total: results.length, page: 1, per_page: results.length, total_pages: 1 };
+        return new Response(JSON.stringify(pagedPage), {
             status: 200,
             headers: { 'Content-Type': 'application/json; charset=utf-8',
                        'X-Offline-Search': 'js-fallback' }
