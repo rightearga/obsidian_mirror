@@ -70,20 +70,22 @@
 #insights-loading { text-align: center; padding: 40px; color: var(--text-muted, #6c7086); }
 #insights-error   { display: none; color: #f7768e; padding: 20px; }
 
-/* ── 通用进度条（linear-gradient 单元素方案，主题自适应，无嵌套问题） ─── */
+/* ── 通用进度条（主题自适应）─────────────────────────────────────────────
+   fill：var(--link-color)  — 浅色 #6a5acd / 深色 #7aa2f7，均已在 variables.css 定义
+   track：var(--border-color) — 浅色 #e6e6e6 / 深色 #2a2b2e，与主题边框一致
+   方案：background-color(轨道) + background-image+size(填充)，兼容性最佳
+   ─────────────────────────────────────────────────────────────────────── */
 .ib-bar {
     display: inline-block;
     width: 100px; height: 6px;
     border-radius: 3px;
     vertical-align: middle;
     margin-right: 6px;
-    /* 用 CSS 自定义属性 --w 控制填充比例（由 JS 内联设置） */
-    background: linear-gradient(
-        to right,
-        var(--accent-color, #6a5acd) var(--w, 0%),
-        var(--bg-secondary, #1e1e2e) var(--w, 0%)
-    );
-    border: 1px solid var(--border-color, #313244);
+    background-color: var(--border-color, #e6e6e6);
+    background-image: linear-gradient(var(--link-color, #6a5acd), var(--link-color, #6a5acd));
+    background-size: var(--w, 0%) 100%;
+    background-repeat: no-repeat;
+    background-position: left center;
 }
 </style>
 {% endblock %}
