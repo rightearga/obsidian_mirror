@@ -588,6 +588,18 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         let new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx, &backlinks);
         *data.insights_cache.write().await = new_cache;
         info!("✅ 笔记洞察缓存已更新");
+
+        // v1.8.6：填充 mtime 秒缓存，避免图谱构建热路径重复调用 SystemTime::duration_since()
+        let new_mtime: std::collections::HashMap<String, i64> = notes.iter()
+            .map(|(path, note)| {
+                let secs = note.mtime
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                (path.clone(), secs)
+            })
+            .collect();
+        *data.mtime_cache.write().await = new_mtime;
     }
 
     Ok(())

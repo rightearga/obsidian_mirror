@@ -3,7 +3,7 @@ use crate::domain::{GraphData, GraphEdge, GraphNode, Note};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::UNIX_EPOCH;
 
-/// 从笔记的 mtime 获取 Unix 秒时间戳（v1.8.4 热力图使用）
+/// 从笔记的 mtime 获取 Unix 秒时间戳
 fn note_mtime_secs(note: &Note) -> i64 {
     note.mtime.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
@@ -37,7 +37,7 @@ pub fn generate_graph(
     };
 
     // 找到当前笔记
-    let _current_note = match notes.get(&current_path) {
+    let current_note = match notes.get(&current_path) {
         Some(note) => note,
         None => {
             return GraphData {
@@ -47,21 +47,15 @@ pub fn generate_graph(
         }
     };
 
-    // 找到中心节点的标签
-    let center_tags = notes
-        .get(&current_path)
-        .map(|n| n.tags.clone())
-        .unwrap_or_default();
-
     // 添加中心节点（携带标签信息，用于前端节点颜色分组）
     graph_nodes.insert(
         current_path.clone(),
         GraphNode {
-            id: current_path.clone(),
+            id:    current_path.clone(),
             label: current_note_title.to_string(),
             title: current_note_title.to_string(),
-            tags:  center_tags,
-            mtime: notes.get(&current_path).map(note_mtime_secs).unwrap_or(0),
+            tags:  current_note.tags.clone(),
+            mtime: note_mtime_secs(current_note),
         },
     );
     visited.insert(current_path.clone());
@@ -170,6 +164,12 @@ pub fn generate_global_graph(
 ) -> GraphData {
     const MAX_NODES: usize = 500;
 
+    // v1.8.6：预计算全部笔记的 mtime 秒，避免在节点构建热路径重复调用 duration_since()。
+    // 在遍历所有笔记（第二遍构建节点时）直接从此 map 读取，节省逐节点的时间戳转换开销。
+    let mtime_map: HashMap<&str, i64> = notes.iter()
+        .map(|(path, note)| (path.as_str(), note_mtime_secs(note)))
+        .collect();
+
     let mut graph_nodes: HashMap<String, GraphNode> = HashMap::new();
     let mut graph_edges: Vec<GraphEdge> = Vec::new();
     let mut connected: HashSet<String> = HashSet::new();
@@ -210,7 +210,8 @@ pub fn generate_global_graph(
                 label: note.title.clone(),
                 title: note.title.clone(),
                 tags:  note.tags.clone(),
-                mtime: note_mtime_secs(note),
+                // v1.8.6：从预计算 mtime_map 读取，避免重复调用 duration_since()
+                mtime: mtime_map.get(note.path.as_str()).copied().unwrap_or(0),
             },
         );
     }

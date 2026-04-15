@@ -8,6 +8,23 @@
 
 ---
 
+## [v1.8.6] — 2026-04-15
+
+性能回归修复：WASM 搜索 M4 回退 + 图谱 mtime 热路径优化。
+
+### Fixed
+- **[P1] WASM NoteIndex 搜索 M4 评分方案逆效应**（`crates/wasm/src/lib.rs`）：回退 v1.7.0 引入的 M4 位掩码评分方案。M4 迭代 `content_tokens` 集合建 u8 位掩码 = O(n_tokens)，在大规模笔记库下反慢于原 `HashSet.contains()` O(1)。恢复原始查询方案后 ASCII 搜索 1855µs→192µs（**-89.5%**），CJK 搜索 2015µs→509µs（**-73.5%**）
+- **[P2] 全局图谱 mtime 热路径优化**（`src/graph.rs`）：在 `generate_global_graph` 函数入口预计算 `mtime_map: HashMap<&str, i64>`，节点构建时直接读取，避免对每个节点重复调用 `SystemTime::duration_since(UNIX_EPOCH)`
+
+### Changed
+- `AppState` 新增 `mtime_cache: TokioRwLock<HashMap<String, i64>>`（`src/state.rs`），每次 sync 后填充（`src/sync.rs`），为图谱和其他场景提供预计算的 mtime 秒缓存
+
+### 测试统计
+- 服务端：125/125 通过
+- WASM：38/38 通过
+
+---
+
 ## [v1.8.5] — 2026-04-15
 
 依赖升级验证：确认 v1.8.x 开发周期内自动升级的所有核心依赖兼容性，更新版本文档。

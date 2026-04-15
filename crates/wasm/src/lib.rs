@@ -477,60 +477,28 @@ impl NoteIndex {
             .map(|t| if is_cjk_bigram(t) { 15.0_f32 } else { 10.0 })
             .collect();
 
-        // M4（v1.7.0）：预计算 token→query_idx 映射，评分阶段用位掩码替换重复 HashSet 查询。
+        // v1.8.6：回退 M4，恢复原始 HashSet.contains() 评分策略。
         //
-        // 旧方案（M3 后）：每候选笔记执行 query_tokens.len() × 3 次 HashSet::contains()
-        //   = 8 × 3 = 24 次字符串哈希查找（每次约 50ns on L1 miss → 1.2µs/笔记）
+        // M4（v1.7.0）的位掩码方案在 content_tokens 集合较大时产生逆效应：
+        //   迭代所有 content_tokens 建位掩码 = O(n_content_tokens)
+        //   vs 原方案 HashSet.contains() = O(1)
+        // 基准测试（PERFORMANCE-1.8）显示 ASCII 搜索 200µs → 1855µs（+828%）。
         //
-        // 新方案（M4）：迭代 TokenCache 中较短的 title/tag 集合（通常 ≤ 5 条），
-        //   每条做一次 HashMap<&str, u8> 查询，建立 3 个 u8 位掩码，
-        //   再用位运算一次性求分。减少笔记数较多时的热路径开销。
-        let token_to_qidx: HashMap<&str, usize> = query_tokens.iter()
-            .enumerate()
-            .map(|(i, t)| (t.as_str(), i))
-            .collect();
-
-        // 对候选笔记评分（位掩码方案，v1.7.0 M4）
+        // 当前方案（v1.8.6）：对每个 query_token（≤8）直接查三个 HashSet，
+        //   总复杂度 = O(8 × 3) = O(24) 次 O(1) 哈希查询，不受 content_tokens 规模影响。
         let mut scored: Vec<(f32, &NoteEntry)> = candidate_bits.iter_ones()
             .filter_map(|idx| {
                 let note   = self.notes.get(idx)?;
                 let cached = self.token_cache.get(idx)?;
 
-                // 位掩码：bit i = query_token[i] 在该字段中命中（最多 8 个 query token）
-                let mut title_mask: u8 = 0;
-                let mut tag_mask:   u8 = 0;
-                let mut body_mask:  u8 = 0;
-
-                // 遍历 title_tokens（通常 ≤ 5 个），建立标题位掩码
-                for tok in &cached.title_tokens {
-                    if let Some(&qi) = token_to_qidx.get(tok.as_str()) {
-                        title_mask |= 1u8 << qi;
-                    }
-                }
-                // 遍历 tag_tokens（通常 ≤ 3 个）
-                for tok in &cached.tag_tokens {
-                    if let Some(&qi) = token_to_qidx.get(tok.as_str()) {
-                        tag_mask |= 1u8 << qi;
-                    }
-                }
-                // 遍历 content_tokens
-                for tok in &cached.content_tokens {
-                    if let Some(&qi) = token_to_qidx.get(tok.as_str()) {
-                        body_mask |= 1u8 << qi;
-                    }
-                }
-
-                // 位运算求分：遍历每个 query token，查对应位是否置位
-                let score: f32 = (0..query_tokens.len())
-                    .map(|i| {
-                        let bit = 1u8 << i;
-                        let mut s = 0.0f32;
-                        if title_mask & bit != 0 { s += title_weights[i]; }
-                        if tag_mask   & bit != 0 { s += 5.0; }
-                        if body_mask  & bit != 0 { s += 1.0; }
-                        s
-                    })
-                    .sum();
+                // 对每个 query_token 查三个预缓存 HashSet，O(1) 每次
+                let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)| {
+                    let mut s = 0.0f32;
+                    if cached.title_tokens.contains(token.as_str())   { s += tw; }
+                    if cached.tag_tokens.contains(token.as_str())     { s += 5.0; }
+                    if cached.content_tokens.contains(token.as_str()) { s += 1.0; }
+                    s
+                }).sum();
 
                 if score > 0.0 { Some((score, note)) } else { None }
             })
