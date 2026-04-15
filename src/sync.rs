@@ -578,6 +578,16 @@ pub async fn perform_sync(data: &Arc<AppState>) -> anyhow::Result<()> {
         }
     }
 
+    // v1.7.3：同步完成后重新计算笔记洞察缓存
+    {
+        let notes     = data.notes.read().await;
+        let link_idx  = data.link_index.read().await;
+        let tag_idx   = data.tag_index.read().await;
+        let new_cache = crate::insights::compute_insights(&notes, &link_idx, &tag_idx);
+        *data.insights_cache.write().await = new_cache;
+        info!("✅ 笔记洞察缓存已更新");
+    }
+
     Ok(())
 }
 

@@ -1,0 +1,347 @@
+{% extends "layout.html" %}
+
+{% block head %}
+<style>
+/* ── 洞察页面整体布局 ────────────────────────────────────────────── */
+.insights-page { padding: 24px 32px; max-width: 1100px; }
+.insights-page h2 { font-size: 1.1rem; margin: 0 0 12px; color: var(--text-primary, #cdd6f4); }
+.section-card {
+    background: var(--bg-secondary, #1e1e2e);
+    border: 1px solid var(--border-color, #313244);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin-bottom: 20px;
+}
+
+/* ── 概览数字 ────────────────────────────────────────────────────── */
+.stats-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+.stat-chip {
+    background: var(--bg-primary, #181825);
+    border: 1px solid var(--border-color, #313244);
+    border-radius: 6px;
+    padding: 10px 20px;
+    text-align: center;
+    min-width: 110px;
+}
+.stat-chip .num { font-size: 1.6rem; font-weight: 700; color: var(--accent-color, #6a5acd); }
+.stat-chip .lbl { font-size: 0.78rem; color: var(--text-muted, #6c7086); margin-top: 2px; }
+
+/* ── 健康度列表 ───────────────────────────────────────────────────── */
+.health-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.health-item { background: var(--bg-primary, #181825); border-radius: 6px; padding: 12px 16px; }
+.health-item .hi-label { font-size: 0.82rem; color: var(--text-muted, #6c7086); margin-bottom: 6px; }
+.health-item .hi-value { font-size: 1.2rem; font-weight: 600; }
+.health-item .hi-value.warn  { color: #e0af68; }
+.health-item .hi-value.ok    { color: #9ece6a; }
+.health-item .hi-value.error { color: #f7768e; }
+.broken-list, .large-list, .orphan-list {
+    max-height: 220px; overflow-y: auto;
+    margin-top: 10px; font-size: 0.83rem;
+}
+.broken-list li, .large-list li, .orphan-list li {
+    padding: 3px 0; border-bottom: 1px solid var(--border-color, #313244);
+    list-style: none;
+}
+.broken-list li:last-child, .large-list li:last-child, .orphan-list li:last-child { border: none; }
+.broken-list a, .large-list a, .orphan-list a { color: var(--accent-color, #7aa2f7); text-decoration: none; }
+.broken-target { color: #f7768e; font-family: monospace; }
+
+/* ── 折线图 & 热力图 ─────────────────────────────────────────────── */
+.chart-row { display: flex; gap: 20px; flex-wrap: wrap; }
+.chart-box { flex: 1; min-width: 280px; }
+.chart-box svg { width: 100%; overflow: visible; }
+
+/* 热力图 */
+.heatmap { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 8px; }
+.heatmap-cell {
+    width: 14px; height: 14px; border-radius: 2px;
+    background: var(--bg-primary, #181825);
+    border: 1px solid var(--border-color, #313244);
+    cursor: default;
+}
+.heatmap-cell[title] { cursor: default; }
+
+/* ── 标签云 ────────────────────────────────────────────────────────── */
+.tag-cloud { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tag-cloud a { text-decoration: none; border-radius: 4px; padding: 2px 8px; transition: opacity 0.15s; }
+.tag-cloud a:hover { opacity: 0.8; }
+
+/* ── 加载/错误状态 ──────────────────────────────────────────────────── */
+#insights-loading { text-align: center; padding: 40px; color: var(--text-muted, #6c7086); }
+#insights-error   { display: none; color: #f7768e; padding: 20px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="insights-page">
+    <div id="insights-loading">加载中…</div>
+    <div id="insights-error">加载洞察数据失败，请稍后重试。</div>
+    <div id="insights-content" style="display:none">
+
+        <!-- 概览数字 -->
+        <div class="section-card">
+            <h2>概览</h2>
+            <div class="stats-row">
+                <div class="stat-chip"><div class="num" id="s-total-notes">—</div><div class="lbl">笔记总数</div></div>
+                <div class="stat-chip"><div class="num" id="s-total-tags">—</div><div class="lbl">标签总数</div></div>
+                <div class="stat-chip"><div class="num" id="s-total-links">—</div><div class="lbl">链接总数</div></div>
+                <div class="stat-chip"><div class="num" id="s-orphan-count">—</div><div class="lbl">孤立笔记</div></div>
+                <div class="stat-chip"><div class="num" id="s-broken-count">—</div><div class="lbl">断链数</div></div>
+                <div class="stat-chip"><div class="num" id="s-untagged-pct">—</div><div class="lbl">无标签占比</div></div>
+            </div>
+        </div>
+
+        <!-- 健康度 -->
+        <div class="section-card">
+            <h2>知识库健康度</h2>
+            <div class="health-grid">
+                <!-- 断链 -->
+                <div>
+                    <div class="hi-label">断链（WikiLink 指向不存在的笔记）</div>
+                    <ul class="broken-list" id="broken-list"></ul>
+                    <div id="broken-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">✅ 无断链</div>
+                </div>
+                <!-- 超大笔记 -->
+                <div>
+                    <div class="hi-label">超大笔记（&gt;5000字且无目录，建议拆分）</div>
+                    <ul class="large-list" id="large-list"></ul>
+                    <div id="large-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">✅ 无超大笔记</div>
+                </div>
+                <!-- 孤立笔记 -->
+                <div>
+                    <div class="hi-label">孤立笔记（无出链且无入链）</div>
+                    <ul class="orphan-list" id="orphan-list"></ul>
+                    <div id="orphan-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">✅ 无孤立笔记</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 写作趋势 -->
+        <div class="section-card">
+            <h2>写作趋势</h2>
+            <div class="chart-row">
+                <!-- 月度折线图 -->
+                <div class="chart-box">
+                    <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:6px">按月笔记修改数（近 24 个月）</div>
+                    <svg id="monthly-chart" height="120" viewBox="0 0 500 120" preserveAspectRatio="none"></svg>
+                </div>
+                <!-- 最近 30 天热力图 -->
+                <div class="chart-box" style="min-width:200px;flex:0.6">
+                    <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:6px">最近 30 天活跃度</div>
+                    <div class="heatmap" id="heatmap"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 标签云 -->
+        <div class="section-card">
+            <h2>标签云</h2>
+            <div class="tag-cloud" id="tag-cloud"></div>
+            <div id="tag-cloud-empty" style="display:none;font-size:0.83rem;color:var(--text-muted)">暂无标签</div>
+        </div>
+
+    </div><!-- #insights-content -->
+</div>
+
+<script>
+// ── 洞察 Dashboard 渲染脚本（v1.7.3）───────────────────────────────────────
+(async function() {
+    const loading = document.getElementById('insights-loading');
+    const errBox  = document.getElementById('insights-error');
+    const content = document.getElementById('insights-content');
+
+    let stats;
+    try {
+        const r = await fetch('/api/insights/stats');
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        stats = await r.json();
+    } catch(e) {
+        loading.style.display = 'none';
+        errBox.style.display = 'block';
+        errBox.textContent = '加载洞察数据失败: ' + e.message;
+        return;
+    }
+
+    loading.style.display = 'none';
+    content.style.display = '';
+
+    // ── 概览数字 ─────────────────────────────────────────────────────────────
+    setText('s-total-notes',  stats.total_notes);
+    setText('s-total-tags',   stats.total_tags);
+    setText('s-total-links',  stats.total_links);
+    setText('s-orphan-count', stats.orphan_notes.length);
+    setText('s-broken-count', stats.broken_links.length);
+    const untaggedPct = stats.total_notes > 0
+        ? Math.round(stats.untagged_ratio * 100) + '%'
+        : '—';
+    setText('s-untagged-pct', untaggedPct);
+
+    // ── 断链 ─────────────────────────────────────────────────────────────────
+    const brokenList = document.getElementById('broken-list');
+    if (stats.broken_links.length === 0) {
+        document.getElementById('broken-empty').style.display = '';
+    } else {
+        stats.broken_links.slice(0, 50).forEach(bl => {
+            const li = document.createElement('li');
+            li.innerHTML = `<a href="/doc/${encodeURIComponent(bl.from_path)}">${esc(bl.from_title)}</a>`
+                + ` → <span class="broken-target">[[${esc(bl.broken_target)}]]</span>`;
+            brokenList.appendChild(li);
+        });
+        if (stats.broken_links.length > 50) {
+            const li = document.createElement('li');
+            li.textContent = `…还有 ${stats.broken_links.length - 50} 条`;
+            brokenList.appendChild(li);
+        }
+    }
+
+    // ── 超大笔记 ─────────────────────────────────────────────────────────────
+    const largeList = document.getElementById('large-list');
+    if (stats.large_notes.length === 0) {
+        document.getElementById('large-empty').style.display = '';
+    } else {
+        stats.large_notes.slice(0, 30).forEach(n => {
+            const li = document.createElement('li');
+            li.innerHTML = `<a href="/doc/${encodeURIComponent(n.path)}">${esc(n.title)}</a>`;
+            largeList.appendChild(li);
+        });
+    }
+
+    // ── 孤立笔记 ─────────────────────────────────────────────────────────────
+    const orphanList = document.getElementById('orphan-list');
+    if (stats.orphan_notes.length === 0) {
+        document.getElementById('orphan-empty').style.display = '';
+    } else {
+        stats.orphan_notes.slice(0, 30).forEach(n => {
+            const li = document.createElement('li');
+            li.innerHTML = `<a href="/doc/${encodeURIComponent(n.path)}">${esc(n.title)}</a>`;
+            orphanList.appendChild(li);
+        });
+        if (stats.orphan_notes.length > 30) {
+            const li = document.createElement('li');
+            li.textContent = `…还有 ${stats.orphan_notes.length - 30} 条`;
+            orphanList.appendChild(li);
+        }
+    }
+
+    // ── 月度折线图（纯 SVG）──────────────────────────────────────────────────
+    renderMonthlyChart(stats.monthly_counts);
+
+    // ── 热力图 ───────────────────────────────────────────────────────────────
+    renderHeatmap(stats.daily_counts);
+
+    // ── 标签云 ───────────────────────────────────────────────────────────────
+    renderTagCloud(stats.tag_cloud);
+})();
+
+// ── 辅助函数 ─────────────────────────────────────────────────────────────────
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
+}
+
+function esc(str) {
+    return String(str)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function renderMonthlyChart(monthly) {
+    if (!monthly || monthly.length === 0) return;
+    const svg = document.getElementById('monthly-chart');
+    const W = 500, H = 120, PAD = { t: 10, r: 10, b: 30, l: 30 };
+    const maxCount = Math.max(...monthly.map(m => m.count), 1);
+    const n = monthly.length;
+    const xStep = (W - PAD.l - PAD.r) / Math.max(n - 1, 1);
+    const yScale = v => PAD.t + (H - PAD.t - PAD.b) * (1 - v / maxCount);
+
+    // Y 轴
+    let lines = `<line x1="${PAD.l}" y1="${PAD.t}" x2="${PAD.l}" y2="${H - PAD.b}" stroke="var(--border-color,#313244)" stroke-width="1"/>`;
+    // X 轴
+    lines += `<line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="var(--border-color,#313244)" stroke-width="1"/>`;
+
+    // 折线路径
+    const pts = monthly.map((m, i) => `${PAD.l + i * xStep},${yScale(m.count)}`).join(' ');
+    const fill_pts = `${PAD.l},${H - PAD.b} ` + pts + ` ${PAD.l + (n-1) * xStep},${H - PAD.b}`;
+    lines += `<polygon points="${fill_pts}" fill="var(--accent-color,#6a5acd)" opacity="0.15"/>`;
+    lines += `<polyline points="${pts}" fill="none" stroke="var(--accent-color,#6a5acd)" stroke-width="2" stroke-linejoin="round"/>`;
+
+    // X 轴标签（每 6 个月显示一次）
+    monthly.forEach((m, i) => {
+        if (i % 6 === 0 || i === n - 1) {
+            const x = PAD.l + i * xStep;
+            lines += `<text x="${x}" y="${H - 8}" font-size="10" fill="var(--text-muted,#6c7086)" text-anchor="middle">${esc(m.year_month.slice(0,7))}</text>`;
+        }
+    });
+
+    // 数据点
+    monthly.forEach((m, i) => {
+        if (m.count > 0) {
+            const x = PAD.l + i * xStep;
+            const y = yScale(m.count);
+            lines += `<circle cx="${x}" cy="${y}" r="3" fill="var(--accent-color,#6a5acd)"><title>${m.year_month}: ${m.count} 篇</title></circle>`;
+        }
+    });
+
+    svg.innerHTML = lines;
+}
+
+function renderHeatmap(daily) {
+    const container = document.getElementById('heatmap');
+    if (!daily || daily.length === 0) return;
+    const maxCount = Math.max(...daily.map(d => d.count), 1);
+    const colors = [
+        'var(--bg-primary,#181825)',
+        'rgba(106,90,205,0.3)',
+        'rgba(106,90,205,0.55)',
+        'rgba(106,90,205,0.8)',
+        'var(--accent-color,#6a5acd)',
+    ];
+    daily.forEach(d => {
+        const cell = document.createElement('div');
+        cell.className = 'heatmap-cell';
+        const level = d.count === 0 ? 0 : Math.min(4, Math.ceil(d.count / maxCount * 4));
+        cell.style.background = colors[level];
+        cell.title = `${d.date}: ${d.count} 篇`;
+        container.appendChild(cell);
+    });
+}
+
+function renderTagCloud(tags) {
+    const container = document.getElementById('tag-cloud');
+    if (!tags || tags.length === 0) {
+        document.getElementById('tag-cloud-empty').style.display = '';
+        return;
+    }
+    const maxCount = tags[0].count;  // 已按降序排列
+    const minCount = tags[tags.length - 1].count;
+    const HIGH_THRESHOLD = 50;
+    const LONE_THRESHOLD = 1;
+
+    tags.forEach(t => {
+        const a = document.createElement('a');
+        a.href = '/tag/' + encodeURIComponent(t.tag);
+        a.textContent = t.tag + ' (' + t.count + ')';
+
+        // 字号：12–28px，与 count 对数正比
+        const ratio = maxCount > minCount
+            ? (Math.log(t.count + 1) - Math.log(minCount + 1)) / (Math.log(maxCount + 1) - Math.log(minCount + 1))
+            : 0.5;
+        const fontSize = 12 + Math.round(ratio * 16);
+        a.style.fontSize = fontSize + 'px';
+
+        // 颜色：高频蓝色，孤立灰色，普通紫色
+        if (t.count >= HIGH_THRESHOLD) {
+            a.style.color = '#7aa2f7';
+            a.style.background = 'rgba(122,162,247,0.12)';
+        } else if (t.count <= LONE_THRESHOLD) {
+            a.style.color = 'var(--text-muted,#6c7086)';
+            a.style.background = 'rgba(108,112,134,0.1)';
+        } else {
+            a.style.color = 'var(--accent-color,#bb9af7)';
+            a.style.background = 'rgba(187,154,247,0.1)';
+        }
+        container.appendChild(a);
+    });
+}
+</script>
+{% endblock %}

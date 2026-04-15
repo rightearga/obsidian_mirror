@@ -33,6 +33,7 @@ pub mod share_handlers;
 // 阅读进度模块
 pub mod reading_progress_db;
 pub mod reading_progress_handlers;
+pub mod insights;
 
 // 应用版本信息
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

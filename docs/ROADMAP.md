@@ -593,7 +593,7 @@ impl Bitset {
 
 ---
 
-### 🔧 v1.7.3 — 笔记洞察 Dashboard
+### ✅ v1.7.3 (已发布 - 2026-04-15) — 笔记洞察 Dashboard
 
 **主题**：从笔记库数据中挖掘写作规律与质量问题，提供可视化统计报告
 
@@ -625,6 +625,20 @@ impl Bitset {
 - 所有统计在 `perform_sync` 后增量更新，结果缓存在 `AppState`（`RwLock<InsightsCache>`）
 - 断链检测：遍历 `notes` 中每个 `outgoing_links`，对照 `link_index` 验证目标存在性
 - 无新增数据库表，复用现有内存索引
+
+#### 实际交付物
+- 新增文件：`src/insights.rs`（InsightsCache + compute_insights + 9 个测试）
+- 新增文件：`templates/insights.html`（SVG 折线图、热力图、标签云、健康度列表）
+- 修改文件：`src/state.rs`（AppState 新增 insights_cache 字段）
+- 修改文件：`src/sync.rs`（perform_sync 末尾更新 InsightsCache）
+- 修改文件：`src/handlers.rs`（insights_page_handler + insights_stats_handler）
+- 修改文件：`src/main.rs`（路由注册）
+- 修改文件：`src/templates.rs`（InsightsTemplate）
+- 修改文件：`src/lib.rs`（pub mod insights）
+
+#### 测试结果
+- 服务端全量测试：**111/111 通过**
+- 新增测试：9 个（断链/孤立/超大笔记/无标签/标签云/字符统计/日期算法）
 
 ---
 

@@ -8,6 +8,21 @@
 
 ---
 
+## [v1.7.3] — 2026-04-15
+
+笔记洞察 Dashboard：写作趋势、知识库健康度报告和标签云。
+
+### Added
+- **笔记洞察 Dashboard**（`GET /insights`）：月度折线图（SVG）、最近 30 天热力图、断链列表、孤立/超大笔记健康度、标签云（字号与笔记数正比，高频蓝/孤立灰/普通紫）
+- **洞察统计 API**（`GET /api/insights/stats`）：返回 `InsightsCache` 完整 JSON，供前端图表渲染
+- **`InsightsCache` + `compute_insights`**（`src/insights.rs`）：纯内存计算，`perform_sync` 完成后自动更新；包含断链检测、超大笔记（>5000字且无TOC）、孤立笔记、标签云、月度/日度写作趋势
+- **`AppState.insights_cache`**（`src/state.rs`）：`TokioRwLock<InsightsCache>`，零初始值，首次同步后填充
+
+### 测试统计
+- 服务端：111/111 通过（新增 9 个 insights 单元测试）
+
+---
+
 ## [v1.7.2] — 2026-04-15
 
 Git 版本历史查看：基于 Git log 展示笔记修改历史、历史快照和提交 diff。

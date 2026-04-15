@@ -106,6 +106,17 @@ pub struct AdminUsersTemplate<'a> {
     pub users: &'a [(String, String, bool)],
 }
 
+/// 笔记洞察 Dashboard 模板（v1.7.3）
+///
+/// GET /insights 路由的主页，图表数据由前端 JS 调用 /api/insights/stats 获取。
+#[derive(Template)]
+#[template(path = "insights.html")]
+pub struct InsightsTemplate<'a> {
+    pub title: &'a str,
+    pub sidebar: &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+}
+
 /// 笔记提交历史列表页模板（v1.7.2）
 #[derive(Template)]
 #[template(path = "history.html")]

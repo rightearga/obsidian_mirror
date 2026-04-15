@@ -6,6 +6,7 @@ use tokio::sync::{broadcast, Mutex, RwLock as TokioRwLock};
 
 use crate::config::AppConfig;
 use crate::domain::{Note, SidebarNode};
+use crate::insights::InsightsCache;
 use crate::reading_progress_db::ReadingProgressDatabase;
 use crate::search_engine::SearchEngine;
 use crate::share_db::ShareDatabase;
@@ -66,6 +67,12 @@ pub struct AppState {
     /// 的 `JoinHandle` 存储于此，优雅关闭时 await 全部完成（上限 30 秒）。
     /// 使用 `std::sync::Mutex` 以便在 async 上下文中快速获取而不持有锁跨越 .await。
     pub background_tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
+
+    /// 笔记洞察缓存（v1.7.3）
+    ///
+    /// 在每次 `perform_sync` 完成后由 `compute_insights` 重新计算。
+    /// 包含写作趋势、健康度报告（孤立/断链/超大笔记）和标签云。
+    pub insights_cache: TokioRwLock<InsightsCache>,
 }
 
 /// 同步状态常量
@@ -105,6 +112,7 @@ impl AppState {
             sync_progress_tx,
             sync_history: TokioRwLock::new(VecDeque::new()),
             background_tasks: std::sync::Mutex::new(Vec::new()),
+            insights_cache: TokioRwLock::new(InsightsCache::default()),
         }
     }
 }

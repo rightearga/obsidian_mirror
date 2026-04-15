@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::AppState,
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -430,6 +430,8 @@ async fn start_http_server(
             .service(sync_history_handler)     // GET /api/sync/history — 同步历史（v1.5.5）
             .service(global_graph_handler)
             .service(graph_page_handler)         // GET /graph — 全局知识图谱专页（v1.7.0）
+            .service(insights_page_handler)      // GET /insights — 笔记洞察 Dashboard（v1.7.3）
+            .service(insights_stats_handler)     // GET /api/insights/stats（v1.7.3）
             // Webhook 触发同步（需在 config.webhook.enabled=true 时才有效）
             .route("/webhook/sync", web::post().to(webhook_sync_handler))
             // 配置热重载（需认证）

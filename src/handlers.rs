@@ -9,7 +9,7 @@ use askama::Template;
 use crate::state::AppState;
 use crate::sync::perform_sync;
 use crate::sidebar::{flatten_sidebar, find_first_file};
-use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate, NoteHistoryTemplate, NoteHistoryAtTemplate, NoteHistoryDiffTemplate};
+use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate, NoteHistoryTemplate, NoteHistoryAtTemplate, NoteHistoryDiffTemplate, InsightsTemplate};
 use crate::git::{GitClient, CommitInfo};
 use crate::search_engine::SortBy;
 use crate::graph::generate_graph;
@@ -1392,6 +1392,49 @@ pub async fn graph_page_handler(
             HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
         }
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.7.3：笔记洞察 Dashboard
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// GET /insights — 笔记洞察 Dashboard 主页（v1.7.3）
+///
+/// 展示写作趋势、知识库健康度（孤立/断链/超大笔记）和标签云。
+/// 数据来自每次同步后缓存的 `InsightsCache`，页面本身为静态 HTML，
+/// 图表由内嵌 JS 读取 `/api/insights/stats` 动态渲染。
+#[get("/insights")]
+pub async fn insights_page_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+
+    let tmpl = InsightsTemplate {
+        title: "笔记洞察",
+        sidebar: &flat_sidebar,
+        backlinks: &backlinks_empty,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("洞察页面模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
+    }
+}
+
+/// GET /api/insights/stats — 笔记洞察统计数据（v1.7.3）
+///
+/// 返回完整 `InsightsCache` 的 JSON 序列化，供前端图表读取。
+/// 若尚未同步（缓存为空），返回默认零值结构。
+#[get("/api/insights/stats")]
+pub async fn insights_stats_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let cache = data.insights_cache.read().await;
+    HttpResponse::Ok().json(&*cache)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
