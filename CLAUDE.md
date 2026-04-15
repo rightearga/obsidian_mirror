@@ -60,6 +60,7 @@ docker compose up -d
         enabled: false,
         secret: "CHANGE_THIS",
     ),
+    // 多仓库支持（v1.7.4，可选）：repos: [(name:"personal", repo_url:..., local_path:..., ignore_patterns:[...]), ...]
 )
 ```
 
@@ -96,6 +97,9 @@ docker compose up -d
 - `search_engine: Arc<SearchEngine>` — Tantivy 索引实例（内含缓存的 `IndexReader`）
 - `share_db`、`reading_progress_db` — 基于 redb 的数据库
 - `sync_lock: tokio::sync::Mutex<()>` — 同步互斥锁，防止并发 `/sync` 导致 IndexWriter 冲突
+- `insights_cache: TokioRwLock<InsightsCache>` — 笔记洞察缓存（v1.7.3），每次同步后更新
+
+v1.7.4 新增 `VaultRegistry`（`src/state.rs`）：多仓库支持，持有所有仓库的 `Arc<AppState>`，scoped routes 通过 `app_data()` 覆盖注入对应 AppState。
 
 ### Markdown 处理（`src/markdown.rs`）
 
