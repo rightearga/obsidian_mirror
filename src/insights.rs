@@ -71,6 +71,15 @@ pub struct MonthlyLinkCount {
     pub link_count: usize,
 }
 
+/// 按月统计的字符数（v1.9.4 写作速度折线图）
+#[derive(Debug, Clone, Serialize)]
+pub struct MonthlyCharCount {
+    /// 格式：`"YYYY-MM"`
+    pub year_month: String,
+    /// 该月内最后修改的笔记的可见字符总数
+    pub char_count: usize,
+}
+
 /// 标签共现对（v1.9.3）：两个标签同时出现在同一笔记中的次数
 #[derive(Debug, Clone, Serialize)]
 pub struct TagPair {
@@ -151,6 +160,10 @@ pub struct InsightsCache {
     pub connectivity_scores: Vec<ConnectivityEntry>,
     /// 阅读频率热力图 Top 10（由 sync.rs 异步填充，默认空列表）
     pub reading_hotmap: Vec<ReadingHotEntry>,
+
+    // ── 时间线联动（v1.9.4）────────────────────────────────────────────────
+    /// 按月统计的可见字符数（最近 24 个月，升序，用于写作速度折线图右轴）
+    pub monthly_char_counts: Vec<MonthlyCharCount>,
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -251,6 +264,9 @@ pub fn compute_insights(
     // ── 网络密度趋势：按月统计出链活动（近似，v1.8.4）─────────────────────
     let monthly_link_counts = build_monthly_link_series(notes);
 
+    // ── 月度字符数统计（v1.9.4 写作速度折线图右轴）───────────────────────────
+    let monthly_char_counts = build_monthly_char_series(notes);
+
     // ── 标签共现矩阵（v1.9.3）────────────────────────────────────────────────
     let tag_cooccurrence = compute_tag_cooccurrence(notes, tag_index);
 
@@ -281,6 +297,7 @@ pub fn compute_insights(
         tag_cooccurrence,
         connectivity_scores,
         reading_hotmap: vec![],  // 由 sync.rs 通过 spawn_blocking 异步填充
+        monthly_char_counts,
     }
 }
 
@@ -417,6 +434,40 @@ fn build_monthly_link_series(notes: &HashMap<String, Note>) -> Vec<MonthlyLinkCo
 // ──────────────────────────────────────────────────────────────────────────────
 // 测试
 // ──────────────────────────────────────────────────────────────────────────────
+
+/// 构建按月字符数统计数据（v1.9.4 写作速度折线图右轴）
+///
+/// 对每篇笔记，将其 `content_html` 的可见字符数累加到 mtime 所在月份。
+/// 最近 24 个月升序返回。
+fn build_monthly_char_series(notes: &HashMap<String, Note>) -> Vec<MonthlyCharCount> {
+    let mut month_map: HashMap<String, usize> = HashMap::new();
+    for note in notes.values() {
+        if let Some(month) = mtime_to_month(note.mtime) {
+            *month_map.entry(month).or_insert(0) += count_visible_chars(&note.content_html);
+        }
+    }
+
+    let today_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let today_days = today_secs / 86400;
+    let (ty, tm, _) = days_to_ymd(today_days);
+
+    let mut result: Vec<MonthlyCharCount> = Vec::new();
+    for i in (0..24i32).rev() {
+        let mut month = tm as i32 - i;
+        let mut year  = ty;
+        while month <= 0 { month += 12; year -= 1; }
+        while month > 12 { month -= 12; year += 1; }
+        let key = format!("{:04}-{:02}", year, month);
+        result.push(MonthlyCharCount {
+            year_month: key.clone(),
+            char_count: *month_map.get(&key).unwrap_or(&0),
+        });
+    }
+    result
+}
 
 /// 计算标签共现矩阵（v1.9.3）
 ///

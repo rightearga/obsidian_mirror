@@ -43,6 +43,18 @@
     background: rgba(106,90,205,0.18); color: var(--accent-color, #bb9af7); }
 #tl-loading { color: var(--text-muted, #6c7086); padding: 40px; text-align: center; }
 #tl-empty   { color: var(--text-muted, #6c7086); font-style: italic; padding: 20px; }
+/* v1.9.4 图谱跳转按钮 */
+.tl-graph-btn {
+    font-size: 0.72rem; padding: 1px 6px; border-radius: 3px;
+    border: 1px solid var(--border-color, #313244);
+    background: var(--bg-primary, #181825); color: var(--text-muted, #6c7086);
+    text-decoration: none; margin-left: 6px; cursor: pointer; white-space: nowrap;
+    vertical-align: middle;
+}
+.tl-graph-btn:hover { background: var(--accent-color, #6a5acd); color: #fff; border-color: var(--accent-color, #6a5acd); }
+/* v1.9.4 图表区 */
+.tl-chart-section { margin-bottom: 24px; }
+.tl-chart-section h3 { font-size: 0.9rem; color: var(--text-muted, #6c7086); margin: 0 0 8px; }
 </style>
 {% endblock %}
 
@@ -61,6 +73,19 @@
         <span class="tl-summary" id="tl-summary"></span>
     </div>
 
+    <!-- v1.9.4：写作速度折线图 -->
+    <div class="tl-chart-section" id="tl-speed-section" style="display:none">
+        <h3>写作速度（笔记数 vs 字符数 / 月）</h3>
+        <svg id="tl-speed-chart" height="110" viewBox="0 0 500 110" preserveAspectRatio="none" style="width:100%;overflow:visible;"></svg>
+    </div>
+
+    <!-- v1.9.4：标签演化 -->
+    <div class="tl-chart-section" id="tl-tags-section" style="display:none">
+        <h3>标签演化（Top 8 标签，按月堆叠）</h3>
+        <svg id="tl-tags-chart" height="100" viewBox="0 0 500 100" preserveAspectRatio="none" style="width:100%;overflow:visible;"></svg>
+        <div id="tl-tags-legend" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;font-size:0.78rem;"></div>
+    </div>
+
     <div id="tl-loading">加载中…</div>
     <div id="tl-empty" style="display:none">没有符合条件的笔记</div>
     <div id="tl-content"></div>
@@ -71,11 +96,28 @@
 let _tlAllNotes = [];
 let _tlCollapsed = new Set();   // 折叠的 year-month 键
 
+// v1.9.4：图表颜色调色板
+const TL_PALETTE = ['#7aa2f7','#9ece6a','#f7768e','#e0af68','#bb9af7','#2ac3de','#ff9e64','#73daca'];
+
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        const r = await fetch('/api/timeline');
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        _tlAllNotes = await r.json();
+        // 并行获取时间线数据和洞察数据
+        const [rTimeline, rInsights] = await Promise.all([
+            fetch('/api/timeline'),
+            fetch('/api/insights/stats'),
+        ]);
+        if (!rTimeline.ok) throw new Error('HTTP ' + rTimeline.status);
+        _tlAllNotes = await rTimeline.json();
+
+        // v1.9.4：渲染写作速度图和标签演化图
+        if (rInsights.ok) {
+            const stats = await rInsights.json();
+            if (stats.monthly_counts?.length && stats.monthly_char_counts?.length) {
+                document.getElementById('tl-speed-section').style.display = '';
+                tlRenderSpeed(stats.monthly_counts, stats.monthly_char_counts);
+            }
+        }
+        tlRenderTagEvolution(_tlAllNotes);
 
         // 填充标签下拉
         const tags = new Set();
@@ -135,7 +177,11 @@ function tlRender() {
             const collapsed = _tlCollapsed.has('m-' + key) ? 'collapsed' : '';
             const hidden    = _tlCollapsed.has('m-' + key) ? 'hidden'    : '';
             const monthName = key.slice(5) + ' 月';
-            html += `<div class="tl-month ${collapsed}" id="th-m-${key}" onclick="tlToggle('m-${key}')">${key.slice(0,4)}年${monthName}（${notes.length} 篇）</div>`;
+            // v1.9.4：月份旁加"图谱"跳转按钮
+            const since = key + '-01';
+            const until = key + '-31';
+            const graphBtn = `<a href="/graph?since=${since}&amp;until=${until}" class="tl-graph-btn" title="查看该月图谱" onclick="event.stopPropagation()">图谱</a>`;
+            html += `<div class="tl-month ${collapsed}" id="th-m-${key}" onclick="tlToggle('m-${key}')">${key.slice(0,4)}年${monthName}（${notes.length} 篇）${graphBtn}</div>`;
             html += `<div class="tl-notes ${hidden}" id="tn-m-${key}">`;
         } else {
             const collapsed = _tlCollapsed.has('y-' + key) ? 'collapsed' : '';
@@ -180,6 +226,105 @@ function tlToggleYear(year) {
 
 function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── v1.9.4：写作速度双折线图 ─────────────────────────────────────────────────
+function tlRenderSpeed(monthlyCounts, monthlyChars) {
+    const svg = document.getElementById('tl-speed-chart');
+    const W = 500, H = 110, PAD = { t:8, r:40, b:25, l:35 };
+    const n  = Math.min(monthlyCounts.length, monthlyChars.length);
+    if (n < 2) return;
+
+    const counts = monthlyCounts.slice(-n).map(m => m.count);
+    const chars  = monthlyChars.slice(-n).map(m => m.char_count);
+    const maxC   = Math.max(...counts, 1);
+    const maxCh  = Math.max(...chars,  1);
+    const xStep  = (W - PAD.l - PAD.r) / Math.max(n - 1, 1);
+    const yC  = v => PAD.t + (H - PAD.t - PAD.b) * (1 - v / maxC);
+    const yCh = v => PAD.t + (H - PAD.t - PAD.b) * (1 - v / maxCh);
+
+    let s = `<line x1="${PAD.l}" y1="${PAD.t}" x2="${PAD.l}" y2="${H-PAD.b}" stroke="var(--border-color,#313244)" stroke-width="1"/>`;
+    s    += `<line x1="${PAD.l}" y1="${H-PAD.b}" x2="${W-PAD.r}" y2="${H-PAD.b}" stroke="var(--border-color,#313244)" stroke-width="1"/>`;
+
+    const ptsC  = monthlyCounts.slice(-n).map((m, i) => `${PAD.l + i*xStep},${yC(m.count)}`).join(' ');
+    const ptsCh = monthlyChars.slice(-n).map((m, i)  => `${PAD.l + i*xStep},${yCh(m.char_count)}`).join(' ');
+    s += `<polyline points="${ptsC}"  fill="none" stroke="#7aa2f7" stroke-width="2" stroke-linejoin="round"/>`;
+    s += `<polyline points="${ptsCh}" fill="none" stroke="#9ece6a" stroke-width="2" stroke-linejoin="round" stroke-dasharray="4 2"/>`;
+
+    // X 轴标签（每 6 个月）
+    monthlyCounts.slice(-n).forEach((m, i) => {
+        if (i % 6 === 0 || i === n - 1) {
+            s += `<text x="${PAD.l + i*xStep}" y="${H-6}" font-size="9" fill="var(--text-muted,#6c7086)" text-anchor="middle">${esc(m.year_month)}</text>`;
+        }
+    });
+    // 图例
+    s += `<rect x="${W-PAD.r+4}" y="${PAD.t}" width="8" height="8" fill="#7aa2f7"/><text x="${W-PAD.r+14}" y="${PAD.t+7}" font-size="9" fill="var(--text-muted,#6c7086)">笔记数</text>`;
+    s += `<line x1="${W-PAD.r+4}" y1="${PAD.t+20}" x2="${W-PAD.r+12}" y2="${PAD.t+20}" stroke="#9ece6a" stroke-width="2" stroke-dasharray="4 2"/><text x="${W-PAD.r+14}" y="${PAD.t+23}" font-size="9" fill="var(--text-muted,#6c7086)">字符数</text>`;
+
+    svg.innerHTML = s;
+}
+
+// ── v1.9.4：标签演化堆叠面积图 ──────────────────────────────────────────────
+function tlRenderTagEvolution(notes) {
+    if (!notes || notes.length === 0) return;
+
+    const MAX_TAGS = 8;
+    // 统计全局 Tag 频率，取 Top MAX_TAGS
+    const tagFreq = {};
+    notes.forEach(n => (n.tags || []).forEach(t => { tagFreq[t] = (tagFreq[t] || 0) + 1; }));
+    const topTags = Object.entries(tagFreq).sort((a,b)=>b[1]-a[1]).slice(0, MAX_TAGS).map(([t])=>t);
+    if (topTags.length < 2) return;
+
+    // 按月分组
+    const monthMap = {};
+    notes.forEach(n => {
+        const m = (n.date || n.mtime ? new Date((n.mtime || 0)*1000).toISOString().slice(0,7) : null);
+        if (!m) return;
+        if (!monthMap[m]) monthMap[m] = {};
+        (n.tags || []).forEach(t => { if (topTags.includes(t)) monthMap[m][t] = (monthMap[m][t]||0)+1; });
+    });
+
+    const months = Object.keys(monthMap).sort().slice(-24);
+    if (months.length < 2) return;
+
+    document.getElementById('tl-tags-section').style.display = '';
+    const svg = document.getElementById('tl-tags-chart');
+    const W = 500, H = 100, PAD = { t:5, r:8, b:20, l:5 };
+    const n = months.length;
+    const xStep = (W - PAD.l - PAD.r) / Math.max(n - 1, 1);
+
+    // 堆叠：计算每月各 tag 的累积值
+    let s = '';
+    const prevY = new Array(n).fill(H - PAD.b);
+
+    topTags.forEach((tag, ti) => {
+        const heights = months.map(m => (monthMap[m][tag] || 0));
+        const maxH = Math.max(...months.map(m => Object.values(monthMap[m]||{}).reduce((a,b)=>a+b,0)), 1);
+        const scale = (H - PAD.t - PAD.b) / maxH;
+
+        const pts_top = heights.map((h, i) => `${PAD.l + i*xStep},${prevY[i] - h*scale}`).join(' ');
+        const pts_bot = heights.map((_, i) => `${PAD.l + i*xStep},${prevY[i]}`).reverse().join(' ');
+        const color = TL_PALETTE[ti % TL_PALETTE.length];
+        s += `<polygon points="${pts_top} ${pts_bot}" fill="${color}" opacity="0.65"><title>#${esc(tag)}</title></polygon>`;
+        heights.forEach((h, i) => { prevY[i] -= h * scale; });
+    });
+
+    // X 轴标签
+    months.forEach((m, i) => {
+        if (i % 6 === 0 || i === n-1) {
+            s += `<text x="${PAD.l + i*xStep}" y="${H-5}" font-size="9" fill="var(--text-muted,#6c7086)" text-anchor="middle">${esc(m)}</text>`;
+        }
+    });
+    svg.innerHTML = s;
+
+    // 图例
+    const legend = document.getElementById('tl-tags-legend');
+    legend.innerHTML = topTags.map((t, i) =>
+        `<span style="display:inline-flex;align-items:center;gap:4px;">
+            <span style="width:10px;height:10px;background:${TL_PALETTE[i%TL_PALETTE.length]};border-radius:2px;opacity:0.8;flex-shrink:0;"></span>
+            #${esc(t)}
+         </span>`
+    ).join('');
 }
 </script>
 {% endblock %}

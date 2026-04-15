@@ -1127,7 +1127,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
-### 🔧 v1.9.4 — 时间线联动深化（方向 D）
+### ✅ v1.9.4 (已发布 - 2026-04-15) — 时间线联动深化（方向 D）
 
 **主题**：让时间线从"笔记列表"升级为"写作轨迹分析工具"
 
@@ -1150,6 +1150,14 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 - 时间线页每个月份标题旁加 **"在图谱中查看"** 按钮
 - 点击后跳转到 `/graph?since=YYYY-MM-01&until=YYYY-MM-31`
 - 图谱专页支持 `since`/`until` URL 参数，只显示该时间范围内修改的节点（其余半透明）
+
+#### 实际交付物
+- 修改文件：`src/insights.rs`（MonthlyCharCount + build_monthly_char_series）
+- 修改文件：`templates/timeline.html`（写作速度图/标签演化图/月份图谱按钮）
+- 修改文件：`templates/graph_page.html`（since/until URL 参数时间过滤）
+
+#### 测试结果
+- 服务端全量测试：**133/133 通过**
 
 ---
 

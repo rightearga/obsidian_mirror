@@ -8,6 +8,21 @@
 
 ---
 
+## [v1.9.4] — 2026-04-15
+
+时间线联动深化：写作速度折线图、标签演化堆叠面积图、时间线 ↔ 图谱联动。
+
+### Added
+- **写作速度折线图**（`src/insights.rs`、`templates/timeline.html`）：`MonthlyCharCount` 类型 + `build_monthly_char_series()`，时间线页顶部双 Y 轴折线图（左轴=笔记数/蓝，右轴=字符数/绿虚线）
+- **标签演化堆叠面积图**（`templates/timeline.html`）：从时间线数据计算前 8 标签按月出现次数，纯 SVG 堆叠面积图 + 彩色图例
+- **月份图谱按钮**（`templates/timeline.html`）：每个月份标题旁加"图谱"链接，跳转至 `/graph?since=YYYY-MM-01&until=YYYY-MM-31`
+- **图谱时间过滤**（`templates/graph_page.html`）：支持 `since`/`until` URL 参数，范围外节点颜色变暗（mtime-based）；顶部显示时间过滤提示
+
+### 测试统计
+- 服务端：133/133 通过（无需新测试，新计算函数与已有 build_time_series 逻辑一致）
+
+---
+
 ## [v1.9.3] — 2026-04-15
 
 洞察 Dashboard 深化：标签共现矩阵、笔记连通度评分、阅读频率热力图。
