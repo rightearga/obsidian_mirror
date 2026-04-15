@@ -1395,6 +1395,29 @@ pub async fn graph_page_handler(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// v1.7.4：多仓库支持
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// GET /api/vaults — 返回所有已配置仓库的名称列表（v1.7.4）
+///
+/// 供前端仓库切换器读取。返回格式：
+/// ```json
+/// {"vaults": [{"name": "personal", "is_primary": true}, ...]}
+/// ```
+#[get("/api/vaults")]
+pub async fn vaults_list_handler(
+    vault_registry: web::Data<Arc<crate::state::VaultRegistry>>,
+) -> impl Responder {
+    let vaults: Vec<serde_json::Value> = vault_registry.vaults.iter().enumerate()
+        .map(|(i, (name, _))| serde_json::json!({
+            "name": name,
+            "is_primary": i == 0,
+        }))
+        .collect();
+    HttpResponse::Ok().json(serde_json::json!({ "vaults": vaults }))
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // v1.7.3：笔记洞察 Dashboard
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -1765,6 +1788,7 @@ mod tests {
             sync_interval_minutes: 0,
             webhook: WebhookConfig::default(),
             public_base_url: None,
+            repos: vec![],
         };
 
         let search_engine = Arc::new(SearchEngine::new(&idx_path).unwrap());

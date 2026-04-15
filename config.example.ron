@@ -76,4 +76,24 @@
     // 示例：public_base_url: Some("https://notes.example.com")
     // 未配置时使用 X-Forwarded-Proto header 推断 scheme，最终 fallback 到 Host header。
     // public_base_url: None,
+
+    // ── 多仓库配置（v1.7.4，可选）──────────────────────────────────────────
+    // 设置后替代上方 repo_url / local_path / ignore_patterns，支持多仓库同时运行。
+    // 每个仓库通过 /r/{name}/ 前缀访问；第一个仓库为主仓库，保持无前缀路由向后兼容。
+    // 未配置时（保持 repos 为空或不填），使用单仓库模式（向后兼容）。
+    //
+    // repos: [
+    //     (
+    //         name: "personal",
+    //         repo_url: "https://git.example.com/personal-notes.git",
+    //         local_path: "./vault_personal",
+    //         ignore_patterns: [".obsidian", ".trash"],
+    //     ),
+    //     (
+    //         name: "work",
+    //         repo_url: "https://git.example.com/work-notes.git",
+    //         local_path: "./vault_work",
+    //         ignore_patterns: [".obsidian", "drafts/"],
+    //     ),
+    // ],
 )

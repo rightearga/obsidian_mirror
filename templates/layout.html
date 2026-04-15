@@ -71,6 +71,21 @@
     <div class="sidebar">
         <!-- 常驻顶部按钮栏 -->
         <div class="sidebar-header">
+            <!-- 仓库切换器（v1.7.4：多仓库模式时显示，单仓库时隐藏） -->
+            <div id="vault-switcher" style="display:none; position:relative;">
+                <button id="vault-switcher-btn" title="切换仓库"
+                    style="background:none;border:none;cursor:pointer;padding:2px 6px;color:var(--text-muted,#6c7086);font-size:0.82rem;display:flex;align-items:center;gap:4px;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M3 3h18v18H3z M3 9h18 M9 3v18"></path>
+                    </svg>
+                    <span id="vault-current-name">default</span>
+                    <span>▾</span>
+                </button>
+                <div id="vault-dropdown" style="display:none;position:absolute;top:100%;left:0;z-index:200;
+                    background:var(--bg-secondary,#1e1e2e);border:1px solid var(--border-color,#313244);
+                    border-radius:6px;min-width:140px;padding:4px 0;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+                </div>
+            </div>
             <strong data-i18n="sidebar.files">文件</strong>
             <!-- 用户菜单（仅在启用认证时显示） -->
             <div class="user-menu" id="user-menu" style="display: none;">
@@ -663,5 +678,50 @@
     <script defer src="/static/wasm/loader.js?v=20260414"></script>
     <!-- v1.6.1: WASM 实时预览面板（需 WASM 模块加载完成后激活）-->
     <script defer src="/static/js/wasm-preview.js?v=20260414"></script>
+    <!-- v1.7.4: 仓库切换器 -->
+    <script>
+    (async function initVaultSwitcher() {
+        try {
+            const r = await fetch('/api/vaults');
+            if (!r.ok) return;
+            const data = await r.json();
+            const vaults = data.vaults || [];
+            if (vaults.length <= 1) return; // 单仓库：不显示切换器
+
+            const switcher   = document.getElementById('vault-switcher');
+            const currentLbl = document.getElementById('vault-current-name');
+            const dropdown   = document.getElementById('vault-dropdown');
+            const btn        = document.getElementById('vault-switcher-btn');
+            if (!switcher) return;
+
+            // 从 URL 路径推断当前仓库名
+            const pathMatch = location.pathname.match(/^\/r\/([^/]+)/);
+            const activeName = pathMatch ? pathMatch[1] : (vaults.find(v => v.is_primary)?.name || vaults[0].name);
+            currentLbl.textContent = activeName;
+            switcher.style.display = '';
+
+            // 构建下拉菜单
+            vaults.forEach(v => {
+                const item = document.createElement('a');
+                item.href = '/r/' + encodeURIComponent(v.name) + '/';
+                item.textContent = v.name + (v.is_primary ? ' (主)' : '');
+                item.style.cssText = 'display:block;padding:6px 14px;font-size:0.83rem;color:var(--text-primary,#cdd6f4);text-decoration:none;white-space:nowrap;';
+                if (v.name === activeName) {
+                    item.style.background = 'var(--accent-color,rgba(106,90,205,0.2))';
+                    item.style.fontWeight = '600';
+                }
+                item.addEventListener('mouseenter', () => item.style.background = 'var(--bg-hover,rgba(255,255,255,0.07))');
+                item.addEventListener('mouseleave', () => item.style.background = v.name === activeName ? 'var(--accent-color,rgba(106,90,205,0.2))' : '');
+                dropdown.appendChild(item);
+            });
+
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                dropdown.style.display = dropdown.style.display === 'none' ? '' : 'none';
+            });
+            document.addEventListener('click', () => { dropdown.style.display = 'none'; });
+        } catch(_) {}
+    })();
+    </script>
 </body>
 </html>

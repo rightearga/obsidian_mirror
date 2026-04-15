@@ -75,6 +75,35 @@ pub struct AppState {
     pub insights_cache: TokioRwLock<InsightsCache>,
 }
 
+/// 多仓库注册表（v1.7.4）
+///
+/// 持有所有已初始化的仓库状态，按配置顺序排列。
+/// 第一个仓库为主仓库，持有向后兼容的无前缀路由（`/doc/{path}` 等）。
+/// 非主仓库通过 `/r/{name}/` 前缀访问。
+pub struct VaultRegistry {
+    /// 仓库列表：`(name, Arc<AppState>)`，顺序与 `config.effective_repos()` 一致
+    pub vaults: Vec<(String, Arc<AppState>)>,
+}
+
+impl VaultRegistry {
+    /// 返回主仓库（列表中第一个）的 `AppState`
+    pub fn primary(&self) -> Arc<AppState> {
+        self.vaults[0].1.clone()
+    }
+
+    /// 按名称查找仓库的 `AppState`，不存在时返回 `None`
+    pub fn get(&self, name: &str) -> Option<Arc<AppState>> {
+        self.vaults.iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, s)| s.clone())
+    }
+
+    /// 返回所有仓库名称列表
+    pub fn names(&self) -> Vec<&str> {
+        self.vaults.iter().map(|(n, _)| n.as_str()).collect()
+    }
+}
+
 /// 同步状态常量
 pub mod sync_status {
     pub const IDLE: u8    = 0;

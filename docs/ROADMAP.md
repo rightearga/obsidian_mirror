@@ -642,7 +642,7 @@ impl Bitset {
 
 ---
 
-### 🔧 v1.7.4 — 多仓库支持
+### ✅ v1.7.4 (已发布 - 2026-04-15) — 多仓库支持
 
 **主题**：单实例管理多个 Git 仓库，适配团队多项目或个人多知识库场景
 
@@ -687,6 +687,22 @@ impl Bitset {
 - 用户权限全局生效（不做仓库级别独立认证）
 - Prometheus 指标加 `repo` label 区分
 - `perform_sync` 支持按 repo name 单独触发（`POST /r/{name}/sync`）
+
+#### 实际交付物
+- 修改文件：`src/config.rs`（RepoConfig + repos 字段 + effective_repos() + 4 个测试）
+- 修改文件：`src/state.rs`（VaultRegistry 结构体）
+- 修改文件：`src/main.rs`（多仓库初始化、build_vault_scope、重写 start_http_server）
+- 修改文件：`src/handlers.rs`（vaults_list_handler）
+- 修改文件：`templates/layout.html`（仓库切换器下拉菜单）
+- 修改文件：`config.example.ron`（多仓库配置示例注释）
+
+#### 设计说明
+actix-web `scope().app_data()` 覆盖机制：每个 `/r/{name}/` scope 注入该仓库的 `Arc<AppState>`，
+现有 30+ 个 handler 代码**零修改**即可在多仓库场景下正确工作。
+
+#### 测试结果
+- 服务端全量测试：**115/115 通过**
+- 新增测试：4 个（effective_repos 单/多仓库、is_multi_vault）
 
 ---
 

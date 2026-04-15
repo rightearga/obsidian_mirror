@@ -3,9 +3,31 @@ use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 
+/// 单个仓库配置（v1.7.4 多仓库支持）
+///
+/// 在 `config.ron` 的 `repos` 数组中使用，每项描述一个 Git 仓库。
+/// 单仓库兼容：若 `repos` 为空，系统自动从顶级 `repo_url`/`local_path`/`ignore_patterns` 构造一个名为 "default" 的仓库。
+#[derive(Debug, Deserialize, Clone)]
+pub struct RepoConfig {
+    /// 仓库唯一名称（用于 URL 前缀 /r/{name}/...）
+    pub name: String,
+    /// Git 仓库远程地址
+    #[serde(default)]
+    pub repo_url: String,
+    /// 本地克隆路径
+    pub local_path: PathBuf,
+    /// 忽略的文件/目录模式（与全局 ignore_patterns 相同格式）
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
+    /// 单仓库兼容字段：Git 仓库地址（若 repos 非空则忽略）
+    #[serde(default)]
     pub repo_url: String,
+    /// 单仓库兼容字段：本地路径（若 repos 非空则忽略）
+    #[serde(default = "default_local_path")]
     pub local_path: PathBuf,
     pub listen_addr: String,
     #[serde(default = "default_workers")]
@@ -34,6 +56,14 @@ pub struct AppConfig {
     /// 未设置时使用 X-Forwarded-Proto header 推断，最终 fallback 到 Host header。
     #[serde(default)]
     pub public_base_url: Option<String>,
+
+    /// 多仓库配置列表（v1.7.4）
+    ///
+    /// 非空时取代顶级 `repo_url`/`local_path`/`ignore_patterns`；
+    /// 空时向后兼容，自动将顶级字段包装成名为 "default" 的单仓库。
+    /// 第一个仓库为主仓库，持有后向兼容的无前缀路由。
+    #[serde(default)]
+    pub repos: Vec<RepoConfig>,
 }
 
 /// Webhook 配置
@@ -122,6 +152,10 @@ impl Default for SecurityConfig {
     }
 }
 
+fn default_local_path() -> PathBuf {
+    PathBuf::from("./vault_data")
+}
+
 fn default_index_db_path() -> PathBuf {
     PathBuf::from("./index.db")
 }
@@ -159,6 +193,27 @@ fn default_workers() -> usize {
 }
 
 impl AppConfig {
+    /// 返回有效的仓库列表（v1.7.4）。
+    ///
+    /// 若 `repos` 非空，直接返回；否则从顶级 `repo_url`/`local_path`/`ignore_patterns`
+    /// 构造一个名为 "default" 的单仓库以实现向后兼容。
+    pub fn effective_repos(&self) -> Vec<RepoConfig> {
+        if !self.repos.is_empty() {
+            return self.repos.clone();
+        }
+        vec![RepoConfig {
+            name: "default".to_string(),
+            repo_url: self.repo_url.clone(),
+            local_path: self.local_path.clone(),
+            ignore_patterns: self.ignore_patterns.clone(),
+        }]
+    }
+
+    /// 是否启用多仓库模式（`repos` 字段非空）。
+    pub fn is_multi_vault(&self) -> bool {
+        !self.repos.is_empty()
+    }
+
     pub fn load(path: &str) -> anyhow::Result<Self> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path))?;
@@ -167,3 +222,85 @@ impl AppConfig {
         Ok(config)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_single_vault_config() -> AppConfig {
+        AppConfig {
+            repo_url: "https://git.example.com/notes.git".to_string(),
+            local_path: PathBuf::from("./vault"),
+            listen_addr: "127.0.0.1:8080".to_string(),
+            workers: 4,
+            ignore_patterns: vec![".obsidian".to_string()],
+            database: DatabaseConfig::default(),
+            security: SecurityConfig::default(),
+            sync_interval_minutes: 0,
+            webhook: WebhookConfig::default(),
+            public_base_url: None,
+            repos: vec![],
+        }
+    }
+
+    #[test]
+    fn test_effective_repos_single_vault() {
+        // 单仓库模式：从顶级字段构造名为 "default" 的仓库
+        let config = make_single_vault_config();
+        let repos = config.effective_repos();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "default");
+        assert_eq!(repos[0].repo_url, "https://git.example.com/notes.git");
+        assert_eq!(repos[0].local_path, PathBuf::from("./vault"));
+        assert_eq!(repos[0].ignore_patterns, vec![".obsidian"]);
+    }
+
+    #[test]
+    fn test_is_multi_vault_false_when_repos_empty() {
+        let config = make_single_vault_config();
+        assert!(!config.is_multi_vault());
+    }
+
+    #[test]
+    fn test_effective_repos_multi_vault() {
+        // 多仓库模式：直接返回 repos 列表
+        let mut config = make_single_vault_config();
+        config.repos = vec![
+            RepoConfig {
+                name: "personal".to_string(),
+                repo_url: "https://git.example.com/personal.git".to_string(),
+                local_path: PathBuf::from("./personal"),
+                ignore_patterns: vec![],
+            },
+            RepoConfig {
+                name: "work".to_string(),
+                repo_url: "https://git.example.com/work.git".to_string(),
+                local_path: PathBuf::from("./work"),
+                ignore_patterns: vec!["drafts/".to_string()],
+            },
+        ];
+        let repos = config.effective_repos();
+        assert_eq!(repos.len(), 2);
+        assert_eq!(repos[0].name, "personal");
+        assert_eq!(repos[1].name, "work");
+        assert!(config.is_multi_vault());
+    }
+
+    #[test]
+    fn test_effective_repos_multi_vault_ignores_top_level_fields() {
+        // 多仓库模式下，顶级 repo_url/local_path 被忽略
+        let mut config = make_single_vault_config();
+        config.repos = vec![RepoConfig {
+            name: "vault1".to_string(),
+            repo_url: "https://git.example.com/v1.git".to_string(),
+            local_path: PathBuf::from("./v1"),
+            ignore_patterns: vec![],
+        }];
+        let repos = config.effective_repos();
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].name, "vault1");
+        // 顶级 repo_url 不出现在结果中
+        assert_ne!(repos[0].repo_url, "https://git.example.com/notes.git");
+    }
+}
+

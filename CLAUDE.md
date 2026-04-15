@@ -142,6 +142,8 @@ docker compose up -d
 | GET | `/api/graph/global` | 全库关系图谱（`?hide_isolated=` 参数） |
 | GET | `/graph` | 全局知识图谱专页（全屏，含工具栏、聚类着色，v1.7.0） |
 | GET | `/insights` | 笔记洞察 Dashboard（写作趋势/健康度/标签云，v1.7.3） |
+| GET | `/api/vaults` | 所有仓库名称列表（v1.7.4 多仓库） |
+| ANY | `/r/{name}/...` | 多仓库路由前缀（所有仓库特定路由均可加此前缀，v1.7.4） |
 | GET | `/api/insights/stats` | 洞察统计数据 JSON（InsightsCache，v1.7.3） |
 | GET | `/doc/{path}/history` | 笔记提交历史列表（git log --follow，v1.7.2） |
 | GET | `/doc/{path}/at/{commit}` | 历史版本快照（git show，Markdown 渲染，v1.7.2） |

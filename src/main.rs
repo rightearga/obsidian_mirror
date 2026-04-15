@@ -5,11 +5,11 @@ use std::path::PathBuf;
 use tracing::{info, warn};
 
 use obsidian_mirror::{
-    config::AppConfig,
-    state::AppState,
+    config::{AppConfig, DatabaseConfig},
+    state::{AppState, VaultRegistry},
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler, vaults_list_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -43,72 +43,106 @@ async fn serve_manifest(_req: actix_web::HttpRequest) -> actix_web::Result<actix
 async fn main() -> anyhow::Result<()> {
     // 初始化日志
     init_logging();
-    
+
     // 初始化 Prometheus 指标
     init_metrics();
-    
+
     // 打印启动信息
     print_startup_banner();
-    
+
     // 加载配置
     let config = load_config("config.ron");
     print_config_info(&config);
-    
-    // 初始化搜索引擎
-    let search_engine = init_search_engine(&config)?;
-    
-    // 初始化认证系统
-    let auth_system = init_auth_system(&config)?;
-    
-    // 初始化分享链接数据库
-    let share_db = init_share_database(&config)?;
-    
-    // 初始化阅读进度数据库
-    let reading_progress_db = init_reading_progress_database(&config)?;
-    
-    // 创建应用状态
-    info!("✨ 创建应用状态...");
-    let app_state = Arc::new(AppState::new(config.clone(), search_engine, share_db, reading_progress_db));
-    info!("✅ 应用状态创建完成");
-    
-    // 执行初始同步
-    perform_initial_sync(&app_state).await;
 
-    // 启动定时自动同步任务（若 sync_interval_minutes > 0）
-    if config.sync_interval_minutes > 0 {
-        let interval_minutes = config.sync_interval_minutes;
-        let state_for_timer = app_state.clone();
-        tokio::spawn(async move {
-            use tokio::time::{interval, Duration};
-            let mut ticker = interval(Duration::from_secs(interval_minutes as u64 * 60));
-            ticker.tick().await; // 跳过第一次立即触发（启动时已执行初始同步）
-            loop {
-                ticker.tick().await;
-                // 尝试获取同步锁，若已在同步中则跳过
-                match state_for_timer.sync_lock.try_lock() {
-                    Ok(_guard) => {
-                        info!("⏰ 定时同步开始（间隔 {} 分钟）", interval_minutes);
-                        if let Err(e) = perform_sync(&state_for_timer).await {
-                            tracing::error!("定时同步失败: {:?}", e);
-                        }
-                    }
-                    Err(_) => {
-                        info!("⏰ 定时同步跳过：另一个同步任务正在进行");
-                    }
-                }
-            }
-        });
-        info!("✅ 定时同步任务已启动（间隔 {} 分钟）", config.sync_interval_minutes);
+    // 初始化认证系统（全局，所有仓库共用）
+    let auth_system = init_auth_system(&config)?;
+
+    // 初始化分享链接数据库（全局）
+    let share_db = init_share_database(&config)?;
+
+    // 初始化阅读进度数据库（全局）
+    let reading_progress_db = init_reading_progress_database(&config)?;
+
+    // v1.7.4：为每个仓库创建独立的 AppState（包含独立搜索索引和同步状态）
+    let repos = config.effective_repos();
+    let is_multi = config.is_multi_vault();
+    let mut vault_list: Vec<(String, Arc<AppState>)> = Vec::new();
+
+    for (idx, repo) in repos.iter().enumerate() {
+        info!("========================================");
+        info!("📚 初始化仓库 [{}/{}]: {}", idx + 1, repos.len(), repo.name);
+
+        // 为每个仓库派生独立的数据库路径（主仓库沿用全局配置，其他仓库加名称前缀）
+        let vault_db = derive_vault_db_config(&config.database, &repo.name, is_multi);
+
+        // 为该仓库创建专属搜索引擎
+        let vault_search = init_vault_search_engine(&vault_db, &repo.name)?;
+
+        // 构造该仓库的 AppConfig（全局设置 + 仓库特定的 repo_url/local_path/ignore_patterns）
+        let vault_config = AppConfig {
+            repo_url:           repo.repo_url.clone(),
+            local_path:         repo.local_path.clone(),
+            ignore_patterns:    repo.ignore_patterns.clone(),
+            database:           vault_db,
+            repos:              vec![],  // 仓库级别 config 中不再嵌套 repos
+            ..config.clone()
+        };
+
+        let vault_state = Arc::new(AppState::new(
+            vault_config,
+            vault_search,
+            share_db.clone(),
+            reading_progress_db.clone(),
+        ));
+        info!("✅ 仓库 {} 状态创建完成", repo.name);
+
+        vault_list.push((repo.name.clone(), vault_state));
     }
 
+    // 执行各仓库初始同步
+    for (name, vault_state) in &vault_list {
+        info!("🔄 仓库 {} 开始初始同步...", name);
+        perform_initial_sync(vault_state).await;
+    }
+
+    // 启动每个仓库的定时自动同步（若 sync_interval_minutes > 0）
+    let sync_interval = config.sync_interval_minutes;
+    if sync_interval > 0 {
+        for (name, vault_state) in &vault_list {
+            let vault_name   = name.clone();
+            let state_timer  = vault_state.clone();
+            tokio::spawn(async move {
+                use tokio::time::{interval as tick_interval, Duration};
+                let mut ticker = tick_interval(Duration::from_secs(sync_interval as u64 * 60));
+                ticker.tick().await; // 跳过第一次立即触发
+                loop {
+                    ticker.tick().await;
+                    match state_timer.sync_lock.try_lock() {
+                        Ok(_guard) => {
+                            info!("⏰ 仓库 {} 定时同步开始", vault_name);
+                            if let Err(e) = perform_sync(&state_timer).await {
+                                tracing::error!("仓库 {} 定时同步失败: {:?}", vault_name, e);
+                            }
+                        }
+                        Err(_) => info!("⏰ 仓库 {} 定时同步跳过：另一个同步任务正在进行", vault_name),
+                    }
+                }
+            });
+        }
+        info!("✅ 所有仓库定时同步任务已启动（间隔 {} 分钟）", sync_interval);
+    }
+
+    // 构建 VaultRegistry
+    let vault_registry = Arc::new(VaultRegistry { vaults: vault_list });
+
     // 启动 HTTP 服务器
-    let result = start_http_server(app_state, config, auth_system).await;
-    
+    let result = start_http_server(vault_registry, config, auth_system).await;
+
     // 优雅退出
     info!("========================================");
     info!("👋 {} 服务器已停止", APP_NAME);
     info!("========================================");
-    
+
     result
 }
 
@@ -232,26 +266,59 @@ fn load_config(config_path: &str) -> AppConfig {
                 sync_interval_minutes: 0,
                 webhook: Default::default(),
                 public_base_url: None,
+                repos: vec![],
             }
         }
     }
 }
 
-/// 初始化搜索引擎
-fn init_search_engine(config: &AppConfig) -> anyhow::Result<Arc<SearchEngine>> {
-    info!("🔍 初始化搜索引擎...");
-    // 搜索索引放在 index.db 的同级目录下，而不是 local_path 内部，
-    // 避免 git clone/重建 local_path 时 Tantivy 的 IndexReader 持续报警
-    let index_dir = config.database.index_db_path
+/// 派生每个仓库的专属数据库配置（v1.7.4）
+///
+/// 主仓库（name = "default" 或单仓库模式）沿用全局配置；
+/// 其余仓库在 index_db_path 同级目录下生成 `{name}_index.db`，
+/// auth/share/reading_progress 数据库保持全局共享。
+fn derive_vault_db_config(base: &DatabaseConfig, vault_name: &str, is_multi: bool) -> DatabaseConfig {
+    if !is_multi || vault_name == "default" {
+        return base.clone();
+    }
+    // 文件名安全化：替换路径分隔符和空格
+    let safe_name = vault_name.replace(['/', '\\', ' ', ':'], "_");
+    let parent = base.index_db_path.parent().unwrap_or(std::path::Path::new("."));
+    DatabaseConfig {
+        index_db_path: parent.join(format!("{}_index.db", safe_name)),
+        // 认证、分享、阅读进度数据库跨仓库共享
+        auth_db_path:               base.auth_db_path.clone(),
+        share_db_path:              base.share_db_path.clone(),
+        reading_progress_db_path:   base.reading_progress_db_path.clone(),
+    }
+}
+
+/// 为指定仓库初始化搜索引擎（v1.7.4）
+///
+/// 搜索索引目录从 `index_db_path` 的同级位置派生：
+/// - 单仓库 / 主仓库：`.search_index/`
+/// - 非主仓库：`.search_index_{name}/`
+fn init_vault_search_engine(vault_db: &DatabaseConfig, vault_name: &str) -> anyhow::Result<Arc<SearchEngine>> {
+    info!("🔍 初始化搜索引擎（仓库: {}）...", vault_name);
+    let index_dir = vault_db.index_db_path
         .parent()
         .unwrap_or(std::path::Path::new("."))
-        .join(".search_index");
+        .join(if vault_name == "default" {
+            ".search_index".to_string()
+        } else {
+            let safe = vault_name.replace(['/', '\\', ' ', ':'], "_");
+            format!(".search_index_{}", safe)
+        });
     info!("  └─ 索引目录: {}", index_dir.display());
-    
-    let search_engine = Arc::new(SearchEngine::new(&index_dir)?);
-    info!("✅ 搜索引擎初始化完成");
-    
-    Ok(search_engine)
+    let engine = Arc::new(SearchEngine::new(&index_dir)?);
+    info!("✅ 搜索引擎初始化完成（仓库: {}）", vault_name);
+    Ok(engine)
+}
+
+/// 初始化搜索引擎（单仓库向后兼容入口，供外部代码调用）
+#[allow(dead_code)]
+fn init_search_engine(config: &AppConfig) -> anyhow::Result<Arc<SearchEngine>> {
+    init_vault_search_engine(&config.database, "default")
 }
 
 /// 初始化认证系统
@@ -344,21 +411,58 @@ async fn perform_initial_sync(app_state: &Arc<AppState>) {
     }
 }
 
-/// 启动 HTTP 服务器
+/// 为单个仓库构建路由 scope（v1.7.4）
+///
+/// 使用 actix-web 的 `.app_data()` 覆盖机制：scope 内的所有处理器
+/// 接收到的 `web::Data<Arc<AppState>>` 将是该仓库的 AppState，
+/// 无需修改任何现有 handler。
+fn build_vault_scope(scope_path: &str, vault_state: Arc<AppState>) -> actix_web::Scope {
+    web::scope(scope_path)
+        .app_data(web::Data::new(vault_state))
+        .service(stats_handler)
+        .service(preview_handler)
+        .service(sync_handler)
+        .service(search_handler)
+        .service(graph_handler)
+        .service(assets_handler)
+        .service(tags_list_handler)
+        .service(tag_notes_handler)
+        .service(orphans_handler)
+        .service(random_handler)
+        .service(recent_page_handler)
+        .service(titles_api_handler)
+        .service(suggest_handler)
+        .service(sync_events_handler)
+        .service(sync_history_handler)
+        .service(global_graph_handler)
+        .service(graph_page_handler)
+        .service(insights_page_handler)
+        .service(insights_stats_handler)
+        .route("/webhook/sync",                          web::post().to(webhook_sync_handler))
+        .route("/api/config/reload",                     web::post().to(config_reload_handler))
+        // Git 历史路由需在 doc_handler 之前注册
+        .route("/doc/{path:.*}/history",                 web::get().to(note_history_handler))
+        .route("/doc/{path:.*}/at/{commit}",             web::get().to(note_history_at_handler))
+        .route("/doc/{path:.*}/diff/{commit}",           web::get().to(note_history_diff_handler))
+        .service(doc_handler)
+        .service(index_handler)
+}
+
+/// 启动 HTTP 服务器（v1.7.4：接受 VaultRegistry 支持多仓库）
 async fn start_http_server(
-    app_state: Arc<AppState>,
+    vault_registry: Arc<VaultRegistry>,
     config: AppConfig,
     auth_system: Option<(Arc<AuthDatabase>, Arc<JwtManager>)>,
 ) -> anyhow::Result<()> {
     let bind_addr = config.listen_addr.clone();
     let workers = config.workers;
     let auth_enabled = config.security.auth_enabled;
-    
-    // 克隆 app_state 用于闭包
-    let app_state_for_closure = app_state.clone();
-    let app_state_for_shutdown = app_state.clone();
+
+    // 主仓库（第一个）的 AppState，供优雅关闭时保存索引
+    let primary_for_shutdown = vault_registry.primary();
+    let vault_registry_for_shutdown = vault_registry.clone();
     let config_for_shutdown = config.clone();
-    
+
     info!("========================================");
     info!("🚀 启动 HTTP 服务器");
     info!("========================================");
@@ -368,53 +472,79 @@ async fn start_http_server(
     if auth_enabled {
         info!("🔒 认证: 已启用");
     }
+    if vault_registry.vaults.len() > 1 {
+        info!("📚 多仓库模式：{} 个仓库（{}）",
+            vault_registry.vaults.len(),
+            vault_registry.names().join(", "));
+    }
     info!("========================================");
     info!("✨ 服务器已就绪，按 Ctrl+C 停止");
     info!("========================================");
 
-    // 创建一个 dummy JWT manager 用于未启用认证的情况
+    // JWT manager（未启用认证时使用 dummy）
     let jwt_manager = auth_system.as_ref()
         .map(|(_, mgr)| mgr.clone())
         .unwrap_or_else(|| Arc::new(JwtManager::new("dummy".to_string(), 24)));
 
     let server = HttpServer::new(move || {
+        let primary_state = vault_registry.primary();
+
         let mut app = App::new()
             .wrap(actix_web::middleware::Logger::default())
-            // 始终应用认证中间件（但内部会检查 auth_enabled）
             .wrap(AuthMiddleware::new((*jwt_manager).clone(), auth_enabled))
-            .app_data(web::Data::new(app_state_for_closure.clone()));
-        
-        // 如果有认证系统，添加相关的 Data 和路由
+            // 主仓库 AppState（向后兼容的无前缀路由使用此数据）
+            .app_data(web::Data::new(primary_state))
+            // VaultRegistry（供 /api/vaults 端点读取）
+            .app_data(web::Data::new(vault_registry.clone()));
+
+        // 认证相关路由（全局）
         if let Some((ref auth_db, ref jwt_manager)) = auth_system {
             app = app
                 .app_data(web::Data::new(auth_db.clone()))
                 .app_data(web::Data::new(jwt_manager.clone()))
-                // 登录页面和 API
                 .route("/login", web::get().to(login_page_handler))
                 .route("/change-password", web::get().to(change_password_page_handler))
-                .route("/api/auth/login", web::post().to(login_handler))
-                .route("/api/auth/logout", web::post().to(logout_handler))
-                .route("/api/auth/change-password", web::post().to(change_password_handler))
-                .route("/api/auth/current-user", web::get().to(current_user_handler))
-                // 管理员用户管理路由（v1.5.3）
-                .route("/admin/users", web::get().to(admin_users_page_handler))
-                .route("/api/admin/users", web::get().to(list_users_handler))
-                .route("/api/admin/users", web::post().to(create_user_handler))
-                .route("/api/admin/users/{username}", web::delete().to(delete_user_handler))
+                .route("/api/auth/login",            web::post().to(login_handler))
+                .route("/api/auth/logout",           web::post().to(logout_handler))
+                .route("/api/auth/change-password",  web::post().to(change_password_handler))
+                .route("/api/auth/current-user",     web::get().to(current_user_handler))
+                .route("/admin/users",                        web::get().to(admin_users_page_handler))
+                .route("/api/admin/users",                    web::get().to(list_users_handler))
+                .route("/api/admin/users",                    web::post().to(create_user_handler))
+                .route("/api/admin/users/{username}",         web::delete().to(delete_user_handler))
                 .route("/api/admin/users/{username}/reset-password", web::post().to(reset_user_password_handler));
         }
-        
-        // 添加通用路由
-        app
+
+        // ── 全局路由（与仓库无关）──────────────────────────────────────────────
+        app = app
             .service(fs::Files::new("/static", "static").show_files_listing())
-            // Service Worker 必须从根路径提供（浏览器安全限制：scope 由注册路径决定）
-            .route("/sw.js", web::get().to(serve_service_worker))
-            // Web App Manifest 也从根路径提供（标准做法）
+            .route("/sw.js",        web::get().to(serve_service_worker))
             .route("/manifest.json", web::get().to(serve_manifest))
-            .service(health_handler)  // 健康检查端点
-            .service(metrics_handler)  // Prometheus 指标端点
-            .service(stats_handler)   // 统计信息端点
-            .service(preview_handler) // 笔记预览端点
+            .service(health_handler)
+            .service(metrics_handler)
+            .service(vaults_list_handler)  // GET /api/vaults（v1.7.4）
+            // 分享链接路由（跨仓库共享）
+            .route("/api/share/create",          web::post().to(create_share_handler))
+            .route("/api/share/list",             web::get().to(list_shares_handler))
+            .route("/api/share/{token}",          web::delete().to(revoke_share_handler))
+            .route("/share/{token}",              web::get().to(access_share_handler))
+            .route("/share/{token}",              web::post().to(access_share_handler))
+            // 阅读进度路由（跨仓库共享）
+            .route("/api/reading/progress",                          web::post().to(save_progress_handler))
+            .route("/api/reading/progress",                          web::get().to(list_progress_handler))
+            .route("/api/reading/progress/{note_path:.*}",           web::get().to(get_progress_handler))
+            .route("/api/reading/progress/{note_path:.*}",           web::delete().to(delete_progress_handler))
+            .route("/api/reading/history",        web::post().to(add_history_handler))
+            .route("/api/reading/history",        web::get().to(list_history_handler))
+            // 搜索历史路由
+            .route("/api/search/history",         web::post().to(add_search_history_handler))
+            .route("/api/search/history",         web::get().to(get_search_history_handler))
+            .route("/api/search/history",         web::delete().to(clear_search_history_handler));
+
+        // ── 主仓库向后兼容路由（无前缀，使用外层 app_data 的主仓库 AppState）──
+        app = app
+            .service(stats_handler)
+            .service(preview_handler)
             .service(sync_handler)
             .service(search_handler)
             .service(graph_handler)
@@ -425,53 +555,36 @@ async fn start_http_server(
             .service(random_handler)
             .service(recent_page_handler)
             .service(titles_api_handler)
-            .service(suggest_handler)          // GET /api/suggest — 搜索建议（v1.5.2）
-            .service(sync_events_handler)      // GET /api/sync/events — SSE 同步进度（v1.5.5）
-            .service(sync_history_handler)     // GET /api/sync/history — 同步历史（v1.5.5）
+            .service(suggest_handler)
+            .service(sync_events_handler)
+            .service(sync_history_handler)
             .service(global_graph_handler)
-            .service(graph_page_handler)         // GET /graph — 全局知识图谱专页（v1.7.0）
-            .service(insights_page_handler)      // GET /insights — 笔记洞察 Dashboard（v1.7.3）
-            .service(insights_stats_handler)     // GET /api/insights/stats（v1.7.3）
-            // Webhook 触发同步（需在 config.webhook.enabled=true 时才有效）
-            .route("/webhook/sync", web::post().to(webhook_sync_handler))
-            // 配置热重载（需认证）
-            .route("/api/config/reload", web::post().to(config_reload_handler))
-            // 分享链接相关路由
-            .route("/api/share/create", web::post().to(create_share_handler))
-            .route("/api/share/list", web::get().to(list_shares_handler))
-            .route("/api/share/{token}", web::delete().to(revoke_share_handler))
-            .route("/share/{token}", web::get().to(access_share_handler))
-            .route("/share/{token}", web::post().to(access_share_handler))
-            // 阅读进度相关路由
-            .route("/api/reading/progress", web::post().to(save_progress_handler))
-            .route("/api/reading/progress", web::get().to(list_progress_handler))
-            .route("/api/reading/progress/{note_path:.*}", web::get().to(get_progress_handler))
-            .route("/api/reading/progress/{note_path:.*}", web::delete().to(delete_progress_handler))
-            .route("/api/reading/history", web::post().to(add_history_handler))
-            .route("/api/reading/history", web::get().to(list_history_handler))
-            // 搜索历史相关路由（v1.5.2）
-            .route("/api/search/history", web::post().to(add_search_history_handler))
-            .route("/api/search/history", web::get().to(get_search_history_handler))
-            .route("/api/search/history", web::delete().to(clear_search_history_handler))
-            // Git 历史路由（v1.7.2）：必须在 doc_handler 之前注册，否则被 /doc/{path:.*} 吞掉
-            .route("/doc/{path:.*}/history",          web::get().to(note_history_handler))
-            .route("/doc/{path:.*}/at/{commit}",      web::get().to(note_history_at_handler))
-            .route("/doc/{path:.*}/diff/{commit}",    web::get().to(note_history_diff_handler))
+            .service(graph_page_handler)
+            .service(insights_page_handler)
+            .service(insights_stats_handler)
+            .route("/webhook/sync",              web::post().to(webhook_sync_handler))
+            .route("/api/config/reload",         web::post().to(config_reload_handler))
+            .route("/doc/{path:.*}/history",     web::get().to(note_history_handler))
+            .route("/doc/{path:.*}/at/{commit}", web::get().to(note_history_at_handler))
+            .route("/doc/{path:.*}/diff/{commit}", web::get().to(note_history_diff_handler))
             .service(doc_handler)
-            .service(index_handler)
+            .service(index_handler);
+
+        // ── 多仓库：为每个仓库注册 /r/{name}/... 前缀路由 ─────────────────────
+        for (name, vault_state) in &vault_registry.vaults {
+            let scope_path = format!("/r/{}", name);
+            app = app.service(build_vault_scope(&scope_path, vault_state.clone()));
+        }
+
+        app
     })
     .workers(workers)
     .bind(&bind_addr)?;
-    
+
     let server = server.run();
-    
-    // 设置优雅关闭处理
     let server_handle = server.handle();
-    
-    // 在后台运行服务器
     let server_task = tokio::spawn(server);
-    
-    // 监听关闭信号
+
     tokio::select! {
         _ = tokio::signal::ctrl_c() => {
             info!("========================================");
@@ -486,58 +599,65 @@ async fn start_http_server(
                 sigterm.recv().await
             }
             #[cfg(not(unix))]
-            {
-                std::future::pending::<()>().await
-            }
+            { std::future::pending::<()>().await }
         } => {
             info!("========================================");
             info!("📢 收到 SIGTERM 信号，开始优雅关闭...");
             info!("========================================");
         }
     }
-    
-    // 停止接受新连接
+
     server_handle.stop(true).await;
-
-    // 等待服务器完全关闭
     server_task.await??;
-
     info!("✅ HTTP 服务器已关闭");
 
-    // v1.5.5：等待后台任务（Tantivy 重建、redb 持久化）完成，上限 30 秒
+    // v1.5.5：等待所有仓库的后台任务完成（上限 30 秒）
     info!("⏳ 等待后台任务完成...");
-    let bg_tasks: Vec<_> = {
-        let mut lock = app_state_for_shutdown.background_tasks.lock().unwrap();
-        lock.drain(..).collect()
-    };
-    if !bg_tasks.is_empty() {
+    let mut all_bg: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+    for (_, vault_state) in &vault_registry_for_shutdown.vaults {
+        let mut lock = vault_state.background_tasks.lock().unwrap();
+        all_bg.extend(lock.drain(..));
+    }
+    if !all_bg.is_empty() {
         let timeout = tokio::time::Duration::from_secs(30);
-        match tokio::time::timeout(timeout, futures_util::future::join_all(bg_tasks)).await {
+        match tokio::time::timeout(timeout, futures_util::future::join_all(all_bg)).await {
             Ok(_) => info!("✅ 所有后台任务已完成"),
             Err(_) => warn!("⚠️ 后台任务等待超时（30 秒），强制退出"),
         }
     }
-    
-    // 保存持久化索引（如果需要）
+
+    // 保存所有仓库的持久化索引
     info!("💾 保存持久化索引...");
-    if let Ok(persistence) = obsidian_mirror::persistence::IndexPersistence::open(&config_for_shutdown.database.index_db_path) {
-        // 获取当前 Git 提交（使用 GitClient 公共接口，不重复实现）
-        if let Ok(git_commit) = obsidian_mirror::git::GitClient::get_current_commit(&config_for_shutdown.local_path).await {
-            let notes = app_state_for_shutdown.notes.read().await.clone();
-            let link_index = app_state_for_shutdown.link_index.read().await.clone();
-            let backlinks = app_state_for_shutdown.backlinks.read().await.clone();
-            let tag_index = app_state_for_shutdown.tag_index.read().await.clone();
-            let sidebar = app_state_for_shutdown.sidebar.read().await.clone();
-            
-            let ignore_patterns = config_for_shutdown.ignore_patterns.clone();
-            if let Err(e) = persistence.save_indexes(&git_commit, &ignore_patterns, &notes, &link_index, &backlinks, &tag_index, &sidebar) {
-                warn!("⚠️  保存持久化索引失败: {:?}", e);
-            } else {
-                info!("✅ 持久化索引已保存");
+    for (name, vault_state) in &vault_registry_for_shutdown.vaults {
+        let vault_cfg = vault_state.config.read().unwrap().clone();
+        if let Ok(persistence) = obsidian_mirror::persistence::IndexPersistence::open(
+            &vault_cfg.database.index_db_path
+        ) {
+            if let Ok(git_commit) = obsidian_mirror::git::GitClient::get_current_commit(
+                &vault_cfg.local_path
+            ).await {
+                let notes      = vault_state.notes.read().await.clone();
+                let link_index = vault_state.link_index.read().await.clone();
+                let backlinks  = vault_state.backlinks.read().await.clone();
+                let tag_index  = vault_state.tag_index.read().await.clone();
+                let sidebar    = vault_state.sidebar.read().await.clone();
+
+                if let Err(e) = persistence.save_indexes(
+                    &git_commit, &vault_cfg.ignore_patterns,
+                    &notes, &link_index, &backlinks, &tag_index, &sidebar
+                ) {
+                    warn!("⚠️ 仓库 {} 持久化索引保存失败: {:?}", name, e);
+                } else {
+                    info!("✅ 仓库 {} 持久化索引已保存", name);
+                }
             }
         }
     }
-    
+
+    // 消除未使用警告（primary_for_shutdown 仅作兜底引用）
+    let _ = primary_for_shutdown;
+    let _ = config_for_shutdown;
+
     info!("========================================");
     info!("👋 应用已优雅关闭");
     info!("========================================");

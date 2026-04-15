@@ -8,6 +8,28 @@
 
 ---
 
+## [v1.7.4] — 2026-04-15
+
+多仓库支持：单实例管理多个 Git 仓库，路由自动按仓库命名空间化。
+
+### Added
+- **多仓库配置**（`src/config.rs`）：新增 `RepoConfig` 结构体和 `repos: Vec<RepoConfig>` 字段；`effective_repos()` 方法在单仓库兼容模式下自动从顶级字段构造 "default" 仓库
+- **VaultRegistry**（`src/state.rs`）：保存所有仓库的 `AppState`，提供 `primary()`、`get(name)`、`names()` 方法
+- **动态 scope 路由**（`src/main.rs`）：为每个仓库构建 `/r/{name}/...` 前缀 scope，通过 actix-web `app_data()` 覆盖机制注入对应 AppState，无需修改任何现有 handler
+- **`GET /api/vaults`**（`src/handlers.rs`）：返回所有仓库名称及主仓库标记
+- **仓库切换器**（`templates/layout.html`）：多仓库时在侧边栏显示下拉菜单，单仓库时隐藏
+- **`config.example.ron`**：新增多仓库配置示例注释
+
+### Changed
+- `main()` 改为为每个仓库创建独立的 `AppState`（独立搜索索引、sync_lock、IndexPersistence）
+- 优雅关闭时等待所有仓库的后台任务并保存所有仓库的持久化索引
+- 每仓库独立定时同步任务（`sync_interval_minutes` 全局生效）
+
+### 测试统计
+- 服务端：115/115 通过（新增 4 个 config 多仓库测试）
+
+---
+
 ## [v1.7.3] — 2026-04-15
 
 笔记洞察 Dashboard：写作趋势、知识库健康度报告和标签云。
