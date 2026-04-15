@@ -222,25 +222,35 @@ const NotePreview = {
     
     /**
      * 获取预览内容（带缓存）
+     *
+     * 支持历史版本预览（v1.7.2）：
+     * 若 href 为 /doc/{path}/at/{commit} 格式，自动提取 path 和 commit 参数，
+     * 调用 /api/preview?path={path}&commit={commit} 获取历史内容。
      */
     async fetchPreview(path) {
-        // 检查缓存
-        if (this.cache.has(path)) {
-            return this.cache.get(path);
+        // 检查是否为历史版本路径：{notePath}/at/{commit}
+        const atMatch = path.match(/^(.+)\/at\/([0-9a-f]{4,64})$/i);
+        const cacheKey = path;
+
+        if (this.cache.has(cacheKey)) {
+            return this.cache.get(cacheKey);
         }
-        
-        // 请求 API
-        const response = await fetch(`/api/preview?path=${encodeURIComponent(path)}`);
-        
+
+        let url;
+        if (atMatch) {
+            // 历史版本预览：/api/preview?path={notePath}&commit={hash}
+            url = `/api/preview?path=${encodeURIComponent(atMatch[1])}&commit=${encodeURIComponent(atMatch[2])}`;
+        } else {
+            url = `/api/preview?path=${encodeURIComponent(path)}`;
+        }
+
+        const response = await fetch(url);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
-        
+
         const preview = await response.json();
-        
-        // 添加到缓存
-        this.addToCache(path, preview);
-        
+        this.addToCache(cacheKey, preview);
         return preview;
     },
     

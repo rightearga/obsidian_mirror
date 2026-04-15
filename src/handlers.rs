@@ -771,6 +771,8 @@ pub async fn stats_handler(data: web::Data<Arc<AppState>>) -> impl Responder {
 #[derive(Debug, Deserialize)]
 pub struct PreviewQuery {
     pub path: String,
+    /// 可选提交 hash（v1.7.2）：指定后返回该提交时的历史版本预览
+    pub commit: Option<String>,
 }
 
 #[get("/api/preview")]
@@ -779,50 +781,63 @@ pub async fn preview_handler(
     data: web::Data<Arc<AppState>>,
 ) -> impl Responder {
     use serde_json::json;
-    
+
     let decoded_path = match percent_encoding::percent_decode_str(&query.path).decode_utf8() {
         Ok(s) => s.to_string(),
         Err(e) => {
             error!("❌ 预览路径解码失败: {} - 错误: {:?}", query.path, e);
-            return HttpResponse::BadRequest().json(json!({
-                "error": "Invalid UTF-8 in path"
-            }));
+            return HttpResponse::BadRequest().json(json!({"error": "Invalid UTF-8 in path"}));
         }
     };
-    
+
+    // v1.7.2：commit 参数存在时返回历史版本预览
+    if let Some(commit) = &query.commit {
+        if !is_valid_commit_hash(commit) {
+            return HttpResponse::BadRequest().json(json!({"error": "无效的 commit hash"}));
+        }
+        let local_path = data.config.read().unwrap().local_path.clone();
+        let raw_md = match GitClient::get_file_at_commit(&decoded_path, commit, &local_path).await {
+            Ok(s) => s,
+            Err(_) => return HttpResponse::NotFound().json(json!({"error": "历史版本不存在"})),
+        };
+        let (content_html, _, _, _, _) = crate::markdown::MarkdownProcessor::process(&raw_md);
+        let preview_content = truncate_html(&content_html, 500);
+        // 从当前索引取标题（历史版本标题可能不同，降级为路径名）
+        let title = {
+            let notes = data.notes.read().await;
+            notes.get(&decoded_path).map(|n| n.title.clone())
+                .unwrap_or_else(|| decoded_path.clone())
+        };
+        return HttpResponse::Ok().json(json!({
+            "title": title,
+            "content": preview_content,
+            "path": decoded_path,
+        }));
+    }
+
     let notes = data.notes.read().await;
     let link_index = data.link_index.read().await;
-    
+
     // 查找笔记（与 doc_handler 逻辑一致）
     let note_key = if notes.contains_key(&decoded_path) {
         Some(decoded_path.clone())
     } else if let Some(path) = link_index.get(&decoded_path) {
         Some(path.clone())
     } else {
-        // 尝试添加 .md 后缀
         let with_md = format!("{}.md", decoded_path);
-        if notes.contains_key(&with_md) {
-            Some(with_md)
-        } else {
-            None
-        }
+        if notes.contains_key(&with_md) { Some(with_md) } else { None }
     };
-    
+
     if let Some(key) = note_key
         && let Some(note) = notes.get(&key) {
-            // 截取内容前 500 个字符作为预览
             let preview_content = truncate_html(&note.content_html, 500);
-            
-            let preview = json!({
+            return HttpResponse::Ok().json(json!({
                 "title": note.title,
                 "content": preview_content,
                 "path": note.path,
-            });
-            
-            return HttpResponse::Ok().json(preview);
+            }));
         }
-    
-    // 未找到笔记
+
     HttpResponse::NotFound().json(json!({
         "error": "笔记未找到",
         "path": decoded_path

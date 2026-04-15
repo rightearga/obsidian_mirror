@@ -35,7 +35,7 @@
         <td class="date-cell">{{ c.date|truncate(19) }}</td>
         <td class="subject-cell">{{ c.subject }}</td>
         <td class="action-cell">
-          <a href="/doc/{{ note_path }}/at/{{ c.hash }}" class="btn-history-action" data-no-preview>查看</a>
+          <a href="/doc/{{ note_path }}/at/{{ c.hash }}" class="btn-history-action">查看</a>
           <a href="/doc/{{ note_path }}/diff/{{ c.hash }}" class="btn-history-action" data-no-preview>Diff</a>
         </td>
       </tr>
