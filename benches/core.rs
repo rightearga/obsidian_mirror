@@ -39,7 +39,7 @@ fn make_note(title: &str, outgoing_links: Vec<&str>, tags: Vec<&str>) -> Note {
         tags: tags.into_iter().map(|s| s.to_string()).collect(),
         toc: Vec::<TocItem>::new(),
         mtime: SystemTime::UNIX_EPOCH,
-        frontmatter: Frontmatter(serde_yml::Value::Null),
+        frontmatter: Frontmatter(serde_yaml::Value::Null),
         outgoing_links: outgoing_links.into_iter().map(|s| s.to_string()).collect(),
     }
 }
