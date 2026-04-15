@@ -1762,7 +1762,10 @@ pub async fn export_html_handler(
             error!("zip start_file 失败 {}: {:?}", html_path, e);
             continue;
         }
-        let _ = zip.write_all(html.as_bytes());
+        // v1.8.7 B1：记录写入失败，避免静默产生损坏条目
+        if let Err(e) = zip.write_all(html.as_bytes()) {
+            error!("zip write_all 失败 {}: {:?}", html_path, e);
+        }
     }
 
     // index.html：笔记列表首页

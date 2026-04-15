@@ -1,4 +1,4 @@
-//! obsidian_mirror WebAssembly 模块（v1.8.0）
+//! obsidian_mirror WebAssembly 模块（v1.8.6）
 //!
 //! 提供可在浏览器端运行的纯函数实现，与服务端共享同一份逻辑。
 //!
