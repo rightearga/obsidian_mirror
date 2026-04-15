@@ -1276,8 +1276,11 @@ pub async fn webhook_sync_handler(
 ///
 /// `signature` 格式为 `sha256=<hex>`，使用常数时间比较防止时序攻击。
 fn verify_github_signature(secret: &str, body: &[u8], signature: &str) -> bool {
-    use hmac::{Hmac, Mac};
+    use hmac::Mac;
     use sha2::Sha256;
+    // hmac 0.13：使用 SimpleHmac + KeyInit::new_from_slice
+    use hmac::digest::KeyInit;
+    type HmacSha256 = hmac::SimpleHmac<Sha256>;
 
     let prefix = "sha256=";
     if !signature.starts_with(prefix) {
@@ -1285,15 +1288,13 @@ fn verify_github_signature(secret: &str, body: &[u8], signature: &str) -> bool {
     }
     let sig_hex = &signature[prefix.len()..];
 
-    // 将十六进制签名解码为字节
     let sig_bytes = match hex_decode(sig_hex) {
         Some(b) => b,
         None => return false,
     };
 
     // 计算 HMAC-SHA256 并使用常数时间比较（防时序攻击）
-    // hmac::Mac 提供 new_from_slice / update / verify_slice
-    let mut mac: Hmac<Sha256> = match Mac::new_from_slice(secret.as_bytes()) {
+    let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
         Ok(m) => m,
         Err(_) => return false,
     };
@@ -1474,6 +1475,254 @@ pub async fn insights_stats_handler(
 ) -> impl Responder {
     let cache = data.insights_cache.read().await;
     HttpResponse::Ok().json(&*cache)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.8.2：导出与发布
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// 将字符串中的 XML 特殊字符转义
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+     .replace('<', "&lt;")
+     .replace('>', "&gt;")
+     .replace('"', "&quot;")
+}
+
+/// SystemTime → RFC 3339 字符串（Atom feed 使用）
+fn to_rfc3339(t: std::time::SystemTime) -> String {
+    use chrono::{DateTime, Utc};
+    let dt: DateTime<Utc> = t.into();
+    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
+
+/// RSS/Atom 订阅查询参数
+#[derive(Debug, Deserialize)]
+pub struct FeedQuery {
+    /// 按标签过滤（可选）
+    pub tag:    Option<String>,
+    /// 按文件夹前缀过滤（可选）
+    pub folder: Option<String>,
+}
+
+/// GET /feed.xml — Atom 1.0 订阅（v1.8.2）
+///
+/// 返回全库最近 50 篇笔记（按 mtime 降序），支持按标签或文件夹过滤。
+/// `<content>` 包含完整渲染 HTML，标准 RSS 阅读器可订阅。
+#[get("/feed.xml")]
+pub async fn feed_handler(
+    query: web::Query<FeedQuery>,
+    data:  web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let notes  = data.notes.read().await;
+    let config = data.config.read().unwrap().clone();
+    let base   = config.public_base_url.as_deref().unwrap_or("http://localhost:8080").trim_end_matches('/');
+
+    // 过滤 + 排序
+    let mut filtered: Vec<&crate::domain::Note> = notes.values().collect();
+    if let Some(tag) = &query.tag {
+        filtered.retain(|n| n.tags.iter().any(|t| t == tag));
+    }
+    if let Some(folder) = &query.folder {
+        let prefix = format!("{}/", folder.trim_end_matches('/'));
+        filtered.retain(|n| n.path.starts_with(&prefix) || n.path == *folder);
+    }
+    filtered.sort_by(|a, b| b.mtime.cmp(&a.mtime));
+    filtered.truncate(50);
+
+    let now = to_rfc3339(std::time::SystemTime::now());
+
+    let mut xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Obsidian Mirror</title>
+  <link href="{base}/" rel="alternate"/>
+  <link href="{base}/feed.xml" rel="self"/>
+  <updated>{now}</updated>
+  <id>{base}/</id>
+"#
+    );
+
+    for note in &filtered {
+        let encoded_path = percent_encoding::utf8_percent_encode(
+            &note.path, percent_encoding::NON_ALPHANUMERIC,
+        ).to_string();
+        let link    = format!("{}/doc/{}", base, encoded_path);
+        let updated = to_rfc3339(note.mtime);
+        xml.push_str(&format!(
+            r#"  <entry>
+    <title>{}</title>
+    <link href="{}"/>
+    <id>{}</id>
+    <updated>{}</updated>
+    <content type="html"><![CDATA[{}]]></content>
+  </entry>
+"#,
+            xml_escape(&note.title),
+            link,
+            link,
+            updated,
+            note.content_html,  // CDATA 块无需转义
+        ));
+    }
+    xml.push_str("</feed>\n");
+
+    HttpResponse::Ok()
+        .content_type("application/atom+xml; charset=utf-8")
+        .body(xml)
+}
+
+/// 将笔记路径转换为静态导出的 HTML 文件路径
+/// 例如：`folder/note.md` → `folder/note.html`
+fn note_path_to_html(note_path: &str) -> String {
+    if let Some(stem) = note_path.strip_suffix(".md") {
+        format!("{}.html", stem)
+    } else {
+        format!("{}.html", note_path)
+    }
+}
+
+/// 生成静态站点导出用的最小化独立 HTML
+fn build_static_note_html(note: &crate::domain::Note, all_notes: &[(&str, &str)]) -> String {
+    // all_notes: Vec<(path, title)> 排序后的列表，用于生成侧边栏
+    let nav_links: String = all_notes.iter().map(|(path, title)| {
+        let html_path = note_path_to_html(path);
+        format!("<li><a href=\"/{}\">{}</a></li>", html_path, xml_escape(title))
+    }).collect::<Vec<_>>().join("\n");
+
+    let css = r#"body{display:flex;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+margin:0;background:#fff;color:#222;line-height:1.75;}
+nav{width:230px;min-height:100vh;padding:12px 8px;border-right:1px solid #e5e7eb;
+font-size:12.5px;overflow-y:auto;flex-shrink:0;position:sticky;top:0;max-height:100vh;}
+nav h2{font-size:13px;color:#6b7280;margin:0 0 8px;padding:0 4px;}
+nav ul{list-style:none;margin:0;padding:0;}
+nav li a{display:block;padding:3px 8px;border-radius:4px;text-decoration:none;
+color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+nav li a:hover{background:#f3f4f6;}
+main{flex:1;padding:32px 40px;max-width:780px;}
+h1{font-size:1.7rem;margin-top:0;}
+pre{background:#f8f9fa;padding:12px;border-radius:4px;overflow-x:auto;}
+code{background:#f3f4f6;padding:1px 4px;border-radius:3px;font-size:0.9em;}
+blockquote{border-left:3px solid #d1d5db;margin:0;padding:0 14px;color:#6b7280;}
+img{max-width:100%;height:auto;}
+table{border-collapse:collapse;width:100%;}
+th,td{border:1px solid #e5e7eb;padding:6px 10px;}
+@media(max-width:600px){body{flex-direction:column;}
+nav{width:100%;min-height:auto;max-height:200px;border-right:none;border-bottom:1px solid #e5e7eb;}}"#;
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{title} - Obsidian Mirror Export</title>
+<style>{css}</style>
+</head>
+<body>
+<nav>
+  <h2>所有笔记</h2>
+  <ul>{nav}</ul>
+</nav>
+<main>
+<h1>{title}</h1>
+{content}
+</main>
+</body>
+</html>"#,
+        title   = xml_escape(&note.title),
+        css     = css,
+        nav     = nav_links,
+        content = note.content_html,
+    )
+}
+
+/// POST /api/export/html — 静态站点 zip 导出（v1.8.2）
+///
+/// 将整个 vault 渲染为自包含的静态 HTML 文件树，打包为 zip 下载。
+/// 可直接部署到 GitHub Pages、Netlify 等静态托管平台。
+/// 不包含搜索、认证等服务端功能；内部链接指向 `/doc/PATH`，需 web 服务器才能生效。
+#[post("/api/export/html")]
+pub async fn export_html_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
+    use std::io::{Cursor, Write};
+
+    let notes = data.notes.read().await;
+
+    // 排序后的笔记列表（供侧边栏导航使用）
+    let mut sorted_notes: Vec<(&str, &str)> = notes.iter()
+        .map(|(path, note)| (path.as_str(), note.title.as_str()))
+        .collect();
+    sorted_notes.sort_by_key(|(path, _)| *path);
+
+    // 构建 zip
+    let cursor = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(cursor);
+    let opts = SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    // 生成每篇笔记的 HTML
+    for (path, note) in notes.iter() {
+        let html_path = note_path_to_html(path);
+        let html = build_static_note_html(note, &sorted_notes);
+        if let Err(e) = zip.start_file(&html_path, opts) {
+            error!("zip start_file 失败 {}: {:?}", html_path, e);
+            continue;
+        }
+        let _ = zip.write_all(html.as_bytes());
+    }
+
+    // index.html：笔记列表首页
+    let index_links: String = sorted_notes.iter().map(|(path, title)| {
+        let html_path = note_path_to_html(path);
+        format!("<li><a href=\"{}\">{}</a></li>", html_path, xml_escape(title))
+    }).collect::<Vec<_>>().join("\n");
+
+    let index_html = format!(
+        r#"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Obsidian Mirror Export</title>
+<style>body{{font-family:sans-serif;max-width:800px;margin:32px auto;padding:0 16px;}}
+h1{{font-size:1.5rem;}}ul{{list-style:none;padding:0;}}
+li a{{display:block;padding:6px 8px;border-radius:4px;text-decoration:none;color:#374151;}}
+li a:hover{{background:#f3f4f6;}}</style>
+</head>
+<body>
+<h1>Obsidian Mirror 笔记导出</h1>
+<p style="color:#6b7280">共 {} 篇笔记</p>
+<ul>{}</ul>
+</body>
+</html>"#,
+        sorted_notes.len(),
+        index_links,
+    );
+
+    let _ = zip.start_file("index.html", opts);
+    let _ = zip.write_all(index_html.as_bytes());
+
+    // README.md
+    let readme = "# Obsidian Mirror 静态导出\n\n将此 zip 解压后部署到任意 web 服务器（GitHub Pages / Netlify 等）即可浏览。\n\n- 笔记内部链接需 web 服务器才能正常工作\n- 搜索/认证等功能不包含在静态导出中\n";
+    let _ = zip.start_file("README.md", opts);
+    let _ = zip.write_all(readme.as_bytes());
+
+    let result = match zip.finish() {
+        Ok(c)  => c,
+        Err(e) => {
+            error!("zip 打包失败: {:?}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({"error": "打包失败"}));
+        }
+    };
+
+    HttpResponse::Ok()
+        .content_type("application/zip")
+        .insert_header(("Content-Disposition", "attachment; filename=\"obsidian-mirror-export.zip\""))
+        .body(result.into_inner())
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -1963,13 +2212,15 @@ mod tests {
     #[actix_web::test]
     async fn test_verify_github_signature_correct() {
         // 使用已知 secret + body 计算正确签名，验证应通过
-        use hmac::{Hmac, Mac};
+        use hmac::{Mac, SimpleHmac};
+        use hmac::digest::KeyInit;
         use sha2::Sha256;
+        type HmacSha256 = SimpleHmac<Sha256>;
 
         let secret = "webhook_secret";
         let body = b"payload body";
 
-        let mut mac: Hmac<Sha256> = Mac::new_from_slice(secret.as_bytes()).unwrap();
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
         mac.update(body);
         let result = mac.finalize().into_bytes();
         let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
@@ -1983,11 +2234,13 @@ mod tests {
 
     #[actix_web::test]
     async fn test_verify_github_signature_wrong_secret() {
-        use hmac::{Hmac, Mac};
+        use hmac::{Mac, SimpleHmac};
+        use hmac::digest::KeyInit;
         use sha2::Sha256;
+        type HmacSha256 = SimpleHmac<Sha256>;
 
         let body = b"payload body";
-        let mut mac: Hmac<Sha256> = Mac::new_from_slice(b"wrong_secret").unwrap();
+        let mut mac = HmacSha256::new_from_slice(b"wrong_secret").unwrap();
         mac.update(body);
         let result = mac.finalize().into_bytes();
         let hex: String = result.iter().map(|b| format!("{:02x}", b)).collect();
@@ -2078,5 +2331,51 @@ mod tests {
         let html = render_diff_html(diff);
         assert!(!html.contains("<script>"), "script 标签应被 HTML 转义");
         assert!(html.contains("&lt;script&gt;"), "尖括号应被转义为 &lt;/&gt;");
+    }
+
+    // ── v1.8.2：导出与发布 ────────────────────────────────────────────────────
+
+    #[actix_web::test]
+    async fn test_xml_escape() {
+        // XML 特殊字符应被正确转义
+        assert_eq!(xml_escape("a & b"), "a &amp; b");
+        assert_eq!(xml_escape("<script>"), "&lt;script&gt;");
+        assert_eq!(xml_escape("\"quoted\""), "&quot;quoted&quot;");
+    }
+
+    #[actix_web::test]
+    async fn test_note_path_to_html() {
+        // .md 后缀应替换为 .html
+        assert_eq!(note_path_to_html("folder/note.md"), "folder/note.html");
+        assert_eq!(note_path_to_html("root.md"), "root.html");
+        // 无 .md 后缀时追加 .html
+        assert_eq!(note_path_to_html("note"), "note.html");
+    }
+
+    #[actix_web::test]
+    async fn test_build_static_note_html_contains_title() {
+        use crate::domain::Frontmatter;
+        use std::time::SystemTime;
+        let note = crate::domain::Note {
+            path:         "test.md".to_string(),
+            title:        "测试笔记".to_string(),
+            content_html: "<p>内容</p>".to_string(),
+            backlinks:    vec![],
+            tags:         vec![],
+            toc:          vec![],
+            mtime:        SystemTime::UNIX_EPOCH,
+            frontmatter:  Frontmatter(serde_yml::Value::Null),
+            outgoing_links: vec![],
+        };
+        let html = build_static_note_html(&note, &[("test.md", "测试笔记")]);
+        assert!(html.contains("测试笔记"), "HTML 应包含笔记标题");
+        assert!(html.contains("<p>内容</p>"), "HTML 应包含笔记内容");
+    }
+
+    #[actix_web::test]
+    async fn test_to_rfc3339_epoch() {
+        // Unix epoch 应返回 UTC 时间字符串
+        let result = to_rfc3339(std::time::SystemTime::UNIX_EPOCH);
+        assert_eq!(result, "1970-01-01T00:00:00Z", "epoch 应为 1970-01-01T00:00:00Z");
     }
 }

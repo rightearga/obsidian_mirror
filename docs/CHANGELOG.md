@@ -8,6 +8,23 @@
 
 ---
 
+## [v1.8.2] — 2026-04-15
+
+导出与发布：PDF 打印样式、Atom 订阅、静态站点 zip 导出。
+
+### Added
+- **PDF 导出**（`static/css/print.css`、`templates/page.html`）：`@media print` 隐藏侧边栏/状态栏等 UI，优化纸张排版；笔记页面"打印"按钮调用 `window.print()`
+- **Atom 订阅**（`GET /feed.xml`）：全库最近 50 篇笔记，支持 `?tag=` 和 `?folder=` 过滤；Atom 1.0 格式，`<content type="html">` 包含完整渲染 HTML，CDATA 封装
+- **静态站点导出**（`POST /api/export/html`）：将整个 vault 打包为自包含 HTML zip，每篇笔记独立 HTML 文件含内嵌 CSS 和侧边栏导航；包含 `index.html` 笔记列表和 `README.md`；可直接部署到 GitHub Pages / Netlify
+
+### Fixed
+- **hmac 0.13 API 适配**（`src/handlers.rs`）：`verify_github_signature` 及相关测试更新为 `SimpleHmac<Sha256>` + `KeyInit::new_from_slice`（依赖升级引入的 API 变更）
+
+### 测试统计
+- 服务端：123/123 通过（新增 4 个：xml_escape、note_path_to_html、静态 HTML、rfc3339）
+
+---
+
 ## [v1.8.1] — 2026-04-15
 
 代码审计修复版本（CODEREVIEW_1.8）。

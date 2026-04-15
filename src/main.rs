@@ -9,7 +9,7 @@ use obsidian_mirror::{
     state::{AppState, VaultRegistry},
     sync::perform_sync,
     search_engine::SearchEngine,
-    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler, vaults_list_handler},
+    handlers::{sync_handler, search_handler, graph_handler, assets_handler, doc_handler, index_handler, tags_list_handler, tag_notes_handler, health_handler, stats_handler, preview_handler, orphans_handler, random_handler, recent_page_handler, titles_api_handler, suggest_handler, global_graph_handler, webhook_sync_handler, config_reload_handler, sync_events_handler, sync_history_handler, graph_page_handler, note_history_handler, note_history_at_handler, note_history_diff_handler, insights_page_handler, insights_stats_handler, vaults_list_handler, feed_handler, export_html_handler},
     metrics::{init_metrics, metrics_handler},
     auth::{JwtManager, PasswordManager},
     auth_db::AuthDatabase,
@@ -438,6 +438,8 @@ fn build_vault_scope(scope_path: &str, vault_state: Arc<AppState>) -> actix_web:
         .service(graph_page_handler)
         .service(insights_page_handler)
         .service(insights_stats_handler)
+        .service(feed_handler)           // GET /feed.xml — Atom 订阅（v1.8.2）
+        .service(export_html_handler)    // POST /api/export/html（v1.8.2）
         .route("/webhook/sync",                          web::post().to(webhook_sync_handler))
         .route("/api/config/reload",                     web::post().to(config_reload_handler))
         // Git 历史路由需在 doc_handler 之前注册
@@ -523,6 +525,8 @@ async fn start_http_server(
             .service(health_handler)
             .service(metrics_handler)
             .service(vaults_list_handler)  // GET /api/vaults（v1.7.4）
+            .service(feed_handler)         // GET /feed.xml — Atom 订阅（v1.8.2）
+            .service(export_html_handler)  // POST /api/export/html — 静态站点导出（v1.8.2）
             // 分享链接路由（跨仓库共享）
             .route("/api/share/create",          web::post().to(create_share_handler))
             .route("/api/share/list",             web::get().to(list_shares_handler))

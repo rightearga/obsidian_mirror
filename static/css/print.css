@@ -1,0 +1,78 @@
+/* ==========================================
+   打印 / 导出 PDF 专用样式（v1.8.2）
+   @media print：隐藏 UI 元素，优化纸张排版
+   ========================================== */
+
+@media print {
+    /* 隐藏所有交互性 UI */
+    .sidebar,
+    .sidebar-backdrop,
+    .sidebar-toggle,
+    .sidebar-resizer,
+    .page-header-actions,
+    .right-sidebar,
+    .right-sidebar-resizer,
+    .statusbar,
+    .note-preview-card,
+    #graph-modal,
+    .search-modal,
+    .settings-panel,
+    .sync-progress-overlay {
+        display: none !important;
+    }
+
+    /* 主内容撑满页面宽度 */
+    body {
+        background: white !important;
+        color: black !important;
+    }
+
+    .main-content {
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        flex: 1 !important;
+    }
+
+    .main-scroll-container {
+        overflow: visible !important;
+        height: auto !important;
+    }
+
+    .markdown-body {
+        max-width: 100% !important;
+        padding: 0 !important;
+    }
+
+    /* 代码块不截断 */
+    pre,
+    code,
+    blockquote {
+        page-break-inside: avoid;
+        white-space: pre-wrap !important;
+    }
+
+    /* 标题前强制换页防止孤行 */
+    h1, h2, h3, h4 {
+        page-break-after: avoid;
+        break-after: avoid;
+    }
+
+    /* 图片不超出页面宽度 */
+    img {
+        max-width: 100% !important;
+        page-break-inside: avoid;
+    }
+
+    /* 链接显示 URL（可选，注释掉则不显示） */
+    /* a[href]::after {
+        content: " (" attr(href) ")";
+        font-size: 0.85em;
+        color: #666;
+    } */
+
+    /* 页面边距 */
+    @page {
+        margin: 2cm 2.5cm;
+    }
+}
