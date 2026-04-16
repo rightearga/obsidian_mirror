@@ -243,8 +243,26 @@ document.addEventListener('DOMContentLoaded', async () => {
                 _kmLayoutEdges.push([i, j, inter / union]);
             }
         }
-        // 展示用边：只保留 Jaccard > 0.25 的"强"边，避免视觉混乱
-        _kmDisplayEdges = _kmLayoutEdges.filter(([, , w]) => w >= 0.25);
+        // 展示用边：每个节点只保留最相似的 top-3 邻居，避免边过密
+        {
+            const nodeAdj = Array.from({ length: n }, () => []);
+            for (const [i, j, w] of _kmLayoutEdges) {
+                nodeAdj[i].push([j, w]);
+                nodeAdj[j].push([i, w]);
+            }
+            const edgeSeen = new Set();
+            _kmDisplayEdges = [];
+            for (let i = 0; i < n; i++) {
+                nodeAdj[i].sort((a, b) => b[1] - a[1]);
+                for (const [j, w] of nodeAdj[i].slice(0, 3)) {
+                    const key = Math.min(i, j) + '_' + Math.max(i, j);
+                    if (!edgeSeen.has(key)) {
+                        edgeSeen.add(key);
+                        _kmDisplayEdges.push([i, j, w]);
+                    }
+                }
+            }
+        }
 
         _kmLayoutK = Math.sqrt(4000 * 4000 / Math.max(1, n));
         _kmLayoutTemp = _kmLayoutK * 2;
@@ -431,11 +449,44 @@ function kmRedraw() {
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.stroke();
-            // 悬停时用固定字号显示标签（不随缩放放大）
-            ctx.fillStyle = 'rgba(220,225,240,0.95)';
-            ctx.font = 'bold 13px sans-serif';
-            ctx.fillText(nd.title, sx + r + 5, sy + 4);
         }
+    }
+
+    // ── 标签层（栅格碰撞检测，避免重叠）──────────────────────────────────
+    if (_kmScale > 0.4) {
+        const CELL = Math.max(60, 90 / _kmScale); // 缩放越大，间距越小
+        const occupied = new Set();
+        // 按 pagerank 降序，优先显示重要节点的标签
+        const sorted = [..._kmFiltered].sort((a, b) => b.pagerank - a.pagerank);
+
+        ctx.font = '9px sans-serif';
+        for (const nd of sorted) {
+            const sx = nd.x * _kmScale + _kmOx;
+            const sy = nd.y * _kmScale + _kmOy;
+            if (sx < 5 || sx > W - 5 || sy < 5 || sy > H - 5) continue;
+            const cx = Math.floor(sx / CELL), cy = Math.floor(sy / CELL);
+            const cell = cx + '_' + cy;
+            if (occupied.has(cell)) continue;
+            // 占用当前格及紧邻格，保证 ~CELL px 间距
+            occupied.add(cell);
+            occupied.add((cx - 1) + '_' + cy);
+            occupied.add((cx + 1) + '_' + cy);
+            occupied.add(cx + '_' + (cy - 1));
+            occupied.add(cx + '_' + (cy + 1));
+            ctx.fillStyle = nd === _kmHovered
+                ? 'rgba(220,225,240,0.95)'
+                : 'rgba(180,185,215,0.75)';
+            ctx.fillText(nd.title, sx + 5, sy + 3);
+        }
+    }
+
+    // 悬停节点标签（始终显示，白色加粗）
+    if (_kmHovered) {
+        const sx = _kmHovered.x * _kmScale + _kmOx;
+        const sy = _kmHovered.y * _kmScale + _kmOy;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = 'rgba(220,225,240,0.98)';
+        ctx.fillText(_kmHovered.title, sx + 7, sy + 4);
     }
 }
 
