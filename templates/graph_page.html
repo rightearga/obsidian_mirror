@@ -371,9 +371,9 @@ function gpRender(data) {
     const clusterColor = document.getElementById('gp-cluster-color').checked;
     const tagColorMap  = clusterColor ? gpBuildTagColorMap(data.nodes || []) : {};
 
-    // 随机初始布局（打破圆形对称，让 F-R 更快收敛）
+    // 所有节点从中心附近小范围出发（让 F-R 从内向外发散，形成有机聚类）
     const n       = (data.nodes || []).length;
-    const initHalf = Math.max(800, 200 * Math.sqrt(n));
+    const initHalf = 30;  // 很小的初始范围，靠近中心
 
     ;(data.nodes || []).forEach((node) => {
         const deg      = inDeg[node.id] || 0;
@@ -406,9 +406,9 @@ function gpRender(data) {
         if (gpGraph.hasEdge(edgeKey)) return;
         const w = e.weight || 1;
         gpGraph.addEdgeWithKey(edgeKey, e.from, e.to, {
-            // Obsidian 风格：细边，低透明度
-            color: w === 2 ? 'rgba(160,170,220,0.35)' : 'rgba(120,125,150,0.18)',
-            size:  w === 2 ? 1.2 : 0.5,
+            // Obsidian 风格：统一灰色细线
+            color: 'rgba(140,145,155,0.22)',
+            size:  0.5,
         });
         gpEdgeData.push({ from: e.from, to: e.to, weight: w });
     });
@@ -472,8 +472,8 @@ function gpRender(data) {
  */
 function gpStartLayout(n) {
     gpLayoutIter  = 0;
-    // 迭代次数：足够多才能从随机分布收敛到聚类
-    gpLayoutTotal = n > 500 ? 150 : n > 100 ? 200 : 80;
+    // 迭代次数：从小范围中心向外收敛需要更多轮次
+    gpLayoutTotal = n > 500 ? 300 : n > 100 ? 250 : 100;
 
     // 从 graphology 取当前坐标作初始值
     gpLIds = gpGraph.nodes();
@@ -490,8 +490,8 @@ function gpStartLayout(n) {
         if (i !== undefined && j !== undefined) gpLEdges.push([i, j]);
     });
 
-    gpLK    = Math.sqrt(4_000_000 / Math.max(1, n));
-    gpLTemp = gpLK * 2;
+    gpLK    = Math.sqrt(1_500_000 / Math.max(1, n)); // 适中的弹簧常数
+    gpLTemp = gpLK * 8;  // 高初始温度让节点快速从中心散开
 
     // n > 100：Web Worker 布局（主线程零阻塞）
     if (n > 100 && typeof Worker !== 'undefined') {
@@ -530,11 +530,12 @@ function gpStartLayoutWorker() {
 
     const workerCode = `
 onmessage = function(e) {
-    const { px, py, edges, k, temp, totalIters, batchSize } = e.data;
+    const { px, py, edges, k, temp, totalIters, batchSize, gravity } = e.data;
     const n = px.length, kSq = k * k;
     let t = temp;
     for (let iter = 0; iter < totalIters; iter++) {
         const fx = new Float64Array(n), fy = new Float64Array(n);
+        // 排斥力
         for (let i = 0; i < n; i++) {
             for (let j = i+1; j < n; j++) {
                 const dx=px[i]-px[j], dy=py[i]-py[j];
@@ -542,16 +543,23 @@ onmessage = function(e) {
                 fx[i]+=r*ux; fy[i]+=r*uy; fx[j]-=r*ux; fy[j]-=r*uy;
             }
         }
+        // 吸引力（边）
         for (const [i,j] of edges) {
             const dx=px[j]-px[i], dy=py[j]-py[i];
             const d=Math.sqrt(dx*dx+dy*dy)||0.01, a=d*d/k, ux=dx/d, uy=dy/d;
             fx[i]+=a*ux; fy[i]+=a*uy; fx[j]-=a*ux; fy[j]-=a*uy;
         }
+        // 向心引力（防止孤立节点飞出，Obsidian 样式关键）
+        for (let i = 0; i < n; i++) {
+            fx[i] -= gravity * px[i];
+            fy[i] -= gravity * py[i];
+        }
+        // 位移（温度限制）
         for (let i = 0; i < n; i++) {
             const d=Math.sqrt(fx[i]*fx[i]+fy[i]*fy[i])||0.01, mov=Math.min(d,t);
             px[i]+=fx[i]/d*mov; py[i]+=fy[i]/d*mov;
         }
-        t *= 0.92;
+        t *= 0.97;   // 慢冷却：保留更多收敛时间
         if ((iter+1) % batchSize === 0 || iter === totalIters-1) {
             const cpx=new Float64Array(px), cpy=new Float64Array(py);
             postMessage({ px:cpx, py:cpy, done:iter===totalIters-1 }, [cpx.buffer, cpy.buffer]);
@@ -570,7 +578,8 @@ onmessage = function(e) {
         k:          gpLK,
         temp:       gpLTemp,
         totalIters: gpLayoutTotal,
-        batchSize:  Math.max(10, Math.ceil(gpLayoutTotal / 10)),
+        batchSize:  Math.max(5, Math.ceil(gpLayoutTotal / 20)), // 每 5% 回传一次，动画更流畅
+        gravity:    0.008,  // 向心引力系数（Obsidian 效果关键）
     }, [px.buffer, py.buffer]);
 
     _gpLayoutWorker.onmessage = ({ data: { px: nx, py: ny, done } }) => {
