@@ -345,8 +345,8 @@ function gpNodeSize(inDeg, pagerank) {
  * 步骤：构建 Graphology 图 → 圆形初始布局 → 创建 Sigma 渲染器 → 启动 F-R 动画。
  */
 function gpRender(data) {
-    if (typeof Sigma === 'undefined') {
-        gpShowError('可视化库 Sigma.js 未加载');
+    if (typeof Sigma === 'undefined' || typeof graphology === 'undefined') {
+        gpShowError('可视化库 Sigma.js / Graphology 未加载');
         return;
     }
 
@@ -356,7 +356,7 @@ function gpRender(data) {
     if (gpRenderer) { gpRenderer.kill(); gpRenderer = null; }
 
     // 构建 Graphology 有向图
-    gpGraph    = new Graph({ type: 'directed', multi: false, allowSelfLoops: false });
+    gpGraph    = new graphology.Graph({ type: 'directed', multi: false, allowSelfLoops: false });
     gpNodeData = [];
     gpEdgeData = [];
     gpNodeMap  = new Map();
