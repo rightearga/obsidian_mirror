@@ -1256,14 +1256,15 @@ pub fn compute_knowledge_map(notes_json: &str) -> String {
     let mut px: Vec<f64> = (0..n).map(|_| rand2(-init_r, init_r)).collect();
     let mut py: Vec<f64> = (0..n).map(|_| rand2(-init_r, init_r)).collect();
 
-    let area  = 2000.0_f64 * 2000.0_f64;
+    // 加大排斥力区域（4000²），让节点有足够空间展开
+    let area  = 4000.0_f64 * 4000.0_f64;
     let k_fr  = (area / n as f64).sqrt();
     let k_sq  = k_fr * k_fr;
-    // 向心引力（防止孤立节点飞出，与 compute_graph_layout FA2 一致）
-    let k_g   = 0.005_f64;
-    let iters = if n > 500 { 60u32 } else { 120 };
-    let mut temp    = k_fr * 6.0;  // 高初始温度让节点从中心快速扩散
-    let cooling = 0.90_f64;
+    // 加强向心引力，把外围孤立节点拉回来
+    let k_g   = 0.015_f64;
+    let iters = if n > 500 { 80u32 } else { 150 };
+    let mut temp    = k_fr * 4.0;
+    let cooling = 0.91_f64;
 
     for _ in 0..iters {
         let mut fx = vec![0.0_f64; n];
@@ -1283,12 +1284,13 @@ pub fn compute_knowledge_map(notes_json: &str) -> String {
             }
         }
 
-        // 吸引力：相似度边，权重越大吸引力越强
+        // 吸引力：相似度边，轻微加权（避免高 Jaccard 节点过度聚集）
+        // 原来 (1 + w*2.5) 最大 3.5×，现改为 (1 + w*0.4) 最大 1.4×
         for &(i, j, w) in &sim_edges {
             let dx   = px[j] - px[i];
             let dy   = py[j] - py[i];
             let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-            let attr = dist * dist / k_fr * (1.0 + w * 2.5);
+            let attr = dist * dist / k_fr * (1.0 + w * 0.4);
             let ux   = dx / dist;
             let uy   = dy / dist;
             fx[i] += attr * ux; fy[i] += attr * uy;
