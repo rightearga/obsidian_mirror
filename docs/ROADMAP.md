@@ -1161,31 +1161,30 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
-### 🔧 v1.9.5 — 知识地图（方向 C）
+### ✅ v1.9.5 (已发布 - 2026-04-15) — 知识地图（方向 C）
 
 **主题**：基于标签相似度聚类，将笔记库渲染为可漫游的"星图"
 
-#### 算法
+#### 核心功能
+- ✅ **WASM `computeKnowledgeMap`**
+  - 文件：`crates/wasm/src/lib.rs`
+  - 实现：Jaccard 相似度边 + Fruchterman-Reingold 布局（相似度加权吸引力）+ K-means 聚类（K = clamp(唯一标签数/3, 2, 12)）
+  - 返回：`[{id, x, y, tags, cluster_id, pagerank}]`
+- ✅ **`GET /knowledge-map`** — Canvas 全屏专页，平移/缩放/悬停/点击/聚类筛选
+- ✅ **`GET /api/knowledge-map`** — 返回笔记列表（含 tags + pagerank）
 
-- WASM crate 新增 `compute_knowledge_map(notes_json)` 函数：
-  1. 构建标签相似度矩阵（Jaccard 系数：共享标签数 / 并集标签数）
-  2. 将相似度作为边权重，运行力导向布局（复用现有 Barnes-Hut，但边 = 相似度而非链接）
-  3. 返回 `{id, x, y, tags, cluster_id}[]`（cluster_id 由 K-means 聚类决定）
-- 聚类数 K 自动检测（min(标签数/3, 12)，不超过 12 个聚类）
+#### 实际交付物
+- 新增函数：`crates/wasm/src/lib.rs`（`compute_knowledge_map` + `kmeans_2d`）
+- 新增文件：`templates/knowledge_map.html`（Canvas 渲染 + 工具栏）
+- 修改文件：`src/templates.rs`（`KnowledgeMapTemplate`）
+- 修改文件：`src/handlers.rs`（`knowledge_map_page_handler` + `knowledge_map_api_handler`）
+- 修改文件：`src/main.rs`（路由注册）
+- 修改文件：`templates/layout.html`（侧边栏星图图标）
 
-#### 路由
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/knowledge-map` | 知识地图专页 |
-| GET | `/api/knowledge-map` | 布局坐标 JSON（带 cluster_id） |
-
-#### 渲染
-
-- 独立全屏专页（复用 `/graph` 页面框架）
-- Canvas 渲染（非 Vis.js）：支持 10,000+ 节点流畅缩放
-- 颜色 = 主聚类标签（聚类内节点同色），大小 = pagerank 分数
-- 悬停显示笔记标题，点击跳转，支持按聚类筛选
+#### 测试结果
+- 服务端全量测试：**133/133 通过**
+- WASM 全量测试：**46/46 通过**
+- 新增测试：4 个（空输入/单节点/有限坐标/无标签节点）
 
 ---
 

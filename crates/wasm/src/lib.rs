@@ -1089,6 +1089,205 @@ pub fn generate_toc_from_html(html: &str) -> String {
     serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// v1.9.5：知识地图（方向 C）
+// 基于标签相似度聚类，将笔记库渲染为可漫游的"星图"。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 知识地图输入笔记（来自 /api/knowledge-map 响应）
+#[derive(Deserialize)]
+struct KmNote {
+    id:       String,
+    #[allow(dead_code)]
+    title:    String,
+    #[allow(dead_code)]
+    path:     String,
+    tags:     Vec<String>,
+    pagerank: f32,
+}
+
+/// 知识地图布局结果节点
+#[derive(Serialize)]
+struct KmNodeOut {
+    id:         String,
+    x:          f64,
+    y:          f64,
+    tags:       Vec<String>,
+    cluster_id: usize,
+    pagerank:   f32,
+}
+
+/// K-means 聚类（2D 位置空间）
+///
+/// 输入 x/y 坐标和聚类数 k，迭代指定次数后返回每个节点的聚类编号。
+fn kmeans_2d(xs: &[f64], ys: &[f64], k: usize, iterations: usize) -> Vec<usize> {
+    let n = xs.len();
+    if n == 0 || k == 0 { return vec![0; n]; }
+    let k = k.min(n);
+
+    // 初始化质心：均匀间隔采样
+    let mut cx: Vec<f64> = (0..k).map(|i| xs[i * n / k]).collect();
+    let mut cy: Vec<f64> = (0..k).map(|i| ys[i * n / k]).collect();
+    let mut assignments = vec![0usize; n];
+
+    for _ in 0..iterations {
+        // 分配步骤：每个点归属最近质心
+        let mut changed = false;
+        for i in 0..n {
+            let mut best_k = 0;
+            let mut best_d = f64::MAX;
+            for ki in 0..k {
+                let dx = xs[i] - cx[ki];
+                let dy = ys[i] - cy[ki];
+                let d = dx * dx + dy * dy;
+                if d < best_d { best_d = d; best_k = ki; }
+            }
+            if assignments[i] != best_k { changed = true; assignments[i] = best_k; }
+        }
+        if !changed { break; }
+
+        // 更新步骤：重新计算质心
+        let mut sum_x = vec![0.0_f64; k];
+        let mut sum_y = vec![0.0_f64; k];
+        let mut cnt   = vec![0usize; k];
+        for i in 0..n {
+            let ki = assignments[i];
+            sum_x[ki] += xs[i];
+            sum_y[ki] += ys[i];
+            cnt[ki] += 1;
+        }
+        for ki in 0..k {
+            if cnt[ki] > 0 {
+                cx[ki] = sum_x[ki] / cnt[ki] as f64;
+                cy[ki] = sum_y[ki] / cnt[ki] as f64;
+            }
+        }
+    }
+    assignments
+}
+
+/// 计算知识地图布局（v1.9.5）
+///
+/// 输入：JSON 数组 `[{id, title, path, tags, pagerank}]`（由 `/api/knowledge-map` 提供）
+///
+/// 算法：
+/// 1. Jaccard 相似度矩阵（共享标签数 / 并集标签数）
+/// 2. 力导向布局（Fruchterman-Reingold，相似度作为吸引力权重）
+/// 3. K-means 聚类（K = min(唯一标签数/3, 12)，聚类数至少 2）
+///
+/// 返回：JSON 数组 `[{id, x, y, tags, cluster_id, pagerank}]`
+#[wasm_bindgen(js_name = computeKnowledgeMap)]
+pub fn compute_knowledge_map(notes_json: &str) -> String {
+    let notes: Vec<KmNote> = match serde_json::from_str(notes_json) {
+        Ok(v) => v,
+        Err(_) => return "[]".to_string(),
+    };
+    let n = notes.len();
+    if n == 0 { return "[]".to_string(); }
+    if n == 1 {
+        let out = vec![KmNodeOut {
+            id: notes[0].id.clone(), x: 0.0, y: 0.0,
+            tags: notes[0].tags.clone(), cluster_id: 0, pagerank: notes[0].pagerank,
+        }];
+        return serde_json::to_string(&out).unwrap_or_else(|_| "[]".to_string());
+    }
+
+    // ── 步骤 1：预计算标签集合，构建 Jaccard 相似度边 ────────────────────────
+    let tag_sets: Vec<HashSet<&str>> = notes.iter()
+        .map(|nd| nd.tags.iter().map(|t| t.as_str()).collect())
+        .collect();
+
+    // 相似度边：(i, j, jaccard)；仅保留有共同标签的节点对
+    let mut sim_edges: Vec<(usize, usize, f64)> = Vec::new();
+    for i in 0..n {
+        if tag_sets[i].is_empty() { continue; }
+        for j in (i + 1)..n {
+            if tag_sets[j].is_empty() { continue; }
+            let inter = tag_sets[i].intersection(&tag_sets[j]).count();
+            if inter == 0 { continue; }
+            let union = tag_sets[i].union(&tag_sets[j]).count();
+            sim_edges.push((i, j, inter as f64 / union as f64));
+        }
+    }
+
+    // ── 步骤 2：力导向布局 ────────────────────────────────────────────────────
+    // 初始位置：圆形均匀分布
+    let init_r = 500.0_f64 * (n as f64).sqrt();
+    let two_pi = 2.0 * std::f64::consts::PI;
+    let mut px: Vec<f64> = (0..n)
+        .map(|i| init_r * (two_pi * i as f64 / n as f64).cos())
+        .collect();
+    let mut py: Vec<f64> = (0..n)
+        .map(|i| init_r * (two_pi * i as f64 / n as f64).sin())
+        .collect();
+
+    let area  = 2000.0_f64 * 2000.0_f64;
+    let k_fr  = (area / n as f64).sqrt();
+    let k_sq  = k_fr * k_fr;
+    let iters = if n > 500 { 40u32 } else { 80 };
+    let mut temp    = 200.0_f64;
+    let cooling = 0.88_f64;
+
+    for _ in 0..iters {
+        let mut fx = vec![0.0_f64; n];
+        let mut fy = vec![0.0_f64; n];
+
+        // 排斥力：所有节点对（O(n²)，知识地图节点数通常有限）
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let dx = px[i] - px[j];
+                let dy = py[i] - py[j];
+                let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+                let rep  = k_sq / dist;
+                let ux   = dx / dist;
+                let uy   = dy / dist;
+                fx[i] += rep * ux; fy[i] += rep * uy;
+                fx[j] -= rep * ux; fy[j] -= rep * uy;
+            }
+        }
+
+        // 吸引力：相似度边，权重越大吸引力越强
+        for &(i, j, w) in &sim_edges {
+            let dx   = px[j] - px[i];
+            let dy   = py[j] - py[i];
+            let dist = (dx * dx + dy * dy).sqrt().max(1.0);
+            let attr = dist * dist / k_fr * (1.0 + w * 2.5);
+            let ux   = dx / dist;
+            let uy   = dy / dist;
+            fx[i] += attr * ux; fy[i] += attr * uy;
+            fx[j] -= attr * ux; fy[j] -= attr * uy;
+        }
+
+        // 位移（温度限制）
+        for i in 0..n {
+            let d   = (fx[i] * fx[i] + fy[i] * fy[i]).sqrt().max(1.0);
+            let mov = d.min(temp);
+            px[i] += fx[i] / d * mov;
+            py[i] += fy[i] / d * mov;
+        }
+        temp *= cooling;
+    }
+
+    // ── 步骤 3：K-means 聚类 ──────────────────────────────────────────────────
+    let unique_tags: HashSet<&str> = notes.iter()
+        .flat_map(|nd| nd.tags.iter().map(|t| t.as_str()))
+        .collect();
+    let k_clusters = (unique_tags.len() / 3).clamp(2, 12);
+    let cluster_ids = kmeans_2d(&px, &py, k_clusters, 30);
+
+    // ── 组装输出 ──────────────────────────────────────────────────────────────
+    let result: Vec<KmNodeOut> = notes.iter().enumerate().map(|(i, nd)| KmNodeOut {
+        id:         nd.id.clone(),
+        x:          px[i],
+        y:          py[i],
+        tags:       nd.tags.clone(),
+        cluster_id: cluster_ids[i],
+        pagerank:   nd.pagerank,
+    }).collect();
+
+    serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+}
+
 // ─── 单元测试（运行于原生目标，无需 wasm-pack）──────────────────────────────
 
 #[cfg(test)]
@@ -1519,5 +1718,62 @@ mod tests {
         let a = scores["A"].as_f64().unwrap();
         assert!(c > a, "中心节点 C 得分应高于 A，C={},A={}", c, a);
         assert!((c - 1.0).abs() < 0.01, "C 归一化后应为 1.0，实际={}", c);
+    }
+
+    // ─── v1.9.5 测试：compute_knowledge_map ──────────────────────────────────
+
+    /// 空输入应返回空数组
+    #[test]
+    fn test_knowledge_map_empty() {
+        let result = compute_knowledge_map("[]");
+        assert_eq!(result, "[]", "空输入应返回空数组");
+    }
+
+    /// 单个节点应返回该节点，坐标为 (0,0)，cluster_id 为 0
+    #[test]
+    fn test_knowledge_map_single_note() {
+        let json = r#"[{"id":"a.md","title":"A","path":"a.md","tags":["rust"],"pagerank":0.5}]"#;
+        let result = compute_knowledge_map(json);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let nodes = arr.as_array().unwrap();
+        assert_eq!(nodes.len(), 1, "应返回 1 个节点");
+        assert_eq!(nodes[0]["id"], "a.md");
+        assert_eq!(nodes[0]["cluster_id"], 0);
+    }
+
+    /// 相同标签的笔记应被分配布局坐标（坐标为有限值）
+    #[test]
+    fn test_knowledge_map_similar_notes_finite_coords() {
+        use serde_json::json;
+        let notes_json = serde_json::to_string(&json!([
+            {"id":"a.md","title":"A","path":"a.md","tags":["rust","编程"],"pagerank":0.3},
+            {"id":"b.md","title":"B","path":"b.md","tags":["rust","系统"],"pagerank":0.5},
+            {"id":"c.md","title":"C","path":"c.md","tags":["python","编程"],"pagerank":0.2},
+            {"id":"d.md","title":"D","path":"d.md","tags":["游戏","设计"],"pagerank":0.1},
+        ])).unwrap();
+        let result = compute_knowledge_map(&notes_json);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let nodes = arr.as_array().unwrap();
+        assert_eq!(nodes.len(), 4, "应返回 4 个节点");
+        for nd in nodes {
+            let x = nd["x"].as_f64().unwrap_or(f64::NAN);
+            let y = nd["y"].as_f64().unwrap_or(f64::NAN);
+            assert!(x.is_finite(), "x 坐标应为有限值");
+            assert!(y.is_finite(), "y 坐标应为有限值");
+            assert!(nd["cluster_id"].as_u64().is_some(), "cluster_id 应为整数");
+        }
+    }
+
+    /// 无标签笔记仍应出现在输出中（tags 为空，cluster 由布局决定）
+    #[test]
+    fn test_knowledge_map_no_tags_included() {
+        use serde_json::json;
+        let notes_json = serde_json::to_string(&json!([
+            {"id":"a.md","title":"A","path":"a.md","tags":[],"pagerank":0.0},
+            {"id":"b.md","title":"B","path":"b.md","tags":[],"pagerank":0.0},
+        ])).unwrap();
+        let result = compute_knowledge_map(&notes_json);
+        let arr: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(arr.as_array().unwrap().len(), 2, "无标签笔记应包含在输出中");
     }
 }

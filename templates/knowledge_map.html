@@ -1,0 +1,451 @@
+{% extends "layout.html" %}
+
+{% block head %}
+<style>
+/* 知识地图专页（v1.9.5）*/
+.main-scroll-container { padding: 0 !important; height: 100%; overflow: hidden; }
+.markdown-body { padding: 0 !important; height: 100%; display: flex; flex-direction: column; }
+
+/* 工具栏 */
+#km-toolbar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--bg-secondary, #1e1e2e);
+    border-bottom: 1px solid var(--border-color, #313244);
+    flex-shrink: 0; flex-wrap: wrap;
+}
+#km-toolbar label { font-size: 13px; color: var(--text-muted, #6c7086); }
+#km-toolbar select,
+#km-toolbar input[type="text"] {
+    font-size: 13px; padding: 3px 8px;
+    border: 1px solid var(--border-color, #313244);
+    border-radius: 4px;
+    background: var(--bg-primary, #181825);
+    color: var(--text-primary, #cdd6f4);
+}
+#km-toolbar input[type="text"] { width: 160px; }
+#km-toolbar button {
+    font-size: 13px; padding: 4px 10px; border-radius: 4px;
+    border: 1px solid var(--border-color, #313244);
+    background: var(--bg-primary, #181825);
+    color: var(--text-primary, #cdd6f4); cursor: pointer;
+}
+#km-toolbar button:hover,
+#km-toolbar button.active {
+    background: var(--accent-color, #6a5acd);
+    border-color: var(--accent-color, #6a5acd);
+    color: #fff;
+}
+.km-sep { width: 1px; height: 20px; background: var(--border-color, #313244); margin: 0 4px; }
+
+/* Canvas 容器 */
+#km-container {
+    flex: 1; position: relative; overflow: hidden;
+    background: var(--graph-bg, #13131f); cursor: grab;
+}
+#km-container.dragging { cursor: grabbing; }
+#km-canvas { width: 100%; height: 100%; display: block; }
+
+/* 加载/错误覆盖层 */
+#km-loading, #km-error {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; color: var(--text-muted, #6c7086);
+    pointer-events: none;
+}
+#km-error { color: #f38ba8; }
+
+/* 悬停 Tooltip */
+#km-tooltip {
+    position: absolute; display: none;
+    background: var(--bg-secondary, #1e1e2e);
+    border: 1px solid var(--border-color, #313244);
+    border-radius: 6px; padding: 6px 10px;
+    font-size: 12px; color: var(--text-primary, #cdd6f4);
+    pointer-events: none; max-width: 200px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    z-index: 100;
+}
+#km-tooltip .km-tt-tags { color: var(--text-muted, #6c7086); font-size: 11px; margin-top: 2px; }
+
+/* 图例 */
+#km-legend {
+    position: absolute; bottom: 12px; left: 12px;
+    background: var(--bg-secondary, #1e1e2e);
+    border: 1px solid var(--border-color, #313244);
+    border-radius: 6px; padding: 8px 10px;
+    font-size: 11px; color: var(--text-muted, #6c7086);
+    max-height: 180px; overflow-y: auto;
+    display: none;
+}
+#km-legend .km-leg-item {
+    display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+#km-legend .km-leg-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+
+/* 节点数统计 */
+#km-stats {
+    position: absolute; bottom: 10px; right: 12px;
+    font-size: 11px; color: var(--text-muted, #6c7086);
+    pointer-events: none;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- 知识地图专页（v1.9.5）-->
+<div id="km-toolbar">
+    <!-- 过滤 -->
+    <div style="display:flex;align-items:center;gap:6px;">
+        <label for="km-search">搜索：</label>
+        <input type="text" id="km-search" placeholder="笔记标题…" oninput="kmOnSearch()">
+    </div>
+    <div class="km-sep"></div>
+    <!-- 聚类筛选 -->
+    <div style="display:flex;align-items:center;gap:6px;">
+        <label for="km-cluster-filter">聚类：</label>
+        <select id="km-cluster-filter" onchange="kmFilterCluster()">
+            <option value="-1">全部聚类</option>
+        </select>
+    </div>
+    <div class="km-sep"></div>
+    <!-- 节点大小模式 -->
+    <div style="display:flex;align-items:center;gap:6px;">
+        <label>
+            <input type="checkbox" id="km-pagerank-size" checked onchange="kmRedraw()">
+            PageRank 节点大小
+        </label>
+    </div>
+    <div class="km-sep"></div>
+    <!-- 重置视图 -->
+    <button onclick="kmResetView()" title="重置缩放和平移">重置视图</button>
+    <!-- 图例开关 -->
+    <button id="km-legend-btn" onclick="kmToggleLegend()">图例</button>
+</div>
+
+<!-- Canvas 画布 -->
+<div id="km-container">
+    <canvas id="km-canvas"></canvas>
+    <div id="km-loading">加载知识地图中…</div>
+    <div id="km-error" style="display:none"></div>
+    <div id="km-tooltip"><div id="km-tt-title"></div><div class="km-tt-tags" id="km-tt-tags"></div></div>
+    <div id="km-legend"></div>
+    <div id="km-stats"></div>
+</div>
+
+<script>
+// ── 知识地图脚本（v1.9.5）────────────────────────────────────────────────────
+
+// 颜色调色板（最多 12 个聚类）
+const KM_PALETTE = [
+    '#7aa2f7','#9ece6a','#f7768e','#e0af68',
+    '#bb9af7','#2ac3de','#ff9e64','#73daca',
+    '#41a6b5','#a9b1d6','#7dcfff','#b4f9f8',
+];
+
+let _kmNodes      = [];   // 布局后节点：{id, x, y, tags, cluster_id, pagerank, title, path}
+let _kmApiData    = [];   // 原始 API 数据：{id, title, path, tags, pagerank}
+let _kmFiltered   = [];   // 当前过滤后显示节点集合
+let _kmClusterFilter = -1; // -1 = 全部
+let _kmSearchQ    = '';
+
+// 视口变换：offset（平移）和 scale（缩放）
+let _kmOx = 0, _kmOy = 0, _kmScale = 1;
+let _kmDragging = false, _kmDragLast = null;
+
+// 悬停节点
+let _kmHovered = null;
+
+document.addEventListener('DOMContentLoaded', async () => {
+    kmResizeCanvas();
+    window.addEventListener('resize', () => { kmResizeCanvas(); kmRedraw(); });
+
+    try {
+        // 并行加载：API 数据 + WASM
+        const [apiResp, _] = await Promise.all([
+            fetch('/api/knowledge-map'),
+            typeof WasmLoader !== 'undefined' ? WasmLoader.init().catch(() => null) : Promise.resolve(null),
+        ]);
+
+        if (!apiResp.ok) throw new Error('HTTP ' + apiResp.status);
+        _kmApiData = await apiResp.json();
+
+        if (_kmApiData.length === 0) {
+            kmShowError('知识库中没有带标签的笔记，无法生成知识地图');
+            return;
+        }
+
+        // 调用 WASM computeKnowledgeMap 计算布局
+        let layoutNodes;
+        if (typeof WasmLoader !== 'undefined' && WasmLoader.computeKnowledgeMap) {
+            try {
+                const layoutJson = WasmLoader.computeKnowledgeMap(JSON.stringify(_kmApiData));
+                layoutNodes = JSON.parse(layoutJson);
+            } catch(e) {
+                console.warn('WASM 布局失败，使用备用布局：', e);
+                layoutNodes = kmFallbackLayout(_kmApiData);
+            }
+        } else {
+            // WASM 未加载时用备用随机布局
+            layoutNodes = kmFallbackLayout(_kmApiData);
+        }
+
+        // 合并布局结果和 API 元数据（title, path）
+        const apiMap = new Map(_kmApiData.map(n => [n.id, n]));
+        _kmNodes = layoutNodes.map(n => {
+            const api = apiMap.get(n.id) || {};
+            return { ...n, title: api.title || n.id, path: api.path || n.id };
+        });
+
+        // 填充聚类筛选下拉
+        const clusterIds = [...new Set(_kmNodes.map(n => n.cluster_id))].sort((a, b) => a - b);
+        const sel = document.getElementById('km-cluster-filter');
+        clusterIds.forEach(cid => {
+            const opt = document.createElement('option');
+            opt.value = cid;
+            opt.textContent = `聚类 ${cid + 1}（${_kmNodes.filter(n => n.cluster_id === cid).length} 篇）`;
+            sel.appendChild(opt);
+        });
+
+        // 填充图例
+        kmBuildLegend(clusterIds);
+
+        // 初始化视口（居中）
+        kmResetView();
+
+        document.getElementById('km-loading').style.display = 'none';
+        document.getElementById('km-stats').textContent =
+            `${_kmNodes.length} 篇笔记  ${clusterIds.length} 个聚类`;
+
+        kmSetupEvents();
+        kmRedraw();
+
+    } catch(e) {
+        kmShowError('加载失败: ' + e.message);
+    }
+});
+
+// ── 备用布局（WASM 不可用时）──────────────────────────────────────────────────
+function kmFallbackLayout(notes) {
+    const n = notes.length;
+    return notes.map((note, i) => ({
+        id:         note.id,
+        x:          1000 * Math.cos(2 * Math.PI * i / n),
+        y:          1000 * Math.sin(2 * Math.PI * i / n),
+        tags:       note.tags,
+        cluster_id: 0,
+        pagerank:   note.pagerank,
+    }));
+}
+
+// ── Canvas 辅助 ────────────────────────────────────────────────────────────
+function kmResizeCanvas() {
+    const canvas = document.getElementById('km-canvas');
+    const container = document.getElementById('km-container');
+    canvas.width  = container.clientWidth  || window.innerWidth;
+    canvas.height = container.clientHeight || window.innerHeight - 50;
+}
+
+function kmShowError(msg) {
+    document.getElementById('km-loading').style.display = 'none';
+    const el = document.getElementById('km-error');
+    el.textContent = msg; el.style.display = 'flex';
+}
+
+// ── 视口重置（居中所有节点）────────────────────────────────────────────────
+function kmResetView() {
+    if (_kmNodes.length === 0) return;
+    const canvas = document.getElementById('km-canvas');
+    const W = canvas.width, H = canvas.height;
+    const xs = _kmNodes.map(n => n.x), ys = _kmNodes.map(n => n.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
+    const padding = 60;
+    _kmScale = Math.min((W - padding * 2) / rangeX, (H - padding * 2) / rangeY) * 0.9;
+    _kmScale = Math.max(0.05, Math.min(_kmScale, 5));
+    _kmOx = W / 2 - ((minX + maxX) / 2) * _kmScale;
+    _kmOy = H / 2 - ((minY + maxY) / 2) * _kmScale;
+    kmRedraw();
+}
+
+// ── 渲染 ──────────────────────────────────────────────────────────────────
+function kmRedraw() {
+    const canvas = document.getElementById('km-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const sizeByPR = document.getElementById('km-pagerank-size')?.checked ?? true;
+
+    // 计算当前过滤集合
+    _kmFiltered = _kmNodes.filter(n => {
+        if (_kmClusterFilter >= 0 && n.cluster_id !== _kmClusterFilter) return false;
+        if (_kmSearchQ && !n.title.toLowerCase().includes(_kmSearchQ)) return false;
+        return true;
+    });
+
+    const filteredSet = new Set(_kmFiltered.map(n => n.id));
+
+    // 绘制节点
+    for (const nd of _kmNodes) {
+        const sx = nd.x * _kmScale + _kmOx;
+        const sy = nd.y * _kmScale + _kmOy;
+        // 视口裁剪（跳过画面外节点）
+        if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
+
+        const inFilter = filteredSet.has(nd.id);
+        const isHovered = _kmHovered === nd;
+        const baseR = sizeByPR
+            ? 3 + nd.pagerank * 12 * _kmScale
+            : 4 * _kmScale;
+        const r = Math.max(2, Math.min(baseR, 24));
+
+        const color = KM_PALETTE[nd.cluster_id % KM_PALETTE.length];
+        ctx.beginPath();
+        ctx.arc(sx, sy, isHovered ? r + 2 : r, 0, Math.PI * 2);
+        ctx.fillStyle = inFilter ? color : 'rgba(90,90,110,0.35)';
+        ctx.fill();
+        if (isHovered) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // 缩放足够大时显示标签
+        if (_kmScale > 0.6 && inFilter) {
+            ctx.fillStyle = 'rgba(200,200,220,0.85)';
+            ctx.font = `${Math.max(9, Math.min(13, 11 * _kmScale))}px sans-serif`;
+            ctx.fillText(nd.title, sx + r + 2, sy + 4);
+        }
+    }
+}
+
+// ── 鼠标事件 ───────────────────────────────────────────────────────────────
+function kmSetupEvents() {
+    const canvas = document.getElementById('km-canvas');
+    const container = document.getElementById('km-container');
+    const tooltip = document.getElementById('km-tooltip');
+
+    // 拖拽平移
+    canvas.addEventListener('mousedown', e => {
+        _kmDragging = true;
+        _kmDragLast = { x: e.clientX, y: e.clientY };
+        container.classList.add('dragging');
+    });
+    window.addEventListener('mousemove', e => {
+        if (_kmDragging && _kmDragLast) {
+            _kmOx += e.clientX - _kmDragLast.x;
+            _kmOy += e.clientY - _kmDragLast.y;
+            _kmDragLast = { x: e.clientX, y: e.clientY };
+            kmRedraw();
+        } else {
+            kmHandleHover(e, canvas, tooltip);
+        }
+    });
+    window.addEventListener('mouseup', () => {
+        _kmDragging = false;
+        _kmDragLast = null;
+        container.classList.remove('dragging');
+    });
+
+    // 滚轮缩放
+    canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? 1.12 : 0.89;
+        _kmOx = mx + (_kmOx - mx) * factor;
+        _kmOy = my + (_kmOy - my) * factor;
+        _kmScale *= factor;
+        _kmScale = Math.max(0.02, Math.min(_kmScale, 20));
+        kmRedraw();
+    }, { passive: false });
+
+    // 点击跳转
+    canvas.addEventListener('click', e => {
+        if (_kmHovered) window.location.href = '/doc/' + encodeURIComponent(_kmHovered.path);
+    });
+
+    // 触摸支持（手机缩放/平移）
+    let lastTouch = null;
+    canvas.addEventListener('touchstart', e => { if (e.touches.length === 1) lastTouch = e.touches[0]; });
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        if (e.touches.length === 1 && lastTouch) {
+            _kmOx += e.touches[0].clientX - lastTouch.clientX;
+            _kmOy += e.touches[0].clientY - lastTouch.clientY;
+            lastTouch = e.touches[0];
+            kmRedraw();
+        }
+    }, { passive: false });
+    canvas.addEventListener('touchend', () => { lastTouch = null; });
+}
+
+// 悬停检测
+function kmHandleHover(e, canvas, tooltip) {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let found = null;
+    // 反向遍历（靠前的节点优先）
+    for (let i = _kmNodes.length - 1; i >= 0; i--) {
+        const nd = _kmNodes[i];
+        const sx = nd.x * _kmScale + _kmOx;
+        const sy = nd.y * _kmScale + _kmOy;
+        const r  = Math.max(6, 3 + nd.pagerank * 12 * _kmScale);
+        const dx = mx - sx, dy = my - sy;
+        if (dx * dx + dy * dy <= r * r) { found = nd; break; }
+    }
+    if (found !== _kmHovered) {
+        _kmHovered = found;
+        kmRedraw();
+    }
+    if (found) {
+        document.getElementById('km-tt-title').textContent = found.title;
+        document.getElementById('km-tt-tags').textContent =
+            found.tags.length ? '#' + found.tags.join('  #') : '（无标签）';
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX - rect.left + 12) + 'px';
+        tooltip.style.top  = (e.clientY - rect.top  - 10) + 'px';
+        canvas.style.cursor = 'pointer';
+    } else {
+        tooltip.style.display = 'none';
+        canvas.style.cursor = '';
+    }
+}
+
+// ── 搜索与过滤 ─────────────────────────────────────────────────────────────
+function kmOnSearch() {
+    _kmSearchQ = document.getElementById('km-search').value.toLowerCase().trim();
+    kmRedraw();
+}
+
+function kmFilterCluster() {
+    _kmClusterFilter = parseInt(document.getElementById('km-cluster-filter').value, 10);
+    kmRedraw();
+}
+
+// ── 图例 ──────────────────────────────────────────────────────────────────
+function kmBuildLegend(clusterIds) {
+    const legend = document.getElementById('km-legend');
+    legend.innerHTML = clusterIds.map(cid => {
+        const color = KM_PALETTE[cid % KM_PALETTE.length];
+        const count = _kmNodes.filter(n => n.cluster_id === cid).length;
+        return `<div class="km-leg-item">
+            <div class="km-leg-dot" style="background:${color}"></div>
+            聚类 ${cid + 1}（${count} 篇）
+        </div>`;
+    }).join('');
+}
+
+function kmToggleLegend() {
+    const legend = document.getElementById('km-legend');
+    const btn = document.getElementById('km-legend-btn');
+    const visible = legend.style.display !== 'none' && legend.style.display !== '';
+    legend.style.display = visible ? 'none' : 'block';
+    btn.classList.toggle('active', !visible);
+}
+</script>
+{% endblock %}

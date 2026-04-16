@@ -117,6 +117,17 @@ pub struct TimelineTemplate<'a> {
     pub backlinks: &'a [String],
 }
 
+/// 知识地图专页模板（v1.9.5）
+///
+/// GET /knowledge-map 路由的全屏 Canvas 页面，布局由 WASM `computeKnowledgeMap` 计算。
+#[derive(Template)]
+#[template(path = "knowledge_map.html")]
+pub struct KnowledgeMapTemplate<'a> {
+    pub title:     &'a str,
+    pub sidebar:   &'a [crate::domain::FlatNode],
+    pub backlinks: &'a [String],
+}
+
 /// 笔记洞察 Dashboard 模板（v1.7.3）
 ///
 /// GET /insights 路由的主页，图表数据由前端 JS 调用 /api/insights/stats 获取。

@@ -12,7 +12,7 @@
 
 ## 当前开发状态
 
-**当前版本：1.9.4**
+**当前版本：1.9.5**
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
@@ -24,6 +24,7 @@
 | 分享链接 | ✅ 稳定 | UUID token；密码 bcrypt 哈希；URL scheme 支持 X-Forwarded-Proto + public_base_url（Q2） |
 | 阅读进度 | ✅ 稳定 | 滚动位置记忆 + 阅读历史；redb IO 已入 spawn_blocking（A1） |
 | 关系图谱 | ✅ 稳定 | Vis.js 渲染，支持 1-3 层深度 |
+| 知识地图 | ✅ 稳定 | Canvas 渲染，标签相似度聚类，K-means，WASM 布局（v1.9.5） |
 | Prometheus 指标 | ✅ 稳定 | `/metrics` 端点，含请求数、笔记数、延迟直方图 |
 | 应用状态 | ✅ 稳定 | `AppConfig` 改为 `RwLock<AppConfig>` 支持热重载（B2）；`start_time` 用于真实 uptime（B3） |
 

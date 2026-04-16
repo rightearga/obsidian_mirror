@@ -8,6 +8,22 @@
 
 ---
 
+## [v1.9.5] — 2026-04-15
+
+知识地图（方向 C）：基于标签相似度聚类，将笔记库渲染为可漫游的"星图"。
+
+### Added
+- **WASM `computeKnowledgeMap`**（`crates/wasm/src/lib.rs`）：接收笔记列表（含标签/pagerank），执行 Jaccard 相似度 + Fruchterman-Reingold 力导向布局 + K-means 聚类，返回 `[{id, x, y, tags, cluster_id, pagerank}]`
+- **`GET /knowledge-map`**：全屏 Canvas 知识地图专页，支持平移/缩放/悬停/点击跳转、按聚类筛选、PageRank 节点大小模式
+- **`GET /api/knowledge-map`**：返回所有笔记的标签与 PageRank 数据（供 WASM 布局计算）
+- **侧边栏星图图标**（`templates/layout.html`）：新增知识地图入口按钮
+
+### 测试统计
+- 服务端全量：133/133 通过
+- WASM 全量：46/46 通过（新增 4 个测试：空输入/单节点/有限坐标/无标签）
+
+---
+
 ## [v1.9.4] — 2026-04-15
 
 时间线联动深化：写作速度折线图、标签演化堆叠面积图、时间线 ↔ 图谱联动。

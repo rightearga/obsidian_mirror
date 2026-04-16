@@ -9,7 +9,7 @@ use askama::Template;
 use crate::state::AppState;
 use crate::sync::perform_sync;
 use crate::sidebar::{flatten_sidebar, find_first_file};
-use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate, NoteHistoryTemplate, NoteHistoryAtTemplate, NoteHistoryDiffTemplate, InsightsTemplate};
+use crate::templates::{PageTemplate, IndexTemplate, TagsListTemplate, TagNotesTemplate, GraphPageTemplate, NoteHistoryTemplate, NoteHistoryAtTemplate, NoteHistoryDiffTemplate, InsightsTemplate, KnowledgeMapTemplate};
 use crate::git::{GitClient, CommitInfo};
 use crate::search_engine::SortBy;
 use crate::graph::generate_graph;
@@ -2164,6 +2164,73 @@ pub async fn note_history_diff_handler(
             HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
         }
     }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// v1.9.5：知识地图（方向 C）
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// GET /knowledge-map — 知识地图专页（v1.9.5）
+///
+/// 全屏 Canvas 渲染，由前端调用 WASM `computeKnowledgeMap` 计算布局，
+/// 按标签相似度聚类，支持平移/缩放/悬停/点击。
+#[get("/knowledge-map")]
+pub async fn knowledge_map_page_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let sidebar_data = data.sidebar.read().await;
+    let flat_sidebar = flatten_sidebar(&sidebar_data);
+    let backlinks_empty: Vec<String> = vec![];
+
+    let tmpl = KnowledgeMapTemplate {
+        title:     "知识地图",
+        sidebar:   &flat_sidebar,
+        backlinks: &backlinks_empty,
+    };
+    match tmpl.render() {
+        Ok(html) => HttpResponse::Ok().content_type("text/html; charset=utf-8").body(html),
+        Err(e) => {
+            error!("知识地图模板渲染失败: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({"error": "模板渲染失败"}))
+        }
+    }
+}
+
+/// GET /api/knowledge-map — 返回所有笔记的标签与 PageRank，供 WASM 布局计算（v1.9.5）
+///
+/// 响应格式：`[{id, title, path, tags, pagerank}]`
+/// - `id`/`path`：笔记相对路径
+/// - `tags`：标签列表（空标签笔记也包含，WASM 侧处理无标签节点）
+/// - `pagerank`：归一化影响力分数（0.0–1.0，来自 generate_global_graph）
+#[get("/api/knowledge-map")]
+pub async fn knowledge_map_api_handler(
+    data: web::Data<Arc<AppState>>,
+) -> impl Responder {
+    let notes     = data.notes.read().await;
+    let link_index = data.link_index.read().await;
+
+    // 获取全局图谱数据以提取 PageRank 分数
+    let graph_data = crate::graph::generate_global_graph(&notes, &link_index, false);
+    drop(link_index);
+
+    let pr_map: std::collections::HashMap<&str, f32> = graph_data.nodes.iter()
+        .map(|n| (n.id.as_str(), n.pagerank))
+        .collect();
+
+    let km_notes: Vec<serde_json::Value> = notes.values()
+        .map(|n| {
+            let pr = pr_map.get(n.path.as_str()).copied().unwrap_or(0.0);
+            serde_json::json!({
+                "id":       n.path,
+                "title":    n.title,
+                "path":     n.path,
+                "tags":     n.tags,
+                "pagerank": pr,
+            })
+        })
+        .collect();
+
+    HttpResponse::Ok().json(km_notes)
 }
 
 #[cfg(test)]
