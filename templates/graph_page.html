@@ -69,8 +69,9 @@
     box-shadow: 0 4px 12px rgba(0,0,0,0.5); white-space: nowrap;
 }
 </style>
-<!-- 全屏图谱恢复使用 Vis.js（已在 layout.html 全局加载）
-     性能优化：stabilized 事件后关闭物理引擎，hideEdgesOnDrag 拖动时隐藏边 -->
+<!-- Sigma.js 2 + Graphology（本地，v1.9.6）-->
+<script src="/static/js/graphology.min.js"></script>
+<script src="/static/js/sigma.min.js"></script>
 {% endblock %}
 
 {% block content %}

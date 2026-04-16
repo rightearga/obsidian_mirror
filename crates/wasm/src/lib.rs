@@ -1243,22 +1243,23 @@ pub fn compute_knowledge_map(notes_json: &str) -> String {
     }
 
     // ── 步骤 2：力导向布局 ────────────────────────────────────────────────────
-    // 初始位置：圆形均匀分布
-    let init_r = 500.0_f64 * (n as f64).sqrt();
-    let two_pi = 2.0 * std::f64::consts::PI;
+    // 初始位置：节点从中心小范围随机分布（圆形初始会产生对称性陷阱，难以收敛到聚类）
+    let init_r = 15.0_f64 * (n as f64).sqrt();
     let mut px: Vec<f64> = (0..n)
-        .map(|i| init_r * (two_pi * i as f64 / n as f64).cos())
+        .map(|i| init_r * ((i * 7 + 3) as f64 / n as f64 * 2.0 - 1.0))
         .collect();
     let mut py: Vec<f64> = (0..n)
-        .map(|i| init_r * (two_pi * i as f64 / n as f64).sin())
+        .map(|i| init_r * ((i * 13 + 5) as f64 / n as f64 * 2.0 - 1.0))
         .collect();
 
     let area  = 2000.0_f64 * 2000.0_f64;
     let k_fr  = (area / n as f64).sqrt();
     let k_sq  = k_fr * k_fr;
-    let iters = if n > 500 { 40u32 } else { 80 };
-    let mut temp    = 200.0_f64;
-    let cooling = 0.88_f64;
+    // 向心引力（防止孤立节点飞出，与 compute_graph_layout FA2 一致）
+    let k_g   = 0.005_f64;
+    let iters = if n > 500 { 60u32 } else { 120 };
+    let mut temp    = k_fr * 6.0;  // 高初始温度让节点从中心快速扩散
+    let cooling = 0.90_f64;
 
     for _ in 0..iters {
         let mut fx = vec![0.0_f64; n];
@@ -1288,6 +1289,13 @@ pub fn compute_knowledge_map(notes_json: &str) -> String {
             let uy   = dy / dist;
             fx[i] += attr * ux; fy[i] += attr * uy;
             fx[j] -= attr * ux; fy[j] -= attr * uy;
+        }
+
+        // 向心引力（防止孤立节点飞出，知识地图同样适用）
+        for i in 0..n {
+            let dist_c = (px[i] * px[i] + py[i] * py[i]).sqrt().max(1.0);
+            fx[i] -= k_g * px[i] / dist_c;
+            fy[i] -= k_g * py[i] / dist_c;
         }
 
         // 位移（温度限制）
