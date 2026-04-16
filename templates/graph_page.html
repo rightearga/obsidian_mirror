@@ -400,6 +400,7 @@ function gpRender(data) {
 
     ;(data.edges || []).forEach(e => {
         if (!gpGraph.hasNode(e.from) || !gpGraph.hasNode(e.to)) return;
+        if (e.from === e.to) return;   // 跳过自链接（笔记引用自身）
         const edgeKey = `${e.from}__${e.to}`;
         if (gpGraph.hasEdge(edgeKey)) return;
         const w = e.weight || 1;
