@@ -431,15 +431,10 @@ function kmRedraw() {
             ctx.strokeStyle = '#fff';
             ctx.lineWidth = 2;
             ctx.stroke();
-            // 悬停节点显示标签
+            // 悬停时用固定字号显示标签（不随缩放放大）
             ctx.fillStyle = 'rgba(220,225,240,0.95)';
-            ctx.font = `bold ${Math.max(11, Math.min(14, 12 * _kmScale))}px sans-serif`;
-            ctx.fillText(nd.title, sx + r + 4, sy + 4);
-        } else if (_kmScale > 2.0 && inFilter) {
-            // 极度放大时才显示标签（避免密集文字）
-            ctx.fillStyle = 'rgba(180,185,210,0.75)';
-            ctx.font = `${Math.max(9, 10 * _kmScale)}px sans-serif`;
-            ctx.fillText(nd.title, sx + r + 3, sy + 3);
+            ctx.font = 'bold 13px sans-serif';
+            ctx.fillText(nd.title, sx + r + 5, sy + 4);
         }
     }
 }
