@@ -454,12 +454,12 @@ function kmRedraw() {
 
     // ── 标签层（栅格碰撞检测，避免重叠）──────────────────────────────────
     if (_kmScale > 0.4) {
-        const CELL = Math.max(60, 90 / _kmScale); // 缩放越大，间距越小
+        const CELL = Math.max(80, 120 / _kmScale); // 缩放越大，间距越小
         const occupied = new Set();
         // 按 pagerank 降序，优先显示重要节点的标签
         const sorted = [..._kmFiltered].sort((a, b) => b.pagerank - a.pagerank);
 
-        ctx.font = '9px sans-serif';
+        ctx.font = '12px sans-serif';
         for (const nd of sorted) {
             const sx = nd.x * _kmScale + _kmOx;
             const sy = nd.y * _kmScale + _kmOy;
