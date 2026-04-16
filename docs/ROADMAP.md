@@ -1188,6 +1188,100 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
+### 🔧 v1.9.6 — 大规模图谱性能优化（Sigma.js 替换 Vis.js）
+
+**主题**：面向 10,000+ 笔记库，用 WebGL 渲染引擎彻底解决知识图谱卡帧问题
+
+#### 背景
+
+Vis.js 使用 Canvas 2D 渲染，内置物理引擎每帧执行弹力计算，官方建议上限约 3,000 节点。在 10,000+ 节点场景下：
+- 帧率降至 < 10fps，交互严重卡顿
+- 布局稳定期仍持续重绘，CPU 占用高
+- 边绘制 O(E) 随节点增长迅速失控
+
+Sigma.js 专为大规模图可视化设计，底层使用 WebGL：
+- 10,000 节点、100,000 条边可稳定 60fps
+- 节点/边以 GPU 点精灵（Point Sprite）批量渲染
+- 布局计算可完全交由 graphology + Web Worker 完成，不阻塞渲染线程
+
+#### 技术选型
+
+| 库 | 渲染 | 10k 节点帧率 | 依赖大小 | 布局 |
+|----|------|------------|---------|------|
+| Vis.js 9.x（当前） | Canvas 2D | < 10fps | ~1MB | 内置（阻塞主线程）|
+| **Sigma.js 3.x** | WebGL | **60fps** | ~130KB | graphology（可 Worker）|
+| PixiJS 8.x | WebGL | 60fps | ~1MB | 需自行实现 |
+
+选用 **Sigma.js 3 + graphology**：轻量、API 简洁、与现有 `/api/graph/global` 数据格式直接兼容。
+
+#### 实现方案
+
+**层 8：前端改造（`templates/graph_page.html`）**
+
+1. 移除 Vis.js CDN，引入 Sigma.js + graphology（CDN 或本地 `static/js/`）
+2. 用 `graphology.Graph` 替代 `vis.DataSet`：
+   ```javascript
+   const graph = new graphology.Graph();
+   data.nodes.forEach(n => graph.addNode(n.id, { label: n.label, ...n }));
+   data.edges.forEach(e => graph.addEdge(e.from, e.to, { weight: e.weight }));
+   ```
+3. `Sigma(graph, container, options)` 替代 `new vis.Network(container, data, options)`
+4. 保留现有工具栏所有功能（影响力模式、热力图、路径查找、聚类着色、路径高亮）
+5. 事件系统映射：`sigma.on('clickNode', ...)` 替代 `network.on('click', ...)`
+
+**LOD + 剔除（Sigma.js 内置 + 手动增强）**
+
+- Sigma.js 本身已做视口剔除（只渲染可见节点）
+- 补充缩放级别标签控制：`reducers` 中按 `sigma.getCamera().ratio` 决定是否渲染 label
+- 缩放 < 0.3 时隐藏边标签，< 0.1 时只渲染节点点
+
+**物理布局迁移**
+
+- 当前 Vis.js 物理布局（`forceAtlas2Based`）→ graphology-layout-forceatlas2 在 Web Worker 运行
+- 布局稳定后停止（`worker.stop()`），转为纯渲染模式（零 CPU 占用）
+- 首帧前可用 `graphology-layout-random` 给出初始分布，ForceAtlas2 在 Worker 中异步收敛
+
+**向后兼容**
+
+- `/api/graph/global`、`/api/graph`、`/api/graph/path` 接口**不变**
+- 仅替换前端渲染层，服务端零改动
+- 功能全量保留：路径查找高亮、热力图、影响力模式、聚类着色、since/until 时间过滤
+
+#### 知识地图 LOD 优化（同版本顺带）
+
+- `_kmScale < 0.1` 时节点降级为 `fillRect(1×1)` 单像素，不绘制边和标签
+- `_kmScale < 0.3` 时不绘制边，只绘节点圆形
+- F-R 布局迁移到 Web Worker，主线程只做 Canvas 渲染
+
+#### 路由变更
+
+无新路由；`GET /graph`、`GET /api/graph/global` 保持不变。
+
+#### 依赖变更
+
+```html
+<!-- 移除 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.9/..."></script>
+
+<!-- 新增（约 130KB + 60KB）-->
+<script src="/static/js/graphology.min.js"></script>
+<script src="/static/js/sigma.min.js"></script>
+<script src="/static/js/graphology-layout-forceatlas2.min.js"></script>
+```
+
+文件下载到 `static/js/`，不依赖外部 CDN。
+
+#### 预期收益
+
+| 指标 | v1.9.5（Vis.js）| v1.9.6（Sigma.js）|
+|------|----------------|------------------|
+| 10k 节点帧率 | < 10fps | **60fps** |
+| 布局稳定后 CPU | ~15%（持续重绘）| **< 1%**（静止渲染）|
+| 内存占用 | ~400MB | ~80MB |
+| 首帧时间（10k 节点）| ~8s | **< 1s** |
+
+---
+
 ## 📦 功能分类
 
 ### 💡 未来探索方向
@@ -1226,7 +1320,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 | Q4 2026（已完成） | v1.6.0 – v1.6.6 | WASM 加速：客户端渲染 / 离线搜索 / JS 替换 |
 | Q1 2027（已完成） | v1.7.0 – v1.7.4 | 知识洞察：图谱聚类 / Git 历史 / Dashboard / 多仓库 |
 | Q2 2027（已完成） | v1.8.0 – v1.8.7 | 规模化 · 导出发布 · PWA 离线 · 可视化增强 · 依赖升级 |
-| Q3 2027（规划中） | v1.9.0 – v1.9.5 | 可视化深度：图谱影响力 / 路径查找 / 洞察深化 / 知识地图 |
+| Q3 2027（规划中） | v1.9.0 – v1.9.6 | 可视化深度：图谱影响力 / 路径查找 / 洞察深化 / 知识地图 / WebGL 大规模图谱 |
 
 ### 核心价值主张
 
@@ -1300,6 +1394,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 | v1.9.2 | BFS 路径查找，/api/graph/path，图谱路径高亮 |
 | v1.9.3 | 标签共现矩阵，连通度评分，阅读频率热力图 |
 | v1.9.5 | 知识地图（标签相似度聚类 + Barnes-Hut + Canvas 渲染）|
+| v1.9.6 | Vis.js → Sigma.js（WebGL），知识地图 Canvas LOD，10k+ 节点 60fps |
 
 ### 明确不做的技术方向
 
