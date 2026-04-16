@@ -337,12 +337,14 @@ async function gpLoad() {
  * 根据入度和 pagerank 计算节点显示半径
  */
 function gpNodeSize(inDeg, pagerank) {
-    return 5 + Math.min(inDeg * 1.5, 12) + pagerank * 6;
+    // Obsidian 风格：小节点，入度高的节点略大
+    return 3 + Math.min(inDeg * 0.6, 6);
 }
 
 /**
  * 将 API 返回的图谱数据渲染到 Sigma.js 画布。
- * 步骤：构建 Graphology 图 → 圆形初始布局 → 创建 Sigma 渲染器 → 启动 F-R 动画。
+ * 步骤：构建 Graphology 图 → 随机初始布局 → 创建 Sigma 渲染器 → 启动 F-R 动画。
+ * 初始布局使用随机位置（非圆形），避免对称性阻碍 F-R 收敛。
  */
 function gpRender(data) {
     if (typeof Sigma === 'undefined' || typeof graphology === 'undefined') {
@@ -369,19 +371,18 @@ function gpRender(data) {
     const clusterColor = document.getElementById('gp-cluster-color').checked;
     const tagColorMap  = clusterColor ? gpBuildTagColorMap(data.nodes || []) : {};
 
-    // 圆形初始布局
-    const n     = (data.nodes || []).length;
-    const initR = Math.max(500, 300 * Math.sqrt(n));
+    // 随机初始布局（打破圆形对称，让 F-R 更快收敛）
+    const n       = (data.nodes || []).length;
+    const initHalf = Math.max(800, 200 * Math.sqrt(n));
 
-    ;(data.nodes || []).forEach((node, i) => {
+    ;(data.nodes || []).forEach((node) => {
         const deg      = inDeg[node.id] || 0;
         const sz       = gpNodeSize(deg, node.pagerank || 0);
         const rawColor = clusterColor ? gpNodeColorStr(node, tagColorMap) : '#6a5acd';
-        const angle    = (2 * Math.PI * i) / Math.max(1, n);
 
         gpGraph.addNode(node.id, {
-            x:     initR * Math.cos(angle),
-            y:     initR * Math.sin(angle),
+            x:     (Math.random() - 0.5) * initHalf * 2,
+            y:     (Math.random() - 0.5) * initHalf * 2,
             size:  sz,
             color: rawColor,
             label: node.label,
@@ -405,8 +406,9 @@ function gpRender(data) {
         if (gpGraph.hasEdge(edgeKey)) return;
         const w = e.weight || 1;
         gpGraph.addEdgeWithKey(edgeKey, e.from, e.to, {
-            color: w === 2 ? '#7aa2f780' : '#6b728040',
-            size:  w === 2 ? 2.0 : 1.0,
+            // Obsidian 风格：细边，低透明度
+            color: w === 2 ? 'rgba(160,170,220,0.35)' : 'rgba(120,125,150,0.18)',
+            size:  w === 2 ? 1.2 : 0.5,
         });
         gpEdgeData.push({ from: e.from, to: e.to, weight: w });
     });
@@ -419,8 +421,8 @@ function gpRender(data) {
         labelFont:         'sans-serif',
         labelSize:         11,
         labelWeight:       '400',
-        labelDensity:      0.15,   // 低密度标签（性能）
-        labelGridCellSize: 120,
+        labelDensity:      0.08,   // 极低标签密度（Obsidian 风格：缩小时无标签）
+        labelGridCellSize: 150,
         minCameraRatio:    0.005,
         maxCameraRatio:    30,
         hideEdgesOnMove:   true,   // 移动时隐藏边（大图性能优化）
@@ -464,11 +466,14 @@ function gpRender(data) {
 
 // ── Fruchterman-Reingold 布局动画 ─────────────────────────────────────────────
 /**
- * 初始化并启动力导向布局动画。节点从圆形出发，逐帧收敛到自然聚类。
+ * 初始化并启动力导向布局。
+ * - n ≤ 100：主线程 rAF 动画，80 轮
+ * - n > 100：Web Worker，200 轮，主线程零阻塞
  */
 function gpStartLayout(n) {
     gpLayoutIter  = 0;
-    gpLayoutTotal = n > GP_LAYOUT_THRESHOLD ? 40 : 80;
+    // 迭代次数：足够多才能从随机分布收敛到聚类
+    gpLayoutTotal = n > 500 ? 150 : n > 100 ? 200 : 80;
 
     // 从 graphology 取当前坐标作初始值
     gpLIds = gpGraph.nodes();
@@ -488,8 +493,13 @@ function gpStartLayout(n) {
     gpLK    = Math.sqrt(4_000_000 / Math.max(1, n));
     gpLTemp = gpLK * 2;
 
+    // n > 100：Web Worker 布局（主线程零阻塞）
+    if (n > 100 && typeof Worker !== 'undefined') {
+        gpStartLayoutWorker();
+        return;
+    }
+    // 小图：主线程 rAF 动画
     const stepsPerFrame = Math.max(1, Math.ceil(gpLayoutTotal / 40));
-
     function layoutFrame() {
         if (gpLayoutIter >= gpLayoutTotal) {
             document.getElementById('graph-page-stats').textContent =
@@ -499,7 +509,6 @@ function gpStartLayout(n) {
         for (let s = 0; s < stepsPerFrame && gpLayoutIter < gpLayoutTotal; s++, gpLayoutIter++) {
             gpFRStep();
         }
-        // 将新坐标写回 graphology，触发 Sigma 重绘
         const len = gpLIds.length;
         for (let i = 0; i < len; i++) {
             gpGraph.setNodeAttribute(gpLIds[i], 'x', gpLx[i]);
@@ -511,9 +520,82 @@ function gpStartLayout(n) {
     gpLayoutRaf = requestAnimationFrame(layoutFrame);
 }
 
-/** 停止布局动画 */
+/**
+ * Web Worker 布局：F-R 在独立线程运行，每 batchSize 轮回传坐标更新画面。
+ * 使用 Transferable Float64Array 零拷贝，避免大图数据复制开销。
+ */
+let _gpLayoutWorker = null;
+function gpStartLayoutWorker() {
+    if (_gpLayoutWorker) { _gpLayoutWorker.terminate(); _gpLayoutWorker = null; }
+
+    const workerCode = `
+onmessage = function(e) {
+    const { px, py, edges, k, temp, totalIters, batchSize } = e.data;
+    const n = px.length, kSq = k * k;
+    let t = temp;
+    for (let iter = 0; iter < totalIters; iter++) {
+        const fx = new Float64Array(n), fy = new Float64Array(n);
+        for (let i = 0; i < n; i++) {
+            for (let j = i+1; j < n; j++) {
+                const dx=px[i]-px[j], dy=py[i]-py[j];
+                const d=Math.sqrt(dx*dx+dy*dy)||0.01, r=kSq/d, ux=dx/d, uy=dy/d;
+                fx[i]+=r*ux; fy[i]+=r*uy; fx[j]-=r*ux; fy[j]-=r*uy;
+            }
+        }
+        for (const [i,j] of edges) {
+            const dx=px[j]-px[i], dy=py[j]-py[i];
+            const d=Math.sqrt(dx*dx+dy*dy)||0.01, a=d*d/k, ux=dx/d, uy=dy/d;
+            fx[i]+=a*ux; fy[i]+=a*uy; fx[j]-=a*ux; fy[j]-=a*uy;
+        }
+        for (let i = 0; i < n; i++) {
+            const d=Math.sqrt(fx[i]*fx[i]+fy[i]*fy[i])||0.01, mov=Math.min(d,t);
+            px[i]+=fx[i]/d*mov; py[i]+=fy[i]/d*mov;
+        }
+        t *= 0.92;
+        if ((iter+1) % batchSize === 0 || iter === totalIters-1) {
+            const cpx=new Float64Array(px), cpy=new Float64Array(py);
+            postMessage({ px:cpx, py:cpy, done:iter===totalIters-1 }, [cpx.buffer, cpy.buffer]);
+        }
+    }
+};`;
+    const blob = new Blob([workerCode], { type: 'text/javascript' });
+    const url  = URL.createObjectURL(blob);
+    _gpLayoutWorker = new Worker(url);
+    URL.revokeObjectURL(url);
+
+    const px = new Float64Array(gpLx), py = new Float64Array(gpLy);
+    _gpLayoutWorker.postMessage({
+        px, py,
+        edges:      gpLEdges,
+        k:          gpLK,
+        temp:       gpLTemp,
+        totalIters: gpLayoutTotal,
+        batchSize:  Math.max(10, Math.ceil(gpLayoutTotal / 10)),
+    }, [px.buffer, py.buffer]);
+
+    _gpLayoutWorker.onmessage = ({ data: { px: nx, py: ny, done } }) => {
+        const len = gpLIds.length;
+        for (let i = 0; i < len; i++) {
+            gpGraph.setNodeAttribute(gpLIds[i], 'x', nx[i]);
+            gpGraph.setNodeAttribute(gpLIds[i], 'y', ny[i]);
+        }
+        gpRenderer?.refresh();
+        if (done) {
+            _gpLayoutWorker.terminate(); _gpLayoutWorker = null;
+            document.getElementById('graph-page-stats').textContent =
+                `${gpGraph.order} 个节点  ${gpGraph.size} 条边`;
+        }
+    };
+    _gpLayoutWorker.onerror = (err) => {
+        console.warn('图谱 Worker 布局失败：', err.message);
+        if (_gpLayoutWorker) { _gpLayoutWorker.terminate(); _gpLayoutWorker = null; }
+    };
+}
+
+/** 停止所有布局（rAF + Worker） */
 function gpStopLayout() {
-    if (gpLayoutRaf) { cancelAnimationFrame(gpLayoutRaf); gpLayoutRaf = null; }
+    if (gpLayoutRaf)      { cancelAnimationFrame(gpLayoutRaf); gpLayoutRaf = null; }
+    if (_gpLayoutWorker)  { _gpLayoutWorker.terminate(); _gpLayoutWorker = null; }
 }
 
 /** 执行一轮 F-R 排斥 + 吸引 + 位移 */
