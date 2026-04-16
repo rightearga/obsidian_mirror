@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use tantivy::collector::{Count, TopDocs};
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
+use tantivy::merge_policy::NoMergePolicy;
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument};
 use tracing::{info, warn};
 
@@ -186,6 +187,15 @@ impl SearchEngine {
 
         // 获取写入器
         let mut index_writer: IndexWriter = self.index.writer(50_000_000)?; // 50MB 缓冲
+
+        // Windows 文件锁修复（v1.9.6）：全量重建期间禁用段合并。
+        // Tantivy 默认在 commit 时合并段（LogMergePolicy），合并需要删除旧段文件
+        // （.store/.idx 等）。但 IndexReader 持有这些文件的句柄：
+        //   - Linux：允许删除已打开的文件（inode 引用计数）→ 无问题
+        //   - Windows：不允许删除/覆写已打开文件 → PermissionDenied (OS error 5)
+        // NoMergePolicy：commit 只写新段，不删除旧段文件。
+        // 旧段（含 delete_all tombstone）不影响搜索结果，待下次重建时自然清理。
+        index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
         // 清空现有索引
         info!("  ├─ 清空旧索引...");
