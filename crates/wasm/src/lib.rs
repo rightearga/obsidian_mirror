@@ -885,14 +885,16 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     let masses: Vec<f64> = degrees.iter().map(|&d| (d + 1) as f64).collect();
 
     // 初始化位置：节点从中心附近出发，排斥力自然将其向外推开形成聚类
-    // （圆形初始布局在 FA2 中会产生对称性陷阱，中心附近随机更优）
+    // LCG 伪随机数生成器（无外部依赖，避免线性分布陷阱）
     let init_r = 20.0_f64 * (n as f64).sqrt();
-    let mut pos_x: Vec<f64> = (0..n)
-        .map(|i| init_r * ((i * 7 + 3) as f64 / n as f64 * 2.0 - 1.0))
-        .collect();
-    let mut pos_y: Vec<f64> = (0..n)
-        .map(|i| init_r * ((i * 13 + 5) as f64 / n as f64 * 2.0 - 1.0))
-        .collect();
+    let mut rng: u64 = 0xdeadbeef_cafebabe;
+    let mut rand_range = |lo: f64, hi: f64| -> f64 {
+        rng = rng.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        let r = ((rng >> 33) as f64) / ((1u64 << 31) as f64);
+        lo + r * (hi - lo)
+    };
+    let mut pos_x: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
+    let mut pos_y: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
 
     // ForceAtlas2 参数（对应 Vis.js 默认值）
     // k_r：排斥力系数（对应 gravitationalConstant: -50 的绝对值）
@@ -1243,14 +1245,16 @@ pub fn compute_knowledge_map(notes_json: &str) -> String {
     }
 
     // ── 步骤 2：力导向布局 ────────────────────────────────────────────────────
-    // 初始位置：节点从中心小范围随机分布（圆形初始会产生对称性陷阱，难以收敛到聚类）
+    // 初始位置：中心附近小范围伪随机分布（LCG，无外部依赖）
     let init_r = 15.0_f64 * (n as f64).sqrt();
-    let mut px: Vec<f64> = (0..n)
-        .map(|i| init_r * ((i * 7 + 3) as f64 / n as f64 * 2.0 - 1.0))
-        .collect();
-    let mut py: Vec<f64> = (0..n)
-        .map(|i| init_r * ((i * 13 + 5) as f64 / n as f64 * 2.0 - 1.0))
-        .collect();
+    let mut rng2: u64 = 0xfeedface_deadc0de;
+    let mut rand2 = |lo: f64, hi: f64| -> f64 {
+        rng2 = rng2.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+        let r = ((rng2 >> 33) as f64) / ((1u64 << 31) as f64);
+        lo + r * (hi - lo)
+    };
+    let mut px: Vec<f64> = (0..n).map(|_| rand2(-init_r, init_r)).collect();
+    let mut py: Vec<f64> = (0..n).map(|_| rand2(-init_r, init_r)).collect();
 
     let area  = 2000.0_f64 * 2000.0_f64;
     let k_fr  = (area / n as f64).sqrt();
