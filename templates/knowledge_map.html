@@ -297,11 +297,28 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 });
 
-// ── 动画力导向布局（Fruchterman-Reingold，逐帧收敛）────────────────────────
-function kmStartLayoutAnimation(n, totalIters) {
-    if (_kmLayoutRaf) cancelAnimationFrame(_kmLayoutRaf);
-    const stepsPerFrame = Math.max(1, Math.ceil(totalIters / 30)); // 约 30 帧完成
+// ── 布局调度：节点数 > 300 用 Web Worker，否则主线程动画 ────────────────────
+let _kmWorker = null;  // 布局 Worker 实例
 
+function kmStartLayoutAnimation(n, totalIters) {
+    if (_kmLayoutRaf) { cancelAnimationFrame(_kmLayoutRaf); _kmLayoutRaf = null; }
+    if (_kmWorker)    { _kmWorker.terminate(); _kmWorker = null; }
+
+    // 大规模用 Web Worker，避免阻塞主线程
+    if (n > 300 && typeof Worker !== 'undefined') {
+        kmStartLayoutWorker(n, totalIters);
+        return;
+    }
+    // 小规模直接主线程动画
+    kmStartLayoutMainThread(n, totalIters);
+}
+
+/**
+ * 小规模（≤300 节点）主线程动画布局。
+ * 每帧跑 stepsPerFrame 轮 F-R 迭代，通过 requestAnimationFrame 动画收敛。
+ */
+function kmStartLayoutMainThread(n, totalIters) {
+    const stepsPerFrame = Math.max(1, Math.ceil(totalIters / 30));
     function step() {
         if (_kmLayoutIter >= totalIters) {
             document.getElementById('km-stats').textContent =
@@ -316,6 +333,83 @@ function kmStartLayoutAnimation(n, totalIters) {
         _kmLayoutRaf = requestAnimationFrame(step);
     }
     _kmLayoutRaf = requestAnimationFrame(step);
+}
+
+/**
+ * 大规模（>300 节点）Web Worker 布局。
+ * 布局计算在独立线程运行，每 10 轮将坐标 postMessage 回主线程更新渲染。
+ * Worker 代码通过 Blob URL 内联，无需独立文件。
+ */
+function kmStartLayoutWorker(n, totalIters) {
+    // Worker 内联代码：执行 F-R 迭代，每 10 轮发一次坐标
+    const workerCode = `
+onmessage = function(e) {
+    const { px, py, edges, k, temp, totalIters, batchSize } = e.data;
+    const n = px.length;
+    let t = temp;
+    for (let iter = 0; iter < totalIters; iter++) {
+        const fx = new Float64Array(n), fy = new Float64Array(n);
+        const kSq = k * k;
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                const dx = px[i]-px[j], dy = py[i]-py[j];
+                const d = Math.sqrt(dx*dx+dy*dy)||0.01, r = kSq/d;
+                const ux = dx/d, uy = dy/d;
+                fx[i]+=r*ux; fy[i]+=r*uy; fx[j]-=r*ux; fy[j]-=r*uy;
+            }
+        }
+        for (const [i,j,w] of edges) {
+            const dx=px[j]-px[i], dy=py[j]-py[i];
+            const d=Math.sqrt(dx*dx+dy*dy)||0.01, a=d*d/k*(1+w*3);
+            const ux=dx/d, uy=dy/d;
+            fx[i]+=a*ux; fy[i]+=a*uy; fx[j]-=a*ux; fy[j]-=a*uy;
+        }
+        for (let i = 0; i < n; i++) {
+            const d=Math.sqrt(fx[i]*fx[i]+fy[i]*fy[i])||0.01, mov=Math.min(d,t);
+            px[i]+=fx[i]/d*mov; py[i]+=fy[i]/d*mov;
+        }
+        t *= 0.88;
+        // 每 batchSize 轮发送一次坐标（使用 Transferable 零拷贝）
+        if ((iter+1) % batchSize === 0 || iter === totalIters-1) {
+            const pxCopy = new Float64Array(px), pyCopy = new Float64Array(py);
+            postMessage({ px: pxCopy, py: pyCopy, done: iter===totalIters-1 },
+                [pxCopy.buffer, pyCopy.buffer]);
+        }
+    }
+};`;
+    const blob = new Blob([workerCode], { type: 'text/javascript' });
+    const url  = URL.createObjectURL(blob);
+    _kmWorker  = new Worker(url);
+    URL.revokeObjectURL(url);
+
+    // 把当前坐标和边传给 Worker
+    const px = new Float64Array(_kmNodes.map(nd => nd.x));
+    const py = new Float64Array(_kmNodes.map(nd => nd.y));
+    _kmWorker.postMessage({
+        px, py, edges: _kmLayoutEdges,
+        k:    _kmLayoutK,
+        temp: _kmLayoutTemp,
+        totalIters,
+        batchSize: Math.max(5, Math.ceil(totalIters / 8)),
+    }, [px.buffer, py.buffer]);
+
+    // 接收 Worker 返回的坐标并更新节点位置
+    _kmWorker.onmessage = ({ data }) => {
+        const { px: newPx, py: newPy, done } = data;
+        _kmNodes.forEach((nd, i) => { nd.x = newPx[i]; nd.y = newPy[i]; });
+        kmRedraw();
+        if (done) {
+            _kmWorker.terminate();
+            _kmWorker = null;
+            document.getElementById('km-stats').textContent =
+                `${n} 篇笔记  ${new Set(_kmNodes.map(nd => nd.cluster_id)).size} 个聚类`;
+        }
+    };
+    _kmWorker.onerror = (err) => {
+        console.warn('知识地图 Worker 布局失败，降级到主线程：', err.message);
+        if (_kmWorker) { _kmWorker.terminate(); _kmWorker = null; }
+        kmStartLayoutMainThread(n, totalIters);
+    };
 }
 
 function kmLayoutStep(n) {
@@ -404,8 +498,12 @@ function kmRedraw() {
     });
     const filteredSet = new Set(_kmFiltered.map(n => n.id));
 
-    // ── 绘制相似度边（在节点下层）──────────────────────────────────────────
-    if (_kmDisplayEdges.length > 0 && _kmNodes.length > 0) {
+    // ── LOD：scale 很小时只画单像素点，跳过边和标签 ─────────────────────
+    const LOD_PIXEL  = _kmScale < 0.08;  // 极度缩小 → 1px 点
+    const LOD_SIMPLE = _kmScale < 0.25;  // 较小 → 只画圆，不画边
+
+    // ── 绘制相似度边（scale 足够大时才绘制）─────────────────────────────
+    if (!LOD_SIMPLE && _kmDisplayEdges.length > 0 && _kmNodes.length > 0) {
         ctx.save();
         ctx.lineWidth = 0.8;
         for (const [i, j, w] of _kmDisplayEdges) {
@@ -413,10 +511,8 @@ function kmRedraw() {
             if (!ni || !nj) continue;
             const x1 = ni.x * _kmScale + _kmOx, y1 = ni.y * _kmScale + _kmOy;
             const x2 = nj.x * _kmScale + _kmOx, y2 = nj.y * _kmScale + _kmOy;
-            // 视口裁剪
             if (Math.max(x1, x2) < 0 || Math.min(x1, x2) > W) continue;
             if (Math.max(y1, y2) < 0 || Math.min(y1, y2) > H) continue;
-            // 只有两端都在过滤集合中时才绘制
             const bothInFilter = filteredSet.has(ni.id) && filteredSet.has(nj.id);
             const alpha = bothInFilter ? Math.min(0.5, w * 0.8) : 0.06;
             ctx.strokeStyle = `rgba(130,150,210,${alpha})`;
@@ -428,15 +524,24 @@ function kmRedraw() {
         ctx.restore();
     }
 
-    // ── 绘制节点 ─────────────────────────────────────────────────────────
+    // ── 绘制节点（LOD 分级）─────────────────────────────────────────────
     for (const nd of _kmNodes) {
         const sx = nd.x * _kmScale + _kmOx;
         const sy = nd.y * _kmScale + _kmOy;
-        if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
+        if (sx < -2 || sx > W + 2 || sy < -2 || sy > H + 2) continue;
 
         const inFilter = filteredSet.has(nd.id);
         const isHovered = _kmHovered === nd;
         const baseR = sizeByPR ? 4 + nd.pagerank * 10 : 5;
+
+        // LOD_PIXEL：极度缩小时用单像素矩形代替 arc（快 10×）
+        if (LOD_PIXEL && !isHovered) {
+            ctx.fillStyle = inFilter
+                ? KM_PALETTE[nd.cluster_id % KM_PALETTE.length]
+                : 'rgba(80,85,105,0.4)';
+            ctx.fillRect(Math.round(sx), Math.round(sy), 1, 1);
+            continue;
+        }
         const r = Math.max(3, Math.min(baseR, 18));
 
         const color = KM_PALETTE[nd.cluster_id % KM_PALETTE.length];

@@ -8,6 +8,30 @@
 
 ---
 
+## [v1.9.6] — 2026-04-16
+
+大规模图谱性能优化：Vis.js → Sigma.js WebGL 渲染，知识地图 Canvas LOD + Web Worker 布局。
+
+### Changed
+- **图谱专页渲染引擎**（`templates/graph_page.html`）：Vis.js 2D Canvas → Sigma.js 2 WebGL
+  - 10k+ 节点稳定 60fps；布局稳定后 CPU <1%（不再持续重绘）
+  - 布局改为 JS Fruchterman-Reingold 动画收敛，视觉效果更自然
+  - 功能全量保留：聚类着色、热力图、影响力模式、路径查找、时间过滤
+
+### Added
+- **知识地图 Canvas LOD**（`templates/knowledge_map.html`）：
+  - `scale < 0.08`：节点降为 1×1px 单像素（比 `arc()` 快 10×）
+  - `scale < 0.25`：跳过边绘制，只渲染节点圆形
+- **知识地图 Web Worker 布局**（`templates/knowledge_map.html`）：
+  - 节点数 > 300 时 F-R 布局在独立线程运行，主线程不阻塞
+  - 每 N 轮通过 Transferable Float64Array 零拷贝回传坐标
+
+### Infra
+- 新增本地依赖：`static/js/graphology.min.js`（v0.25.4，72KB）
+  和 `static/js/sigma.min.js`（v2.4.0，95KB）；不再依赖外部 CDN
+
+---
+
 ## [v1.9.5] — 2026-04-15
 
 知识地图（方向 C）：基于标签相似度聚类，将笔记库渲染为可漫游的"星图"。

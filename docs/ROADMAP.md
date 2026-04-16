@@ -1188,7 +1188,7 @@ let score: f32 = query_tokens.iter().zip(title_weights.iter()).map(|(token, &tw)
 
 ---
 
-### 🔧 v1.9.6 — 大规模图谱性能优化（Sigma.js 替换 Vis.js）
+### ✅ v1.9.6 (已发布 - 2026-04-16) — 大规模图谱性能优化（Sigma.js 替换 Vis.js）
 
 **主题**：面向 10,000+ 笔记库，用 WebGL 渲染引擎彻底解决知识图谱卡帧问题
 
@@ -1271,14 +1271,15 @@ Sigma.js 专为大规模图可视化设计，底层使用 WebGL：
 
 文件下载到 `static/js/`，不依赖外部 CDN。
 
-#### 预期收益
+#### 实际交付物
+- 新增文件：`static/js/graphology.min.js`（v0.25.4，72KB）
+- 新增文件：`static/js/sigma.min.js`（v2.4.0，95KB）
+- 修改文件：`templates/graph_page.html`（完整迁移到 Sigma.js，保留全部功能）
+- 修改文件：`templates/knowledge_map.html`（Canvas LOD + Web Worker 布局）
 
-| 指标 | v1.9.5（Vis.js）| v1.9.6（Sigma.js）|
-|------|----------------|------------------|
-| 10k 节点帧率 | < 10fps | **60fps** |
-| 布局稳定后 CPU | ~15%（持续重绘）| **< 1%**（静止渲染）|
-| 内存占用 | ~400MB | ~80MB |
-| 首帧时间（10k 节点）| ~8s | **< 1s** |
+#### 测试结果
+- 服务端全量测试：**133/133 通过**
+- 新增测试：0 个（纯前端变更）
 
 ---
 

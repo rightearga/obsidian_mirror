@@ -8,102 +8,82 @@
 
 /* 工具栏 */
 #graph-page-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
     background: var(--bg-secondary, #1e1e2e);
     border-bottom: 1px solid var(--border-color, #313244);
-    flex-shrink: 0;
-    flex-wrap: wrap;
+    flex-shrink: 0; flex-wrap: wrap;
 }
-#graph-page-toolbar .toolbar-group {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
+#graph-page-toolbar .toolbar-group { display: flex; align-items: center; gap: 6px; }
 #graph-page-toolbar .toolbar-sep {
-    width: 1px;
-    height: 20px;
-    background: var(--border-color, #313244);
-    margin: 0 4px;
+    width: 1px; height: 20px;
+    background: var(--border-color, #313244); margin: 0 4px;
 }
 #graph-page-toolbar label { font-size: 13px; color: var(--text-muted, #6c7086); }
 #graph-page-toolbar select,
 #graph-page-toolbar input[type="text"] {
-    font-size: 13px;
-    padding: 3px 8px;
-    border: 1px solid var(--border-color, #313244);
-    border-radius: 4px;
-    background: var(--bg-primary, #181825);
-    color: var(--text-primary, #cdd6f4);
+    font-size: 13px; padding: 3px 8px;
+    border: 1px solid var(--border-color, #313244); border-radius: 4px;
+    background: var(--bg-primary, #181825); color: var(--text-primary, #cdd6f4);
 }
 #graph-page-toolbar input[type="text"] { width: 180px; }
 #graph-page-toolbar button {
-    font-size: 13px;
-    padding: 4px 10px;
-    border-radius: 4px;
+    font-size: 13px; padding: 4px 10px; border-radius: 4px;
     border: 1px solid var(--border-color, #313244);
-    background: var(--bg-primary, #181825);
-    color: var(--text-primary, #cdd6f4);
+    background: var(--bg-primary, #181825); color: var(--text-primary, #cdd6f4);
     cursor: pointer;
 }
 #graph-page-toolbar button.active,
 #graph-page-toolbar button:hover {
     background: var(--accent-color, #6a5acd);
-    border-color: var(--accent-color, #6a5acd);
-    color: #fff;
+    border-color: var(--accent-color, #6a5acd); color: #fff;
 }
 #graph-page-toolbar input[type="checkbox"] { cursor: pointer; }
 
-/* 图谱容器：填满剩余高度 */
+/* 图谱容器 */
 #graph-page-container {
-    flex: 1;
-    position: relative;
-    overflow: hidden;
+    flex: 1; position: relative; overflow: hidden;
     background: var(--graph-bg, #13131f);
 }
-#graph-page-vis {
-    width: 100%;
-    height: 100%;
-}
-#graph-page-loading,
-#graph-page-error {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 14px;
-    color: var(--text-muted, #6c7086);
-    pointer-events: none;
+/* Sigma.js 画布填满容器 */
+#graph-page-vis { width: 100%; height: 100%; }
+#graph-page-vis canvas { position: absolute; top: 0; left: 0; }
+
+#graph-page-loading, #graph-page-error {
+    position: absolute; inset: 0; display: flex;
+    align-items: center; justify-content: center;
+    font-size: 14px; color: var(--text-muted, #6c7086); pointer-events: none;
 }
 #graph-page-error { color: #f38ba8; }
-
-/* 节点数统计 */
 #graph-page-stats {
-    position: absolute;
-    bottom: 8px;
-    right: 12px;
-    font-size: 12px;
-    color: var(--text-muted, #6c7086);
-    pointer-events: none;
+    position: absolute; bottom: 8px; right: 12px;
+    font-size: 12px; color: var(--text-muted, #6c7086); pointer-events: none;
+}
+/* 节点悬停 Tooltip */
+#gp-tooltip {
+    position: absolute; display: none;
+    background: var(--bg-secondary, #1e1e2e);
+    border: 1px solid var(--border-color, #313244);
+    border-radius: 6px; padding: 5px 10px;
+    font-size: 12px; color: var(--text-primary, #cdd6f4);
+    pointer-events: none; z-index: 10;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5); white-space: nowrap;
 }
 </style>
+<!-- Sigma.js 2 + Graphology（本地，v1.9.6）-->
+<script src="/static/js/graphology.min.js"></script>
+<script src="/static/js/sigma.min.js"></script>
 {% endblock %}
 
 {% block content %}
-<!-- 全局知识图谱专页（v1.7.0）-->
+<!-- 全局知识图谱专页（v1.9.6：Sigma.js WebGL 渲染）-->
 <div id="graph-page-toolbar">
     <!-- 视图模式切换 -->
     <div class="toolbar-group">
         <button id="gp-mode-global" class="active" onclick="gpSetMode('global')">全局图谱</button>
         <button id="gp-mode-note" onclick="gpSetMode('note')">笔记子图</button>
     </div>
-
     <div class="toolbar-sep"></div>
-
-    <!-- 笔记搜索（子图模式时使用，全局模式时置灰） -->
+    <!-- 笔记搜索（子图模式） -->
     <div class="toolbar-group" id="gp-note-group">
         <label for="gp-note-input">笔记：</label>
         <input type="text" id="gp-note-input" placeholder="输入笔记标题…"
@@ -114,9 +94,7 @@
             <option value="3">深度 3</option>
         </select>
     </div>
-
     <div class="toolbar-sep"></div>
-
     <!-- 全局图谱选项 -->
     <div class="toolbar-group" id="gp-global-group">
         <label>
@@ -124,9 +102,7 @@
             隐藏孤立节点
         </label>
     </div>
-
     <div class="toolbar-sep"></div>
-
     <!-- 聚类着色 -->
     <div class="toolbar-group">
         <label>
@@ -134,39 +110,34 @@
             标签聚类着色
         </label>
     </div>
-
-    <!-- 高亮搜索 -->
     <div class="toolbar-sep"></div>
+    <!-- 高亮搜索 -->
     <div class="toolbar-group">
         <label for="gp-highlight">高亮：</label>
         <input type="text" id="gp-highlight" placeholder="节点名称…"
                oninput="gpHighlight()" style="width:140px">
     </div>
-
-    <!-- 热力图模式（v1.8.4） -->
     <div class="toolbar-sep"></div>
+    <!-- 热力图（v1.8.4） -->
     <div class="toolbar-group">
         <label>
             <input type="checkbox" id="gp-heatmap" onchange="gpApplyHeatmap()">
             热度着色
         </label>
     </div>
-
-    <!-- 影响力模式（v1.9.0） -->
     <div class="toolbar-sep"></div>
+    <!-- 影响力模式（v1.9.0） -->
     <div class="toolbar-group">
         <label>
             <input type="checkbox" id="gp-influence" onchange="gpApplyInfluence()">
             影响力模式
         </label>
     </div>
-
-    <!-- 路径查找（v1.9.2） -->
     <div class="toolbar-sep"></div>
+    <!-- 路径查找（v1.9.2） -->
     <div class="toolbar-group">
-        <button id="gp-path-toggle" class="active" onclick="gpTogglePathPanel()" title="查找两篇笔记之间的最短链接路径">
-            路径查找
-        </button>
+        <button id="gp-path-toggle" class="active" onclick="gpTogglePathPanel()"
+                title="查找两篇笔记之间的最短链接路径">路径查找</button>
     </div>
 </div>
 
@@ -175,21 +146,20 @@
     border-bottom:1px solid var(--border-color,#313244);display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
     <input type="text" id="gp-path-from" list="gp-note-datalist" placeholder="起点笔记…"
            style="width:160px;padding:4px 8px;border:1px solid var(--border-color,#313244);
-                  border-radius:4px;background:var(--bg-primary,#181825);color:var(--text-primary,#cdd6f4);font-size:0.85rem;">
+                  border-radius:4px;background:var(--bg-primary,#181825);
+                  color:var(--text-primary,#cdd6f4);font-size:0.85rem;">
     <span style="color:var(--text-muted,#6c7086)">→</span>
     <input type="text" id="gp-path-to" list="gp-note-datalist" placeholder="终点笔记…"
            style="width:160px;padding:4px 8px;border:1px solid var(--border-color,#313244);
-                  border-radius:4px;background:var(--bg-primary,#181825);color:var(--text-primary,#cdd6f4);font-size:0.85rem;">
+                  border-radius:4px;background:var(--bg-primary,#181825);
+                  color:var(--text-primary,#cdd6f4);font-size:0.85rem;">
     <button onclick="gpFindPath()"
-            style="padding:4px 12px;background:var(--accent-color,#6a5acd);border:none;border-radius:4px;
-                   color:#fff;cursor:pointer;font-size:0.85rem;">
-        查找
-    </button>
+            style="padding:4px 12px;background:var(--accent-color,#6a5acd);border:none;
+                   border-radius:4px;color:#fff;cursor:pointer;font-size:0.85rem;">查找</button>
     <button onclick="gpClearPath()" title="清除路径高亮"
-            style="padding:4px 8px;background:var(--bg-primary,#181825);border:1px solid var(--border-color,#313244);
-                   border-radius:4px;color:var(--text-muted,#6c7086);cursor:pointer;font-size:0.85rem;">
-        ×
-    </button>
+            style="padding:4px 8px;background:var(--bg-primary,#181825);
+                   border:1px solid var(--border-color,#313244);border-radius:4px;
+                   color:var(--text-muted,#6c7086);cursor:pointer;font-size:0.85rem;">×</button>
     <span id="gp-path-result" style="font-size:0.83rem;color:var(--text-muted,#6c7086)"></span>
 </div>
 
@@ -199,90 +169,101 @@
     <div id="graph-page-loading">加载中…</div>
     <div id="graph-page-error" style="display:none"></div>
     <div id="graph-page-stats"></div>
+    <div id="gp-tooltip"></div>
 </div>
-
-<!-- 笔记搜索建议下拉（复用全局补全数据） -->
 <datalist id="gp-note-datalist"></datalist>
 
 <script>
 // ──────────────────────────────────────────────────────────────────────────────
-// 全局知识图谱专页脚本（v1.7.0）
+// 全局知识图谱专页脚本（v1.9.6：Sigma.js 2 WebGL 渲染器）
+// 架构变更：Vis.js → Sigma.js，布局改为 JS Fruchterman-Reingold 动画收敛。
 // ──────────────────────────────────────────────────────────────────────────────
-let gpNetwork = null;       // Vis.js Network 实例
-let gpRawNodes = [];        // 当前节点数组
-let gpRawEdges = [];        // 当前边数组
-let gpMode = 'global';      // 'global' | 'note'
-let gpAllTitles = [];       // 全部笔记标题列表（用于自动补全）
 
-// 标签颜色调色板（与 graph.js 一致）
+// ── 全局状态 ──────────────────────────────────────────────────────────────────
+let gpRenderer    = null;   // Sigma 渲染器实例
+let gpGraph       = null;   // Graphology Graph 实例
+let gpNodeData    = [];     // 原始节点数组（含 _tags, _mtime, _pagerank, _color）
+let gpEdgeData    = [];     // 原始边数组（含 from, to, weight）
+let gpNodeMap     = new Map(); // id → gpNodeData 索引（O(1) 查询）
+let gpMode        = 'global';
+let gpAllTitles   = [];
+let gpHoveredNode = null;   // 当前悬停节点 ID
+
+// 视觉模式标记
+let gpPathActive  = false;
+
+// 布局动画状态（Fruchterman-Reingold）
+let gpLayoutRaf   = null;
+let gpLayoutIter  = 0;
+let gpLayoutTotal = 0;
+let gpLIds        = [];     // 节点 ID 数组（与坐标同序）
+let gpLx          = [];     // X 坐标
+let gpLy          = [];     // Y 坐标
+let gpLEdges      = [];     // 布局边 [[i, j]]
+let gpLK          = 100;
+let gpLTemp       = 200;
+const GP_COOLING  = 0.88;
+const GP_LAYOUT_THRESHOLD = 100; // 节点数 > 此值时减少迭代
+
+// 颜色调色板（与旧版一致）
 const GP_PALETTE = [
     '#7aa2f7','#9ece6a','#ff9e64','#bb9af7',
     '#2ac3de','#e0af68','#f7768e','#73daca',
     '#41a6b5','#a9b1d6','#7dcfff','#b4f9f8',
 ];
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 初始化
-// ──────────────────────────────────────────────────────────────────────────────
+// ── 初始化 ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-    // v1.9.4：检查 URL 中的 since/until 参数（来自时间线页面跳转）
-    const _params = new URLSearchParams(location.search);
-    const _since  = _params.get('since');  // "YYYY-MM-DD"
-    const _until  = _params.get('until');  // "YYYY-MM-DD"
+    // URL 参数：since/until（来自时间线页面）
+    const sp = new URLSearchParams(location.search);
+    const _since = sp.get('since');
+    const _until = sp.get('until');
     if (_since || _until) {
-        // 设置为全局模式
         gpMode = 'global';
         document.getElementById('gp-mode-global').classList.add('active');
         document.getElementById('gp-mode-note').classList.remove('active');
-        // 预留提示栏（稍后由 gpApplyTimeFilter 填充统计数字）
         const hint = document.createElement('div');
         hint.id = 'gp-time-hint';
-        hint.style.cssText = 'font-size:0.8rem;color:var(--text-muted,#6c7086);padding:4px 12px;background:var(--bg-secondary,#1e1e2e);border-bottom:1px solid var(--border-color,#313244);';
+        hint.style.cssText = 'font-size:0.8rem;color:var(--text-muted,#6c7086);padding:4px 12px;' +
+            'background:var(--bg-secondary,#1e1e2e);border-bottom:1px solid var(--border-color,#313244);';
         hint.textContent = `🕐 时间过滤：${_since || '…'} 至 ${_until || '…'}（加载中…）`;
         document.querySelector('.markdown-body')?.prepend(hint);
     }
-    // 初始加载全局图谱（加载完毕后再执行时间过滤）
+
     await gpLoad();
-    // 时间线跳转：用 /api/timeline 数据（frontmatter date）做准确的月份过滤
-    if (_since || _until) {
-        gpApplyTimeFilter(_since, _until);
-    }
-    // 预取标题列表用于自动补全
+
+    if (_since || _until) gpApplyTimeFilter(_since, _until);
+
     gpFetchTitles();
+
     // URL 参数：?note=xxx&depth=2 直接打开笔记子图
-    const params = new URLSearchParams(location.search);
-    if (params.get('note')) {
-        document.getElementById('gp-note-input').value = params.get('note');
-        if (params.get('depth')) document.getElementById('gp-depth').value = params.get('depth');
+    if (sp.get('note')) {
+        document.getElementById('gp-note-input').value = sp.get('note');
+        if (sp.get('depth')) document.getElementById('gp-depth').value = sp.get('depth');
         gpSetMode('note');
     }
 });
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 模式切换
-// ──────────────────────────────────────────────────────────────────────────────
+// ── 模式切换 ─────────────────────────────────────────────────────────────────
 function gpSetMode(mode) {
     gpMode = mode;
     document.getElementById('gp-mode-global').classList.toggle('active', mode === 'global');
     document.getElementById('gp-mode-note').classList.toggle('active', mode === 'note');
-    // 笔记子图控件仅在 note 模式下激活
-    const noteGroup = document.getElementById('gp-note-group');
+    const noteGroup   = document.getElementById('gp-note-group');
     const globalGroup = document.getElementById('gp-global-group');
-    noteGroup.style.opacity = mode === 'note' ? '1' : '0.4';
-    noteGroup.style.pointerEvents = mode === 'note' ? '' : 'none';
-    globalGroup.style.opacity = mode === 'global' ? '1' : '0.4';
+    noteGroup.style.opacity      = mode === 'note'   ? '1' : '0.4';
+    noteGroup.style.pointerEvents = mode === 'note'  ? '' : 'none';
+    globalGroup.style.opacity    = mode === 'global' ? '1' : '0.4';
     globalGroup.style.pointerEvents = mode === 'global' ? '' : 'none';
     gpLoad();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 数据加载
-// ──────────────────────────────────────────────────────────────────────────────
-// v1.8.0：渐进式加载阈值（超过此节点数时启用两阶段加载）
+// ── 数据加载 ─────────────────────────────────────────────────────────────────
 const GP_PROGRESSIVE_THRESHOLD = 800;
 
 async function gpLoad() {
     gpShowLoading();
+    gpStopLayout();
     try {
         if (gpMode !== 'global') {
             const noteTitle = document.getElementById('gp-note-input').value.trim();
@@ -296,25 +277,25 @@ async function gpLoad() {
 
         const hide = document.getElementById('gp-hide-isolated').checked;
         if (hide) {
-            // 用户主动隐藏孤立节点 → 单次加载
             const resp = await fetch('/api/graph/global?hide_isolated=true');
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             gpRender(await resp.json());
             return;
         }
 
-        // v1.8.0 渐进式加载（与 graph.js 逻辑一致）
+        // 渐进式加载：先渲染有连接的节点，再追加孤立节点
         const phase1 = await fetch('/api/graph/global?hide_isolated=true');
         if (!phase1.ok) throw new Error(`HTTP ${phase1.status}`);
         const phase1Data = await phase1.json();
         gpRender(phase1Data);
 
-        if ((phase1Data.nodes?.length ?? 0) <= GP_PROGRESSIVE_THRESHOLD) {
-            // 节点不多，立刻追加完整数据
+        const n1 = phase1Data.nodes?.length ?? 0;
+        if (n1 <= GP_PROGRESSIVE_THRESHOLD) {
+            // 节点不多：立即追加完整数据
             const full = await fetch('/api/graph/global?hide_isolated=false');
             if (!full.ok) return;
             const fullData = await full.json();
-            if ((fullData.nodes?.length ?? 0) > (phase1Data.nodes?.length ?? 0)) gpRender(fullData);
+            if ((fullData.nodes?.length ?? 0) > n1) gpRender(fullData);
             return;
         }
 
@@ -324,133 +305,258 @@ async function gpLoad() {
                 const full = await fetch('/api/graph/global?hide_isolated=false');
                 if (!full.ok) return;
                 const fullData = await full.json();
-                const isolated = (fullData.nodes || []).filter(n =>
-                    !(phase1Data.nodes || []).some(e => e.id === n.id)
-                );
-                if (isolated.length === 0 || !gpNetwork) return;
-                const newNodes = isolated.map(n => ({
-                    id: n.id, label: n.label, title: n.label,
-                    color: { background: '#6b7280', border: '#9ca3af' },
-                    font: { color: '#cdd6f4', size: 12 }, shape: 'dot', size: 8,
-                    _tags: n.tags || [],
-                }));
-                gpNetwork.body.data.nodes.add(newNodes);
-                gpRawNodes = gpRawNodes.concat(newNodes);
+                const existIds = new Set(gpNodeData.map(n => n.id));
+                const isolated = (fullData.nodes || []).filter(n => !existIds.has(n.id));
+                if (!isolated.length || !gpRenderer) return;
+                isolated.forEach(n => {
+                    const deg    = 0;
+                    const sz     = gpNodeSize(deg, n.pagerank || 0);
+                    const color  = '#6b7280';
+                    const angle  = Math.random() * Math.PI * 2;
+                    const radius = 2000 + Math.random() * 1000;
+                    gpGraph.addNode(n.id, {
+                        x: radius * Math.cos(angle), y: radius * Math.sin(angle),
+                        size: sz, color, label: n.label,
+                    });
+                    gpNodeData.push({ id: n.id, label: n.label, _tags: n.tags || [],
+                        _mtime: n.mtime || 0, _pagerank: n.pagerank || 0, _color: color });
+                    gpNodeMap.set(n.id, gpNodeData.length - 1);
+                });
+                gpRenderer.refresh();
                 document.getElementById('graph-page-stats').textContent =
-                    `${fullData.nodes.length} 个节点  ${fullData.edges.length} 条边`;
+                    `${gpGraph.order} 个节点  ${gpGraph.size} 条边`;
             } catch(_) {}
-        }, 500);
+        }, 600);
     } catch(e) {
         gpShowError('加载失败: ' + e.message);
     }
 }
 
-async function gpFetchTitles() {
-    try {
-        const resp = await fetch('/api/titles');
-        if (!resp.ok) return;
-        const data = await resp.json();
-        gpAllTitles = (data.note_items || []).map(n => n.title);
-        // 填入 datalist
-        const dl = document.getElementById('gp-note-datalist');
-        dl.innerHTML = gpAllTitles.map(t => `<option value="${t.replace(/"/g,'&quot;')}">`).join('');
-        document.getElementById('gp-note-input').setAttribute('list', 'gp-note-datalist');
-    } catch(_) {}
+// ── 渲染（核心）──────────────────────────────────────────────────────────────
+/**
+ * 根据入度和 pagerank 计算节点显示半径
+ */
+function gpNodeSize(inDeg, pagerank) {
+    return 5 + Math.min(inDeg * 1.5, 12) + pagerank * 6;
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 渲染
-// ──────────────────────────────────────────────────────────────────────────────
+/**
+ * 将 API 返回的图谱数据渲染到 Sigma.js 画布。
+ * 步骤：构建 Graphology 图 → 圆形初始布局 → 创建 Sigma 渲染器 → 启动 F-R 动画。
+ */
 function gpRender(data) {
-    if (typeof vis === 'undefined') {
-        gpShowError('可视化库 vis.js 未加载');
+    if (typeof Sigma === 'undefined') {
+        gpShowError('可视化库 Sigma.js 未加载');
         return;
     }
 
-    if (gpNetwork) { gpNetwork.destroy(); gpNetwork = null; }
+    gpStopLayout();
+
+    // 销毁旧渲染器
+    if (gpRenderer) { gpRenderer.kill(); gpRenderer = null; }
+
+    // 构建 Graphology 有向图
+    gpGraph    = new Graph({ type: 'directed', multi: false, allowSelfLoops: false });
+    gpNodeData = [];
+    gpEdgeData = [];
+    gpNodeMap  = new Map();
 
     // 计算入度（用于节点大小）
-    const inDegree = {};
-    data.edges.forEach(e => { inDegree[e.to] = (inDegree[e.to] || 0) + 1; });
+    const inDeg = {};
+    (data.edges || []).forEach(e => { inDeg[e.to] = (inDeg[e.to] || 0) + 1; });
 
-    // 是否开启聚类着色
+    // 聚类着色
     const clusterColor = document.getElementById('gp-cluster-color').checked;
-    const tagColorMap = clusterColor ? gpBuildTagColorMap(data.nodes) : {};
+    const tagColorMap  = clusterColor ? gpBuildTagColorMap(data.nodes || []) : {};
 
-    gpRawNodes = data.nodes.map(node => {
-        const deg = inDegree[node.id] || 0;
-        const sz = 10 + Math.min(deg * 3, 25);
-        const color = clusterColor
-            ? gpNodeColor(node, tagColorMap)
-            : { background: '#6a5acd', border: '#8b7ae0' };
-        return {
-            id: node.id,
+    // 圆形初始布局
+    const n     = (data.nodes || []).length;
+    const initR = Math.max(500, 300 * Math.sqrt(n));
+
+    ;(data.nodes || []).forEach((node, i) => {
+        const deg      = inDeg[node.id] || 0;
+        const sz       = gpNodeSize(deg, node.pagerank || 0);
+        const rawColor = clusterColor ? gpNodeColorStr(node, tagColorMap) : '#6a5acd';
+        const angle    = (2 * Math.PI * i) / Math.max(1, n);
+
+        gpGraph.addNode(node.id, {
+            x:     initR * Math.cos(angle),
+            y:     initR * Math.sin(angle),
+            size:  sz,
+            color: rawColor,
             label: node.label,
-            title: node.label + (node.tags?.length ? '\n标签: ' + node.tags.join(', ') : ''),
-            color,
-            font: { color: '#cdd6f4', size: 13 },
-            shape: 'dot',
-            size:      sz,
+        });
+
+        gpNodeData.push({
+            id:        node.id,
+            label:     node.label,
             _tags:     node.tags     || [],
-            _mtime:    node.mtime    || 0,       // v1.8.4：热力图使用
-            _pagerank: node.pagerank || 0,        // v1.9.0：影响力模式使用
-        };
+            _mtime:    node.mtime    || 0,
+            _pagerank: node.pagerank || 0,
+            _color:    rawColor,
+        });
+        gpNodeMap.set(node.id, gpNodeData.length - 1);
     });
 
-    gpRawEdges = data.edges.map(e => ({
-        from:   e.from,
-        to:     e.to,
-        arrows: 'to',
-        color:  { color: '#6b7280', highlight: '#7aa2f7' },
-        // v1.9.0：边宽度映射边权重（双向互引更粗）
-        width:  (e.weight || 1) === 2 ? 3.0 : 1.5,
-        smooth: { type: 'continuous' },
-    }));
+    ;(data.edges || []).forEach(e => {
+        if (!gpGraph.hasNode(e.from) || !gpGraph.hasNode(e.to)) return;
+        const edgeKey = `${e.from}__${e.to}`;
+        if (gpGraph.hasEdge(edgeKey)) return;
+        const w = e.weight || 1;
+        gpGraph.addEdgeWithKey(edgeKey, e.from, e.to, {
+            color: w === 2 ? '#7aa2f780' : '#6b728040',
+            size:  w === 2 ? 2.0 : 1.0,
+        });
+        gpEdgeData.push({ from: e.from, to: e.to, weight: w });
+    });
 
+    // 创建 Sigma 渲染器
     const container = document.getElementById('graph-page-vis');
-    const graphData = {
-        nodes: new vis.DataSet(gpRawNodes),
-        edges: new vis.DataSet(gpRawEdges),
-    };
-    const options = {
-        nodes: { borderWidth: 1.5, borderWidthSelected: 2.5, shadow: true },
-        edges: { shadow: false },
-        physics: {
-            enabled: true,
-            solver: 'forceAtlas2Based',
-            forceAtlas2Based: {
-                gravitationalConstant: -50,
-                centralGravity: 0.005,
-                springLength: 100,
-                springConstant: 0.08,
-            },
-            stabilization: { iterations: 150, updateInterval: 25 },
-        },
-        interaction: { hover: true, tooltipDelay: 200, navigationButtons: false },
-    };
-    gpNetwork = new vis.Network(container, graphData, options);
+    gpRenderer = new Sigma(gpGraph, container, {
+        renderEdgeLabels:  false,
+        labelColor:        { color: '#cdd6f4' },
+        labelFont:         'sans-serif',
+        labelSize:         11,
+        labelWeight:       '400',
+        labelDensity:      0.15,   // 低密度标签（性能）
+        labelGridCellSize: 120,
+        minCameraRatio:    0.005,
+        maxCameraRatio:    30,
+        hideEdgesOnMove:   true,   // 移动时隐藏边（大图性能优化）
+        hideLabelsOnMove:  true,
+    });
 
-    // 节点单击跳转
-    gpNetwork.on('click', params => {
-        if (params.nodes.length === 1) {
-            const nodeId = params.nodes[0];
-            // nodeId 是相对路径（如 "folder/note.md"）
-            window.location.href = '/doc/' + nodeId;
+    // 节点点击 → 跳转笔记
+    gpRenderer.on('clickNode', ({ node }) => {
+        window.location.href = '/doc/' + encodeURIComponent(node);
+    });
+
+    // 节点悬停 → 显示 Tooltip
+    gpRenderer.on('enterNode', ({ node, event }) => {
+        gpHoveredNode = node;
+        const idx = gpNodeMap.get(node);
+        const nd  = idx !== undefined ? gpNodeData[idx] : null;
+        if (nd) {
+            const tt = document.getElementById('gp-tooltip');
+            tt.textContent = nd.label;
+            tt.style.display = 'block';
+            tt.style.left = (event.original.clientX + 12) + 'px';
+            tt.style.top  = (event.original.clientY - 10) + 'px';
         }
+    });
+    gpRenderer.on('leaveNode', () => {
+        gpHoveredNode = null;
+        document.getElementById('gp-tooltip').style.display = 'none';
+    });
+    // 拖动时隐藏 tooltip
+    gpRenderer.on('moveBody', () => {
+        document.getElementById('gp-tooltip').style.display = 'none';
     });
 
     gpHideLoading();
     document.getElementById('graph-page-stats').textContent =
-        `${data.nodes.length} 个节点  ${data.edges.length} 条边`;
+        `${n} 个节点  ${gpEdgeData.length} 条边`;
 
-    // 时间过滤由 DOMContentLoaded 在 gpLoad() 完成后调用 gpApplyTimeFilter()，此处不再处理
+    // 启动 F-R 布局动画
+    gpStartLayout(n);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 聚类着色
-// ──────────────────────────────────────────────────────────────────────────────
+// ── Fruchterman-Reingold 布局动画 ─────────────────────────────────────────────
+/**
+ * 初始化并启动力导向布局动画。节点从圆形出发，逐帧收敛到自然聚类。
+ */
+function gpStartLayout(n) {
+    gpLayoutIter  = 0;
+    gpLayoutTotal = n > GP_LAYOUT_THRESHOLD ? 40 : 80;
+
+    // 从 graphology 取当前坐标作初始值
+    gpLIds = gpGraph.nodes();
+    gpLx   = gpLIds.map(id => gpGraph.getNodeAttribute(id, 'x'));
+    gpLy   = gpLIds.map(id => gpGraph.getNodeAttribute(id, 'y'));
+
+    // 节点 ID → 索引映射（布局用）
+    const idxMap = new Map(gpLIds.map((id, i) => [id, i]));
+
+    // 收集布局边
+    gpLEdges = [];
+    gpGraph.forEachEdge((edge, attrs, src, tgt) => {
+        const i = idxMap.get(src), j = idxMap.get(tgt);
+        if (i !== undefined && j !== undefined) gpLEdges.push([i, j]);
+    });
+
+    gpLK    = Math.sqrt(4_000_000 / Math.max(1, n));
+    gpLTemp = gpLK * 2;
+
+    const stepsPerFrame = Math.max(1, Math.ceil(gpLayoutTotal / 40));
+
+    function layoutFrame() {
+        if (gpLayoutIter >= gpLayoutTotal) {
+            document.getElementById('graph-page-stats').textContent =
+                `${gpGraph.order} 个节点  ${gpGraph.size} 条边`;
+            return;
+        }
+        for (let s = 0; s < stepsPerFrame && gpLayoutIter < gpLayoutTotal; s++, gpLayoutIter++) {
+            gpFRStep();
+        }
+        // 将新坐标写回 graphology，触发 Sigma 重绘
+        const len = gpLIds.length;
+        for (let i = 0; i < len; i++) {
+            gpGraph.setNodeAttribute(gpLIds[i], 'x', gpLx[i]);
+            gpGraph.setNodeAttribute(gpLIds[i], 'y', gpLy[i]);
+        }
+        gpRenderer?.refresh();
+        gpLayoutRaf = requestAnimationFrame(layoutFrame);
+    }
+    gpLayoutRaf = requestAnimationFrame(layoutFrame);
+}
+
+/** 停止布局动画 */
+function gpStopLayout() {
+    if (gpLayoutRaf) { cancelAnimationFrame(gpLayoutRaf); gpLayoutRaf = null; }
+}
+
+/** 执行一轮 F-R 排斥 + 吸引 + 位移 */
+function gpFRStep() {
+    const n   = gpLIds.length;
+    const kSq = gpLK * gpLK;
+    const fx  = new Float64Array(n);
+    const fy  = new Float64Array(n);
+
+    // 排斥力（所有节点对）
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const dx = gpLx[i] - gpLx[j];
+            const dy = gpLy[i] - gpLy[j];
+            const d  = Math.sqrt(dx * dx + dy * dy) || 0.01;
+            const r  = kSq / d;
+            const ux = dx / d, uy = dy / d;
+            fx[i] += r * ux; fy[i] += r * uy;
+            fx[j] -= r * ux; fy[j] -= r * uy;
+        }
+    }
+    // 吸引力（边）
+    for (const [i, j] of gpLEdges) {
+        const dx = gpLx[j] - gpLx[i];
+        const dy = gpLy[j] - gpLy[i];
+        const d  = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const a  = d * d / gpLK;
+        const ux = dx / d, uy = dy / d;
+        fx[i] += a * ux; fy[i] += a * uy;
+        fx[j] -= a * ux; fy[j] -= a * uy;
+    }
+    // 位移（温度限制）
+    for (let i = 0; i < n; i++) {
+        const d   = Math.sqrt(fx[i] * fx[i] + fy[i] * fy[i]) || 0.01;
+        const mov = Math.min(d, gpLTemp);
+        gpLx[i] += fx[i] / d * mov;
+        gpLy[i] += fy[i] / d * mov;
+    }
+    gpLTemp *= GP_COOLING;
+}
+
+// ── 聚类着色 ──────────────────────────────────────────────────────────────────
+/** 统计节点集合中各标签频率，取出现最多的前 12 个，映射到调色板 */
 function gpBuildTagColorMap(nodes) {
-    // 统计各标签出现次数，取出现最多的前 12 个
     const freq = {};
     nodes.forEach(n => (n.tags || []).forEach(t => { freq[t] = (freq[t] || 0) + 1; }));
     const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12);
@@ -459,182 +565,141 @@ function gpBuildTagColorMap(nodes) {
     return map;
 }
 
-function gpNodeColor(node, tagColorMap) {
-    const tags = node.tags || [];
-    // 找到节点最高频标签对应的颜色
-    for (const tag of tags) {
-        if (tagColorMap[tag]) {
-            return { background: tagColorMap[tag], border: tagColorMap[tag] };
-        }
+/** 根据节点第一个匹配标签返回颜色字符串 */
+function gpNodeColorStr(node, tagColorMap) {
+    for (const tag of (node.tags || [])) {
+        if (tagColorMap[tag]) return tagColorMap[tag];
     }
-    return { background: '#6b7280', border: '#9ca3af' };
+    return '#6b7280';
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 聚类着色切换（不重新请求数据，直接更新颜色）
-// ──────────────────────────────────────────────────────────────────────────────
+/** 切换聚类着色（不重新拉取数据，直接更新颜色） */
 function gpApplyCluster() {
-    if (!gpNetwork) return;
+    if (!gpRenderer) return;
     const clusterColor = document.getElementById('gp-cluster-color').checked;
-    const tagColorMap = clusterColor ? gpBuildTagColorMap(gpRawNodes) : {};
-    const updated = gpRawNodes.map(n => ({
-        id: n.id,
-        color: clusterColor
-            ? gpNodeColor(n, tagColorMap)
-            : { background: '#6a5acd', border: '#8b7ae0' },
-    }));
-    gpNetwork.body.data.nodes.update(updated);
+    const tagColorMap  = clusterColor ? gpBuildTagColorMap(gpNodeData) : {};
+    gpNodeData.forEach(nd => {
+        const color = clusterColor
+            ? gpNodeColorStr({ tags: nd._tags }, tagColorMap)
+            : '#6a5acd';
+        nd._color = color;
+        gpGraph.setNodeAttribute(nd.id, 'color', color);
+    });
+    gpRenderer.refresh();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// v1.8.4：热力图模式（节点颜色 = 修改时间新旧，蓝→绿→黄→红）
-// ──────────────────────────────────────────────────────────────────────────────
-
-/** 根据 0.0–1.0 的热度值返回颜色（冷蓝 → 热红） */
+// ── 热力图模式（v1.8.4）─────────────────────────────────────────────────────
+/** 将 0–1 热度映射为冷蓝→热红渐变色 */
 function gpHeatColor(ratio) {
     const r = Math.round(ratio * 255);
     const b = Math.round((1 - ratio) * 255);
     return `rgb(${r},80,${b})`;
 }
 
-/** 热力图模式：节点颜色映射 mtime 相对新旧 */
+/** 热力图：节点颜色 = mtime 新旧（最新=红，最旧=蓝） */
 function gpApplyHeatmap() {
-    if (!gpNetwork) return;
+    if (!gpRenderer) return;
     const enabled = document.getElementById('gp-heatmap').checked;
-
     if (enabled) {
-        // 计算 mtime 的最小/最大值用于归一化
-        const mtimes = gpRawNodes.map(n => n._mtime || 0).filter(m => m > 0);
-        if (mtimes.length === 0) return;
-        const minMtime = Math.min(...mtimes);
-        const maxMtime = Math.max(...mtimes);
-        const range = maxMtime - minMtime || 1;
-
-        const updated = gpRawNodes.map(n => {
-            const ratio = n._mtime > 0 ? (n._mtime - minMtime) / range : 0;
-            const color = gpHeatColor(ratio);
-            return { id: n.id, color: { background: color, border: color } };
+        const mtimes = gpNodeData.map(n => n._mtime).filter(m => m > 0);
+        if (!mtimes.length) return;
+        const minT = Math.min(...mtimes), maxT = Math.max(...mtimes);
+        const range = maxT - minT || 1;
+        gpNodeData.forEach(nd => {
+            const ratio = nd._mtime > 0 ? (nd._mtime - minT) / range : 0;
+            gpGraph.setNodeAttribute(nd.id, 'color', gpHeatColor(ratio));
         });
-        gpNetwork.body.data.nodes.update(updated);
     } else {
-        // 恢复正常着色
         gpApplyCluster();
     }
+    gpRenderer.refresh();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// v1.9.0：影响力模式（节点尺寸 + 颜色 = PageRank 分数）
-// ──────────────────────────────────────────────────────────────────────────────
-
-/** 影响力模式：节点尺寸映射 pagerank 分数（10–40px），颜色深蓝→金色 */
+// ── 影响力模式（v1.9.0）─────────────────────────────────────────────────────
+/** 影响力模式：节点大小 + 颜色映射 PageRank 分数 */
 function gpApplyInfluence() {
-    if (!gpNetwork) return;
+    if (!gpRenderer) return;
     const enabled = document.getElementById('gp-influence').checked;
-
     if (enabled) {
-        // 获取最大 pagerank，防止全零（例如局部图谱）
-        const maxPR = Math.max(...gpRawNodes.map(n => n._pagerank || 0), 0.001);
-
-        const updated = gpRawNodes.map(n => {
-            const ratio = (n._pagerank || 0) / maxPR;           // 0.0–1.0
-            const size  = 10 + Math.round(ratio * 30);          // 10–40px
-            // 颜色：低影响力=冷蓝 #4a5568，高影响力=金色 #f6ad55
-            const r = Math.round(74  + ratio * (246 - 74));
-            const g = Math.round(85  + ratio * (173 - 85));
-            const b = Math.round(104 + ratio * (85  - 104));
-            const color = `rgb(${r},${g},${b})`;
-            // Tooltip 显示影响力分数和排名
-            const scoreText = (n._pagerank * 100).toFixed(1);
-            return {
-                id:    n.id,
-                size,
-                color: { background: color, border: color },
-                title: `${n.label}\n影响力分数：${scoreText}%`,
-            };
+        const maxPR = Math.max(...gpNodeData.map(n => n._pagerank), 0.001);
+        gpNodeData.forEach(nd => {
+            const ratio = nd._pagerank / maxPR;
+            const sz    = 8 + Math.round(ratio * 22);
+            const r_    = Math.round(74  + ratio * 172);
+            const g_    = Math.round(85  + ratio * 88);
+            const b_    = Math.round(104 + ratio * (-19));
+            gpGraph.setNodeAttribute(nd.id, 'size',  sz);
+            gpGraph.setNodeAttribute(nd.id, 'color', `rgb(${r_},${g_},${b_})`);
         });
-        gpNetwork.body.data.nodes.update(updated);
     } else {
-        // 恢复正常着色（复用 gpApplyCluster）
-        gpApplyCluster();
-        // 恢复默认尺寸
-        const restored = gpRawNodes.map(n => {
-            const deg = (gpRawEdges.filter(e => e.to === n.id).length);
-            return { id: n.id, size: 10 + Math.min(deg * 3, 25) };
+        // 恢复默认大小和颜色
+        const inDeg = {};
+        gpEdgeData.forEach(e => { inDeg[e.to] = (inDeg[e.to] || 0) + 1; });
+        gpNodeData.forEach(nd => {
+            const deg = inDeg[nd.id] || 0;
+            gpGraph.setNodeAttribute(nd.id, 'size',  gpNodeSize(deg, nd._pagerank));
+            gpGraph.setNodeAttribute(nd.id, 'color', nd._color);
         });
-        gpNetwork.body.data.nodes.update(restored);
+        gpApplyCluster();
     }
+    gpRenderer.refresh();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// v1.9.2：图谱路径查找
-// ──────────────────────────────────────────────────────────────────────────────
+// ── 路径查找（v1.9.2）───────────────────────────────────────────────────────
+let _gpPathActive = false;
 
-let _gpPathActive = false; // 是否正在显示路径高亮
-
-/** 切换路径查找面板显示/隐藏 */
 function gpTogglePathPanel() {
     const panel = document.getElementById('gp-path-panel');
     if (!panel) return;
     const visible = panel.style.display !== 'none';
     panel.style.display = visible ? 'none' : 'flex';
-    if (visible) gpClearPath(); // 关闭时清除高亮
+    if (visible) gpClearPath();
 }
 
-/** 调用 /api/graph/path 并高亮路径 */
+/** 调用 /api/graph/path 并高亮路径节点/边 */
 async function gpFindPath() {
-    const from = document.getElementById('gp-path-from').value.trim();
-    const to   = document.getElementById('gp-path-to').value.trim();
+    const from   = document.getElementById('gp-path-from').value.trim();
+    const to     = document.getElementById('gp-path-to').value.trim();
     const result = document.getElementById('gp-path-result');
-
-    if (!from || !to) { result.textContent = '请填写起点和终点'; return; }
-    if (!gpNetwork)    { result.textContent = '请先加载图谱'; return; }
-
+    if (!from || !to)    { result.textContent = '请填写起点和终点'; return; }
+    if (!gpRenderer)     { result.textContent = '请先加载图谱';     return; }
     result.textContent = '查找中…';
-
     try {
-        const resp = await fetch(`/api/graph/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+        const resp = await fetch(
+            `/api/graph/path?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
+        if (data.message) { result.textContent = data.message; gpClearPath(); return; }
 
-        if (data.message) {
-            result.textContent = data.message;
-            gpClearPath();
-            return;
-        }
-
-        const hops      = data.hops || 0;
         const pathIds   = new Set((data.nodes || []).map(n => n.id));
         const pathEdges = new Set((data.edges  || []).map(e => `${e.from}|${e.to}`));
 
-        // 高亮路径节点（金色边框），半透明非路径节点
-        const nodeUpdates = gpRawNodes.map(n => ({
-            id:    n.id,
-            color: pathIds.has(n.id)
-                ? { background: '#f6ad55', border: '#ed8936', borderWidth: 3 }
-                : { background: '#374151', border: '#4b5563', opacity: 0.3 },
-            font:  { color: pathIds.has(n.id) ? '#1a202c' : '#6b7280' },
-        }));
-        gpNetwork.body.data.nodes.update(nodeUpdates);
-
-        // 高亮路径边：通过 vis DataSet 查询所有边并更新
-        const allEdges = gpNetwork.body.data.edges.get();
-        const edgeUpdates = allEdges.map(e => ({
-            id:    e.id,
-            color: pathEdges.has(`${e.from}|${e.to}`)
-                ? { color: '#f6ad55', highlight: '#ed8936' }
-                : { color: 'rgba(107,114,128,0.2)' },
-            width: pathEdges.has(`${e.from}|${e.to}`) ? 3 : 1,
-        }));
-        gpNetwork.body.data.edges.update(edgeUpdates);
+        // 高亮路径节点（金色），淡化非路径节点
+        gpNodeData.forEach(nd => {
+            if (pathIds.has(nd.id)) {
+                gpGraph.setNodeAttribute(nd.id, 'color', '#f6ad55');
+                gpGraph.setNodeAttribute(nd.id, 'highlighted', true);
+            } else {
+                gpGraph.setNodeAttribute(nd.id, 'color', '#2d3748');
+            }
+        });
+        // 高亮路径边
+        gpGraph.forEachEdge((edge, attrs, src, tgt) => {
+            const key = `${src}|${tgt}`;
+            gpGraph.setEdgeAttribute(edge, 'color',
+                pathEdges.has(key) ? '#f6ad55' : '#2d374820');
+            gpGraph.setEdgeAttribute(edge, 'size',
+                pathEdges.has(key) ? 3 : 0.5);
+        });
 
         _gpPathActive = true;
+        gpRenderer.refresh();
 
-        // 路径节点列表
         const nodeList = (data.nodes || [])
-            .map(n => `<a href="/doc/${encodeURIComponent(n.id)}" style="color:#f6ad55;text-decoration:none">${esc(n.label)}</a>`)
+            .map(n => `<a href="/doc/${encodeURIComponent(n.id)}"
+                style="color:#f6ad55;text-decoration:none">${esc(n.label)}</a>`)
             .join(' → ');
-        result.innerHTML = `${hops} 跳：${nodeList}`;
-
+        result.innerHTML = `${data.hops || 0} 跳：${nodeList}`;
     } catch(e) {
         result.textContent = '查找失败: ' + e.message;
     }
@@ -642,55 +707,113 @@ async function gpFindPath() {
 
 /** 清除路径高亮，恢复正常着色 */
 function gpClearPath() {
-    if (!gpNetwork || !_gpPathActive) return;
+    if (!gpRenderer || !_gpPathActive) return;
     _gpPathActive = false;
     document.getElementById('gp-path-result').textContent = '';
-    // 恢复节点着色（复用 gpApplyCluster）
     gpApplyCluster();
-    // 恢复边宽度（通过 vis DataSet 的实际 id）
-    const allEdgesNow = gpNetwork.body.data.edges.get();
-    const edgeRestore = allEdgesNow.map(e => ({
-        id:    e.id,
-        color: { color: '#6b7280', highlight: '#7aa2f7' },
-        width: (e.width || 1.5), // 保留原始宽度
-    }));
-    gpNetwork.body.data.edges.update(edgeRestore);
+    gpGraph.forEachEdge((edge, attrs, src, tgt) => {
+        const w = gpEdgeData.find(e => e.from === src && e.to === tgt)?.weight || 1;
+        gpGraph.setEdgeAttribute(edge, 'color', w === 2 ? '#7aa2f780' : '#6b728040');
+        gpGraph.setEdgeAttribute(edge, 'size',  w === 2 ? 2.0 : 1.0);
+    });
+    gpRenderer.refresh();
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 高亮节点
-// ──────────────────────────────────────────────────────────────────────────────
+// ── 搜索高亮 ─────────────────────────────────────────────────────────────────
 function gpHighlight() {
-    if (!gpNetwork) return;
+    if (!gpRenderer) return;
     const q = document.getElementById('gp-highlight').value.trim().toLowerCase();
-    if (!q) {
-        // 清空高亮：恢复全部节点为正常颜色
-        gpApplyCluster();
-        gpNetwork.selectNodes([]);
-        return;
+    if (!q) { gpApplyCluster(); return; }
+
+    gpNodeData.forEach(nd => {
+        const matched = nd.label.toLowerCase().includes(q);
+        gpGraph.setNodeAttribute(nd.id, 'color', matched ? '#f6c90e' : '#374151');
+        gpGraph.setNodeAttribute(nd.id, 'highlighted', matched);
+    });
+    gpRenderer.refresh();
+
+    // 定位到第一个匹配节点
+    const first = gpNodeData.find(nd => nd.label.toLowerCase().includes(q));
+    if (first) {
+        const x = gpGraph.getNodeAttribute(first.id, 'x');
+        const y = gpGraph.getNodeAttribute(first.id, 'y');
+        gpRenderer.getCamera().animate({ x, y, ratio: 0.5 }, { duration: 400 });
     }
-    const matched = gpRawNodes
-        .filter(n => n.label.toLowerCase().includes(q))
-        .map(n => n.id);
-    gpNetwork.selectNodes(matched);
-    if (matched.length > 0) gpNetwork.focus(matched[0], { scale: 1.2, animation: true });
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// 笔记输入事件
-// ──────────────────────────────────────────────────────────────────────────────
+// ── 时间线跳转时间过滤（v1.9.4）─────────────────────────────────────────────
+/**
+ * 用 /api/timeline 的 frontmatter date 做范围过滤：
+ * 范围内节点加金色边框（用颜色表示），范围外节点淡化。
+ */
+async function gpApplyTimeFilter(since, until) {
+    if (!gpRenderer) return;
+    let inRangePaths = null;
+    try {
+        const resp = await fetch('/api/timeline');
+        if (resp.ok) {
+            const notes = await resp.json();
+            inRangePaths = new Set(
+                notes.filter(n => {
+                    const d = n.date || '';
+                    return (!since || d >= since) && (!until || d <= until);
+                }).map(n => n.path)
+            );
+        }
+    } catch(_) {}
+
+    if (!inRangePaths) {
+        const sinceTs = since ? new Date(since).getTime() / 1000 : 0;
+        const untilTs = until ? (new Date(until).getTime() / 1000 + 86399) : Infinity;
+        inRangePaths = new Set(
+            gpNodeData.filter(n => n._mtime > 0 && n._mtime >= sinceTs && n._mtime <= untilTs)
+                .map(n => n.id)
+        );
+    }
+
+    const inRange  = gpNodeData.filter(n =>  inRangePaths.has(n.id));
+    const outRange = gpNodeData.filter(n => !inRangePaths.has(n.id));
+
+    outRange.forEach(n => gpGraph.setNodeAttribute(n.id, 'color', '#303045'));
+    inRange.forEach(n => {
+        gpGraph.setNodeAttribute(n.id, 'color', '#f6c90e');
+        gpGraph.setNodeAttribute(n.id, 'highlighted', true);
+    });
+    gpRenderer.refresh();
+
+    const hint = document.getElementById('gp-time-hint');
+    if (hint) {
+        hint.textContent = `🕐 时间过滤：${since||'…'} 至 ${until||'…'}` +
+            `（${inRange.length} 篇在范围内，${outRange.length} 篇已淡化）`;
+    }
+}
+
+// ── 自动补全标题列表 ─────────────────────────────────────────────────────────
+async function gpFetchTitles() {
+    try {
+        const resp = await fetch('/api/titles');
+        if (!resp.ok) return;
+        const data = await resp.json();
+        gpAllTitles = (data.note_items || []).map(n => n.title);
+        const dl = document.getElementById('gp-note-datalist');
+        dl.innerHTML = gpAllTitles
+            .map(t => `<option value="${t.replace(/"/g, '&quot;')}">`)
+            .join('');
+        document.getElementById('gp-note-input').setAttribute('list', 'gp-note-datalist');
+    } catch(_) {}
+}
+
+// ── 笔记输入防抖 ─────────────────────────────────────────────────────────────
 let gpNoteDebounce = null;
 function gpOnNoteInput() {
     clearTimeout(gpNoteDebounce);
     gpNoteDebounce = setTimeout(() => { if (gpMode === 'note') gpLoad(); }, 500);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// UI 辅助
-// ──────────────────────────────────────────────────────────────────────────────
+// ── UI 辅助 ──────────────────────────────────────────────────────────────────
 function gpShowLoading() {
     document.getElementById('graph-page-loading').style.display = 'flex';
-    document.getElementById('graph-page-error').style.display = 'none';
+    document.getElementById('graph-page-error').style.display   = 'none';
 }
 function gpHideLoading() {
     document.getElementById('graph-page-loading').style.display = 'none';
@@ -698,71 +821,11 @@ function gpHideLoading() {
 function gpShowError(msg) {
     document.getElementById('graph-page-loading').style.display = 'none';
     const el = document.getElementById('graph-page-error');
-    el.textContent = msg;
+    el.textContent   = msg;
     el.style.display = 'flex';
 }
-
-// ──────────────────────────────────────────────────────────────────────────────
-// v1.9.4：时间线跳转时的月份过滤（从 /api/timeline 获取 frontmatter date）
-// 使用 frontmatter date（而非 fs mtime）确保和时间线页面的分组逻辑一致。
-// ──────────────────────────────────────────────────────────────────────────────
-async function gpApplyTimeFilter(since, until) {
-    if (!gpNetwork) return;
-
-    // 用时间线 API 获取每篇笔记的准确日期（frontmatter date 优先）
-    let inRangePaths = null;
-    try {
-        const resp = await fetch('/api/timeline');
-        if (resp.ok) {
-            const timelineNotes = await resp.json();
-            inRangePaths = new Set(
-                timelineNotes
-                    .filter(n => {
-                        const d = n.date || '';
-                        return (!since || d >= since) && (!until || d <= until);
-                    })
-                    .map(n => n.path)
-            );
-        }
-    } catch(_) {}
-
-    // 若 API 失败，退回到 mtime 比较
-    if (!inRangePaths) {
-        const sinceTs = since ? new Date(since).getTime() / 1000 : 0;
-        const untilTs = until ? (new Date(until).getTime() / 1000 + 86399) : Infinity;
-        inRangePaths = new Set(
-            gpRawNodes
-                .filter(n => n._mtime > 0 && n._mtime >= sinceTs && n._mtime <= untilTs)
-                .map(n => n.id)
-        );
-    }
-
-    const inRange  = gpRawNodes.filter(n =>  inRangePaths.has(n.id));
-    const outRange = gpRawNodes.filter(n => !inRangePaths.has(n.id));
-
-    // 范围外：灰色半透明
-    if (outRange.length > 0) {
-        gpNetwork.body.data.nodes.update(outRange.map(n => ({
-            id:      n.id,
-            color:   { background: '#404055', border: '#505065' },
-            opacity: 0.15,
-            font:    { color: '#555577' },
-        })));
-    }
-    // 范围内：加金色边框突出显示
-    if (inRange.length > 0) {
-        gpNetwork.body.data.nodes.update(inRange.map(n => ({
-            id:          n.id,
-            color:       { ...n.color, border: '#f6c90e' },
-            borderWidth: 2.5,
-        })));
-    }
-
-    // 更新提示栏统计
-    const hint = document.getElementById('gp-time-hint');
-    if (hint) {
-        hint.textContent = `🕐 时间过滤：${since || '…'} 至 ${until || '…'}（${inRange.length} 篇在范围内，${outRange.length} 篇已淡化）`;
-    }
+function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 </script>
 {% endblock %}
