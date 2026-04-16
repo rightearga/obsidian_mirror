@@ -163,7 +163,8 @@ let _kmHovered = null;
 // 布局动画状态
 let _kmLayoutRaf = null;
 let _kmLayoutIter = 0;
-let _kmLayoutEdges = [];  // [[i,j,w], ...]
+let _kmLayoutEdges = [];  // [[i,j,w], ...] 所有相似度边（布局用）
+let _kmDisplayEdges = []; // [[i,j,w], ...] 较强的边（绘制用，jaccard > 0.25）
 let _kmLayoutK = 0;
 let _kmLayoutTemp = 200;
 const KM_COOLING = 0.88;
@@ -242,7 +243,10 @@ document.addEventListener('DOMContentLoaded', async () => {
                 _kmLayoutEdges.push([i, j, inter / union]);
             }
         }
-        _kmLayoutK = Math.sqrt(2000 * 2000 / Math.max(1, n));
+        // 展示用边：只保留 Jaccard > 0.25 的"强"边，避免视觉混乱
+        _kmDisplayEdges = _kmLayoutEdges.filter(([, , w]) => w >= 0.25);
+
+        _kmLayoutK = Math.sqrt(4000 * 4000 / Math.max(1, n));
         _kmLayoutTemp = _kmLayoutK * 2;
         _kmLayoutIter = 0;
 
@@ -380,39 +384,62 @@ function kmRedraw() {
         if (_kmSearchQ && !n.title.toLowerCase().includes(_kmSearchQ)) return false;
         return true;
     });
-
     const filteredSet = new Set(_kmFiltered.map(n => n.id));
 
-    // 绘制节点
+    // ── 绘制相似度边（在节点下层）──────────────────────────────────────────
+    if (_kmDisplayEdges.length > 0 && _kmNodes.length > 0) {
+        ctx.save();
+        ctx.lineWidth = 0.8;
+        for (const [i, j, w] of _kmDisplayEdges) {
+            const ni = _kmNodes[i], nj = _kmNodes[j];
+            if (!ni || !nj) continue;
+            const x1 = ni.x * _kmScale + _kmOx, y1 = ni.y * _kmScale + _kmOy;
+            const x2 = nj.x * _kmScale + _kmOx, y2 = nj.y * _kmScale + _kmOy;
+            // 视口裁剪
+            if (Math.max(x1, x2) < 0 || Math.min(x1, x2) > W) continue;
+            if (Math.max(y1, y2) < 0 || Math.min(y1, y2) > H) continue;
+            // 只有两端都在过滤集合中时才绘制
+            const bothInFilter = filteredSet.has(ni.id) && filteredSet.has(nj.id);
+            const alpha = bothInFilter ? Math.min(0.5, w * 0.8) : 0.06;
+            ctx.strokeStyle = `rgba(130,150,210,${alpha})`;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    // ── 绘制节点 ─────────────────────────────────────────────────────────
     for (const nd of _kmNodes) {
         const sx = nd.x * _kmScale + _kmOx;
         const sy = nd.y * _kmScale + _kmOy;
-        // 视口裁剪（跳过画面外节点）
         if (sx < -20 || sx > W + 20 || sy < -20 || sy > H + 20) continue;
 
         const inFilter = filteredSet.has(nd.id);
         const isHovered = _kmHovered === nd;
-        const baseR = sizeByPR
-            ? 3 + nd.pagerank * 12 * _kmScale
-            : 4 * _kmScale;
-        const r = Math.max(2, Math.min(baseR, 24));
+        const baseR = sizeByPR ? 4 + nd.pagerank * 10 : 5;
+        const r = Math.max(3, Math.min(baseR, 18));
 
         const color = KM_PALETTE[nd.cluster_id % KM_PALETTE.length];
         ctx.beginPath();
         ctx.arc(sx, sy, isHovered ? r + 2 : r, 0, Math.PI * 2);
-        ctx.fillStyle = inFilter ? color : 'rgba(90,90,110,0.35)';
+        ctx.fillStyle = inFilter ? color : 'rgba(80,85,105,0.3)';
         ctx.fill();
+
         if (isHovered) {
             ctx.strokeStyle = '#fff';
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = 2;
             ctx.stroke();
-        }
-
-        // 缩放足够大时显示标签
-        if (_kmScale > 0.6 && inFilter) {
-            ctx.fillStyle = 'rgba(200,200,220,0.85)';
-            ctx.font = `${Math.max(9, Math.min(13, 11 * _kmScale))}px sans-serif`;
-            ctx.fillText(nd.title, sx + r + 2, sy + 4);
+            // 悬停节点显示标签
+            ctx.fillStyle = 'rgba(220,225,240,0.95)';
+            ctx.font = `bold ${Math.max(11, Math.min(14, 12 * _kmScale))}px sans-serif`;
+            ctx.fillText(nd.title, sx + r + 4, sy + 4);
+        } else if (_kmScale > 2.0 && inFilter) {
+            // 极度放大时才显示标签（避免密集文字）
+            ctx.fillStyle = 'rgba(180,185,210,0.75)';
+            ctx.font = `${Math.max(9, 10 * _kmScale)}px sans-serif`;
+            ctx.fillText(nd.title, sx + r + 3, sy + 3);
         }
     }
 }
@@ -488,7 +515,7 @@ function kmHandleHover(e, canvas, tooltip) {
         const nd = _kmNodes[i];
         const sx = nd.x * _kmScale + _kmOx;
         const sy = nd.y * _kmScale + _kmOy;
-        const r  = Math.max(6, 3 + nd.pagerank * 12 * _kmScale);
+        const r  = Math.max(5, (4 + nd.pagerank * 10) * _kmScale);
         const dx = mx - sx, dy = my - sy;
         if (dx * dx + dy * dy <= r * r) { found = nd; break; }
     }
