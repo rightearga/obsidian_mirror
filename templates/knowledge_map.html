@@ -136,6 +136,11 @@
 
 <script>
 // ── 知识地图脚本（v1.9.5）────────────────────────────────────────────────────
+// 布局策略：
+//   1. 按标签聚类分组，各聚类圆形排列 → 立即可见
+//   2. 动画运行 Fruchterman-Reingold 力导向布局（requestAnimationFrame）
+//   3. 如有 WASM 则用 computeKnowledgeMap 覆盖最终坐标（可选加速）
+// ─────────────────────────────────────────────────────────────────────────────
 
 // 颜色调色板（最多 12 个聚类）
 const KM_PALETTE = [
@@ -144,99 +149,188 @@ const KM_PALETTE = [
     '#41a6b5','#a9b1d6','#7dcfff','#b4f9f8',
 ];
 
-let _kmNodes      = [];   // 布局后节点：{id, x, y, tags, cluster_id, pagerank, title, path}
-let _kmApiData    = [];   // 原始 API 数据：{id, title, path, tags, pagerank}
+let _kmNodes      = [];   // 当前节点：{id, x, y, tags, cluster_id, pagerank, title, path}
 let _kmFiltered   = [];   // 当前过滤后显示节点集合
-let _kmClusterFilter = -1; // -1 = 全部
+let _kmClusterFilter = -1;
 let _kmSearchQ    = '';
+let _kmTagToCluster = {}; // 标签 → cluster_id 映射
 
-// 视口变换：offset（平移）和 scale（缩放）
+// 视口变换
 let _kmOx = 0, _kmOy = 0, _kmScale = 1;
 let _kmDragging = false, _kmDragLast = null;
-
-// 悬停节点
 let _kmHovered = null;
+
+// 布局动画状态
+let _kmLayoutRaf = null;
+let _kmLayoutIter = 0;
+let _kmLayoutEdges = [];  // [[i,j,w], ...]
+let _kmLayoutK = 0;
+let _kmLayoutTemp = 200;
+const KM_COOLING = 0.88;
 
 document.addEventListener('DOMContentLoaded', async () => {
     kmResizeCanvas();
     window.addEventListener('resize', () => { kmResizeCanvas(); kmRedraw(); });
 
     try {
-        // 并行加载：API 数据 + WASM
-        const [apiResp, _] = await Promise.all([
-            fetch('/api/knowledge-map'),
-            typeof WasmLoader !== 'undefined' ? WasmLoader.init().catch(() => null) : Promise.resolve(null),
-        ]);
+        const resp = await fetch('/api/knowledge-map');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const apiData = await resp.json();
 
-        if (!apiResp.ok) throw new Error('HTTP ' + apiResp.status);
-        _kmApiData = await apiResp.json();
-
-        if (_kmApiData.length === 0) {
-            kmShowError('知识库中没有带标签的笔记，无法生成知识地图');
+        if (apiData.length === 0) {
+            kmShowError('知识库中没有笔记，无法生成知识地图');
             return;
         }
 
-        // 调用 WASM computeKnowledgeMap 计算布局
-        let layoutNodes;
-        if (typeof WasmLoader !== 'undefined' && WasmLoader.computeKnowledgeMap) {
-            try {
-                const layoutJson = WasmLoader.computeKnowledgeMap(JSON.stringify(_kmApiData));
-                layoutNodes = JSON.parse(layoutJson);
-            } catch(e) {
-                console.warn('WASM 布局失败，使用备用布局：', e);
-                layoutNodes = kmFallbackLayout(_kmApiData);
-            }
-        } else {
-            // WASM 未加载时用备用随机布局
-            layoutNodes = kmFallbackLayout(_kmApiData);
-        }
+        // ── 步骤1：按标签频率分配聚类（立即可用，不需要布局收敛）──────────────
+        const tagFreq = {};
+        apiData.forEach(nd => nd.tags.forEach(t => { tagFreq[t] = (tagFreq[t] || 0) + 1; }));
+        const topTags = Object.entries(tagFreq)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 12)
+            .map(([t]) => t);
+        topTags.forEach((t, i) => { _kmTagToCluster[t] = i; });
 
-        // 合并布局结果和 API 元数据（title, path）
-        const apiMap = new Map(_kmApiData.map(n => [n.id, n]));
-        _kmNodes = layoutNodes.map(n => {
-            const api = apiMap.get(n.id) || {};
-            return { ...n, title: api.title || n.id, path: api.path || n.id };
+        // ── 步骤2：按标签聚类分组，各组圆形排列 → 初始位置立即可见 ──────────
+        const clusterGroups = new Array(topTags.length + 1).fill(null).map(() => []);
+        apiData.forEach(nd => {
+            let cid = topTags.length; // 无标签/无匹配标签 → 末尾组
+            for (const tag of nd.tags) {
+                if (_kmTagToCluster[tag] !== undefined) { cid = _kmTagToCluster[tag]; break; }
+            }
+            clusterGroups[cid].push({ ...nd, cluster_id: cid });
         });
 
-        // 填充聚类筛选下拉
-        const clusterIds = [...new Set(_kmNodes.map(n => n.cluster_id))].sort((a, b) => a - b);
+        // 聚类中心：有标签聚类环绕大圆，无标签聚类置于中心附近
+        const numClusters = topTags.length;
+        const bigR = Math.max(800, 200 * Math.sqrt(numClusters));
+        const nodes = [];
+        clusterGroups.forEach((group, ci) => {
+            if (group.length === 0) return;
+            const isUntagged = ci === topTags.length;
+            const cAngle = isUntagged ? 0 : (2 * Math.PI * ci) / numClusters;
+            const cx = isUntagged ? 0 : bigR * Math.cos(cAngle);
+            const cy = isUntagged ? 0 : bigR * Math.sin(cAngle);
+            // 聚类内节点小圆排列（半径按数量缩放）
+            const innerR = Math.max(80, 45 * Math.sqrt(group.length));
+            group.forEach((nd, i) => {
+                const a = (2 * Math.PI * i) / Math.max(1, group.length);
+                // 添加少量随机扰动，避免完全重叠
+                const jitter = innerR * 0.25 * (Math.random() - 0.5);
+                nodes.push({
+                    id: nd.id, title: nd.title, path: nd.path,
+                    tags: nd.tags, pagerank: nd.pagerank, cluster_id: nd.cluster_id,
+                    x: cx + innerR * Math.cos(a) + jitter,
+                    y: cy + innerR * Math.sin(a) + jitter,
+                });
+            });
+        });
+        _kmNodes = nodes;
+
+        // ── 步骤3：预计算 Jaccard 相似度边（供动画布局使用）─────────────────
+        const n = nodes.length;
+        const tagSets = nodes.map(nd => new Set(nd.tags));
+        _kmLayoutEdges = [];
+        for (let i = 0; i < n; i++) {
+            if (tagSets[i].size === 0) continue;
+            for (let j = i + 1; j < n; j++) {
+                if (tagSets[j].size === 0) continue;
+                let inter = 0;
+                for (const t of tagSets[i]) { if (tagSets[j].has(t)) inter++; }
+                if (inter === 0) continue;
+                const union = tagSets[i].size + tagSets[j].size - inter;
+                _kmLayoutEdges.push([i, j, inter / union]);
+            }
+        }
+        _kmLayoutK = Math.sqrt(2000 * 2000 / Math.max(1, n));
+        _kmLayoutTemp = _kmLayoutK * 2;
+        _kmLayoutIter = 0;
+
+        // 填充聚类筛选下拉 & 图例
+        const usedClusters = [...new Set(_kmNodes.map(nd => nd.cluster_id))].sort((a, b) => a - b);
         const sel = document.getElementById('km-cluster-filter');
-        clusterIds.forEach(cid => {
+        usedClusters.forEach(cid => {
             const opt = document.createElement('option');
             opt.value = cid;
-            opt.textContent = `聚类 ${cid + 1}（${_kmNodes.filter(n => n.cluster_id === cid).length} 篇）`;
+            const label = cid < topTags.length ? `#${topTags[cid]}` : '（无标签）';
+            opt.textContent = `${label}（${_kmNodes.filter(nd => nd.cluster_id === cid).length} 篇）`;
             sel.appendChild(opt);
         });
-
-        // 填充图例
-        kmBuildLegend(clusterIds);
-
-        // 初始化视口（居中）
-        kmResetView();
+        kmBuildLegend(usedClusters, topTags);
 
         document.getElementById('km-loading').style.display = 'none';
         document.getElementById('km-stats').textContent =
-            `${_kmNodes.length} 篇笔记  ${clusterIds.length} 个聚类`;
+            `${n} 篇笔记  ${usedClusters.length} 个聚类  布局收敛中…`;
 
         kmSetupEvents();
+        kmResetView();
         kmRedraw();
+
+        // ── 步骤4：动画运行力导向布局 ────────────────────────────────────────
+        const totalIters = n > 400 ? 20 : n > 150 ? 40 : 60;
+        kmStartLayoutAnimation(n, totalIters);
 
     } catch(e) {
         kmShowError('加载失败: ' + e.message);
     }
 });
 
-// ── 备用布局（WASM 不可用时）──────────────────────────────────────────────────
-function kmFallbackLayout(notes) {
-    const n = notes.length;
-    return notes.map((note, i) => ({
-        id:         note.id,
-        x:          1000 * Math.cos(2 * Math.PI * i / n),
-        y:          1000 * Math.sin(2 * Math.PI * i / n),
-        tags:       note.tags,
-        cluster_id: 0,
-        pagerank:   note.pagerank,
-    }));
+// ── 动画力导向布局（Fruchterman-Reingold，逐帧收敛）────────────────────────
+function kmStartLayoutAnimation(n, totalIters) {
+    if (_kmLayoutRaf) cancelAnimationFrame(_kmLayoutRaf);
+    const stepsPerFrame = Math.max(1, Math.ceil(totalIters / 30)); // 约 30 帧完成
+
+    function step() {
+        if (_kmLayoutIter >= totalIters) {
+            document.getElementById('km-stats').textContent =
+                `${n} 篇笔记  ${new Set(_kmNodes.map(nd => nd.cluster_id)).size} 个聚类`;
+            kmRedraw();
+            return;
+        }
+        for (let s = 0; s < stepsPerFrame && _kmLayoutIter < totalIters; s++, _kmLayoutIter++) {
+            kmLayoutStep(n);
+        }
+        kmRedraw();
+        _kmLayoutRaf = requestAnimationFrame(step);
+    }
+    _kmLayoutRaf = requestAnimationFrame(step);
+}
+
+function kmLayoutStep(n) {
+    const k = _kmLayoutK, kSq = k * k;
+    const fx = new Float64Array(n);
+    const fy = new Float64Array(n);
+
+    // 排斥力（所有节点对）
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            const dx = _kmNodes[i].x - _kmNodes[j].x;
+            const dy = _kmNodes[i].y - _kmNodes[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+            const rep = kSq / dist;
+            const ux = dx / dist, uy = dy / dist;
+            fx[i] += rep * ux; fy[i] += rep * uy;
+            fx[j] -= rep * ux; fy[j] -= rep * uy;
+        }
+    }
+    // 吸引力（标签相似度边）
+    for (const [i, j, w] of _kmLayoutEdges) {
+        const dx = _kmNodes[j].x - _kmNodes[i].x;
+        const dy = _kmNodes[j].y - _kmNodes[i].y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+        const attr = dist * dist / k * (1 + w * 3);
+        const ux = dx / dist, uy = dy / dist;
+        fx[i] += attr * ux; fy[i] += attr * uy;
+        fx[j] -= attr * ux; fy[j] -= attr * uy;
+    }
+    // 位移
+    for (let i = 0; i < n; i++) {
+        const d = Math.sqrt(fx[i] * fx[i] + fy[i] * fy[i]) || 0.01;
+        const mov = Math.min(d, _kmLayoutTemp);
+        _kmNodes[i].x += fx[i] / d * mov;
+        _kmNodes[i].y += fy[i] / d * mov;
+    }
+    _kmLayoutTemp *= KM_COOLING;
 }
 
 // ── Canvas 辅助 ────────────────────────────────────────────────────────────
@@ -428,14 +522,15 @@ function kmFilterCluster() {
 }
 
 // ── 图例 ──────────────────────────────────────────────────────────────────
-function kmBuildLegend(clusterIds) {
+function kmBuildLegend(clusterIds, topTags) {
     const legend = document.getElementById('km-legend');
     legend.innerHTML = clusterIds.map(cid => {
         const color = KM_PALETTE[cid % KM_PALETTE.length];
-        const count = _kmNodes.filter(n => n.cluster_id === cid).length;
+        const count = _kmNodes.filter(nd => nd.cluster_id === cid).length;
+        const label = (topTags && cid < topTags.length) ? `#${topTags[cid]}` : '（无标签）';
         return `<div class="km-leg-item">
             <div class="km-leg-dot" style="background:${color}"></div>
-            聚类 ${cid + 1}（${count} 篇）
+            ${label}（${count} 篇）
         </div>`;
     }).join('');
 }
