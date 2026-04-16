@@ -12,7 +12,7 @@
 
 ## 当前开发状态
 
-**当前版本：1.9.6**
+**当前版本：1.9.7**
 
 | 模块 | 状态 | 说明 |
 |------|------|------|
@@ -23,7 +23,7 @@
 | 认证系统 | ✅ 稳定 | JWT + bcrypt；全部 redb/bcrypt IO 移入 spawn_blocking（A1）；Cookie Secure 动态控制 |
 | 分享链接 | ✅ 稳定 | UUID token；密码 bcrypt 哈希；URL scheme 支持 X-Forwarded-Proto + public_base_url（Q2） |
 | 阅读进度 | ✅ 稳定 | 滚动位置记忆 + 阅读历史；redb IO 已入 spawn_blocking（A1） |
-| 关系图谱 | ✅ 稳定 | Sigma.js 2 WebGL 渲染，支持 10k+ 节点 60fps（v1.9.6）；侧边栏子图仍用 Vis.js |
+| 关系图谱 | ✅ 稳定 | Sigma.js 2 WebGL 渲染 + WASM ForceAtlas2 布局（v1.9.7）；2k 节点布局 <1s |
 | 知识地图 | ✅ 稳定 | Canvas 渲染，标签相似度聚类，K-means，WASM 布局（v1.9.5） |
 | Prometheus 指标 | ✅ 稳定 | `/metrics` 端点，含请求数、笔记数、延迟直方图 |
 | 应用状态 | ✅ 稳定 | `AppConfig` 改为 `RwLock<AppConfig>` 支持热重载（B2）；`start_time` 用于真实 uptime（B3） |

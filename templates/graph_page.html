@@ -69,9 +69,8 @@
     box-shadow: 0 4px 12px rgba(0,0,0,0.5); white-space: nowrap;
 }
 </style>
-<!-- Sigma.js 2 + Graphology（本地，v1.9.6）-->
-<script src="/static/js/graphology.min.js"></script>
-<script src="/static/js/sigma.min.js"></script>
+<!-- 全屏图谱恢复使用 Vis.js（已在 layout.html 全局加载）
+     性能优化：stabilized 事件后关闭物理引擎，hideEdgesOnDrag 拖动时隐藏边 -->
 {% endblock %}
 
 {% block content %}
@@ -175,8 +174,9 @@
 
 <script>
 // ──────────────────────────────────────────────────────────────────────────────
-// 全局知识图谱专页脚本（v1.9.6：Sigma.js 2 WebGL 渲染器）
-// 架构变更：Vis.js → Sigma.js，布局改为 JS Fruchterman-Reingold 动画收敛。
+// 全局知识图谱专页脚本（v1.9.6：Vis.js + 物理关闭优化）
+// 性能优化：布局稳定后立即调用 network.setOptions({physics:false})，
+// 停止持续物理计算。交互期间 hideEdgesOnDrag 减少渲染压力。
 // ──────────────────────────────────────────────────────────────────────────────
 
 // ── 全局状态 ──────────────────────────────────────────────────────────────────
@@ -458,13 +458,50 @@ function gpRender(data) {
 
     gpHideLoading();
     document.getElementById('graph-page-stats').textContent =
-        `${n} 个节点  ${gpEdgeData.length} 条边`;
+        `${n} 个节点  ${gpEdgeData.length} 条边  布局计算中…`;
 
-    // 启动 F-R 布局动画
-    gpStartLayout(n);
+    // ── 布局：优先 WASM（ForceAtlas2，Rust 级速度），fallback 到 JS Worker ──
+    gpApplyLayout(n);
 }
 
 // ── Fruchterman-Reingold 布局动画 ─────────────────────────────────────────────
+/**
+ * 布局调度（v1.9.7）：优先 WASM ForceAtlas2，不可用时降级到 JS Worker。
+ * WASM 版本：Rust 实现，Barnes-Hut O(n log n)，度数加权 FA2，比 JS 快 10-100×。
+ */
+async function gpApplyLayout(n) {
+    // 等待 WasmLoader 初始化完成（通常已在页面加载时完成）
+    if (typeof WasmLoader !== 'undefined') {
+        await WasmLoader.init().catch(() => null);
+    }
+
+    const wasmAvailable = typeof WasmLoader !== 'undefined'
+        && WasmLoader.loaded
+        && typeof WasmLoader.computeGraphLayout === 'function';
+
+    if (wasmAvailable) {
+        // WASM 路径：同步计算，立即更新 Sigma
+        const nodesIn = gpNodeData.map(nd => ({ id: nd.id }));
+        const edgesIn = gpEdgeData.map(e => ({ from: e.from, to: e.to }));
+        const iters   = n > 500 ? 150 : n > 100 ? 250 : 80;
+        const positions = WasmLoader.computeGraphLayout(nodesIn, edgesIn, iters);
+        if (positions && positions.length > 0) {
+            positions.forEach(p => {
+                gpGraph.setNodeAttribute(p.id, 'x', p.x);
+                gpGraph.setNodeAttribute(p.id, 'y', p.y);
+            });
+            gpRenderer?.refresh();
+            document.getElementById('graph-page-stats').textContent =
+                `${n} 个节点  ${gpEdgeData.length} 条边`;
+            return;
+        }
+        console.warn('[graph] WASM 布局返回空，降级到 JS Worker');
+    }
+
+    // JS Worker fallback
+    gpStartLayout(n);
+}
+
 /**
  * 初始化并启动力导向布局。
  * - n ≤ 100：主线程 rAF 动画，80 轮

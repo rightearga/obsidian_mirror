@@ -288,14 +288,65 @@ document.addEventListener('DOMContentLoaded', async () => {
         kmResetView();
         kmRedraw();
 
-        // ── 步骤4：动画运行力导向布局 ────────────────────────────────────────
-        const totalIters = n > 400 ? 20 : n > 150 ? 40 : 60;
-        kmStartLayoutAnimation(n, totalIters);
+        // ── 步骤4：布局（优先 WASM，fallback 到 JS Worker 动画）────────────────
+        await kmApplyLayout(apiData, n, topTags);
 
     } catch(e) {
         kmShowError('加载失败: ' + e.message);
     }
 });
+
+// ── v1.9.7：WASM 布局调度（Rust FA2 → JS Worker → 主线程动画 三级降级）────────
+
+/**
+ * 优先使用 WASM computeKnowledgeMap（Rust 实现，含 Jaccard + F-R + K-means）。
+ * WASM 不可用时降级到 JS Worker（>300 节点）或主线程动画（小图）。
+ */
+async function kmApplyLayout(apiData, n, topTags) {
+    if (typeof WasmLoader !== 'undefined') {
+        await WasmLoader.init().catch(() => null);
+    }
+    const wasmAvailable = typeof WasmLoader !== 'undefined'
+        && WasmLoader.loaded
+        && typeof WasmLoader.computeKnowledgeMap === 'function';
+
+    if (wasmAvailable) {
+        const result = WasmLoader.computeKnowledgeMap(apiData);
+        if (result && result.length > 0) {
+            // 合并 WASM 布局结果：x/y/cluster_id 覆盖，title/path 保留
+            const apiMap = new Map(apiData.map(nd => [nd.id, nd]));
+            _kmNodes = result.map(r => {
+                const api = apiMap.get(r.id) || {};
+                return {
+                    id: r.id, title: api.title || r.id, path: api.path || r.id,
+                    tags: r.tags, pagerank: r.pagerank,
+                    x: r.x, y: r.y, cluster_id: r.cluster_id,
+                };
+            });
+            // 重建聚类颜色映射（WASM K-means 的聚类 id 已包含在结果里）
+            const wasmClusters = [...new Set(_kmNodes.map(nd => nd.cluster_id))].sort((a,b)=>a-b);
+            // 用 topTags 作为标签→聚类的映射（若 WASM cluster_id 与 tag 顺序不同，用 tag 着色兜底）
+            _kmNodes.forEach(nd => {
+                for (const tag of nd.tags) {
+                    if (_kmTagToCluster[tag] !== undefined) {
+                        nd.cluster_id = _kmTagToCluster[tag];
+                        break;
+                    }
+                }
+            });
+            document.getElementById('km-stats').textContent =
+                `${n} 篇笔记  ${wasmClusters.length} 个聚类（WASM 布局）`;
+            kmResetView();
+            kmRedraw();
+            return;
+        }
+        console.warn('[knowledge_map] WASM 布局返回空，降级到 JS');
+    }
+
+    // JS 降级
+    const totalIters = n > 400 ? 20 : n > 150 ? 40 : 60;
+    kmStartLayoutAnimation(n, totalIters);
+}
 
 // ── 布局调度：节点数 > 300 用 Web Worker，否则主线程动画 ────────────────────
 let _kmWorker = null;  // 布局 Worker 实例

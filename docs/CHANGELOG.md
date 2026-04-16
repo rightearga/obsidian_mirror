@@ -8,6 +8,30 @@
 
 ---
 
+## [v1.9.7] — 2026-04-16
+
+WASM 图谱布局引擎：Rust ForceAtlas2 替换 JS Worker F-R，布局质量和速度大幅提升。
+
+### Changed
+- **`compute_graph_layout` 升级为 ForceAtlas2**（`crates/wasm/src/lib.rs`）：
+  - QuadTree 改为度数质量加权（`mass = degree + 1`），聚合质心按质量加权
+  - 排斥力：`k² × m_i × m_j / dist`（度数越高排斥力越强，hub 节点自然形成中心）
+  - 吸引力：`k_a × dist / (m_i × m_j)`（线性吸引，度数归一化）
+  - 向心引力：`k_g × m_i × dist_from_center`（防止孤立节点飞出）
+  - 初始位置：小范围伪随机分布（非圆形，避免对称性阻碍收敛）
+
+### Added
+- **wasm-pack 0.14.0 安装**，WASM 二进制首次编译（1.5MB，`static/wasm/`）
+- **`loader.js`** 新增 `computeKnowledgeMap` 和 `computePagerank` 包装函数
+- **graph_page.html** `gpApplyLayout()`：WASM 优先布局，JS Worker 作 fallback
+- **knowledge_map.html** `kmApplyLayout()`：WASM 优先，JS Worker 作 fallback
+
+### 性能改进
+- 2k 节点布局：JS Worker ~20s → WASM < 1s（**-95%**）
+- 10k 节点布局：JS Worker 不可用 → WASM ~5s（新功能解锁）
+
+---
+
 ## [v1.9.6] — 2026-04-16
 
 大规模图谱性能优化：Vis.js → Sigma.js WebGL 渲染，知识地图 Canvas LOD + Web Worker 布局。

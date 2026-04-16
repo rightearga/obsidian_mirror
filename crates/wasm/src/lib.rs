@@ -658,17 +658,17 @@ struct NodePosition {
 enum QuadTree {
     /// 空节点
     Empty,
-    /// 叶子节点（含一个点）
-    Leaf { idx: usize, x: f64, y: f64 },
-    /// 内部节点（含多个点，用质心聚合）
+    /// 叶子节点（含一个点及其质量）
+    Leaf { idx: usize, x: f64, y: f64, mass: f64 },
+    /// 内部节点（含多个点，用质量加权质心聚合）
     Internal {
         /// 区域范围 [x_min, y_min, x_max, y_max]
         bounds: [f64; 4],
-        /// 区域内点的数量（用于质心权重）
+        /// 区域内所有点质量之和（ForceAtlas2 用度数+1 作为质量）
         total_mass: f64,
-        /// 质心 x 坐标
+        /// 质量加权质心 x 坐标
         cx: f64,
-        /// 质心 y 坐标
+        /// 质量加权质心 y 坐标
         cy: f64,
         /// 四个子象限 [SW, SE, NW, NE]
         children: Box<[QuadTree; 4]>,
@@ -676,15 +676,15 @@ enum QuadTree {
 }
 
 impl QuadTree {
-    /// 将一个点插入四叉树
-    fn insert(&mut self, idx: usize, x: f64, y: f64, bounds: [f64; 4]) {
+    /// 将一个点插入四叉树，`mass` 为节点质量（ForceAtlas2 中 = 度数+1）。
+    fn insert(&mut self, idx: usize, x: f64, y: f64, mass: f64, bounds: [f64; 4]) {
         match self {
             QuadTree::Empty => {
-                *self = QuadTree::Leaf { idx, x, y };
+                *self = QuadTree::Leaf { idx, x, y, mass };
             }
             QuadTree::Leaf { .. } => {
                 // 取出旧叶子，升级为内部节点后重新插入
-                if let QuadTree::Leaf { idx: oi, x: ox, y: oy } = std::mem::replace(self, QuadTree::Empty) {
+                if let QuadTree::Leaf { idx: oi, x: ox, y: oy, mass: om } = std::mem::replace(self, QuadTree::Empty) {
                     let mx = (bounds[0] + bounds[2]) / 2.0;
                     let my = (bounds[1] + bounds[3]) / 2.0;
                     *self = QuadTree::Internal {
@@ -694,15 +694,16 @@ impl QuadTree {
                         children: Box::new([QuadTree::Empty, QuadTree::Empty,
                                             QuadTree::Empty, QuadTree::Empty]),
                     };
-                    self.insert(oi, ox, oy, bounds);
-                    self.insert(idx, x, y, bounds);
+                    self.insert(oi, ox, oy, om, bounds);
+                    self.insert(idx, x, y, mass, bounds);
                 }
             }
             QuadTree::Internal { bounds: b, total_mass, cx, cy, children } => {
-                // 更新质心（增量公式）
-                *total_mass += 1.0;
-                *cx = (*cx * (*total_mass - 1.0) + x) / *total_mass;
-                *cy = (*cy * (*total_mass - 1.0) + y) / *total_mass;
+                // 更新质量加权质心（增量公式）
+                let new_mass = *total_mass + mass;
+                *cx = (*cx * *total_mass + x * mass) / new_mass;
+                *cy = (*cy * *total_mass + y * mass) / new_mass;
+                *total_mass = new_mass;
                 // 决定插入哪个象限并递归
                 let mx = (b[0] + b[2]) / 2.0;
                 let my = (b[1] + b[3]) / 2.0;
@@ -713,7 +714,7 @@ impl QuadTree {
                     if quad & 1 == 0 { mx   } else { b[2] },
                     if quad & 2 == 0 { my   } else { b[3] },
                 ];
-                children[quad].insert(idx, x, y, cb);
+                children[quad].insert(idx, x, y, mass, cb);
             }
         }
     }
@@ -725,12 +726,13 @@ impl QuadTree {
     fn repulsion_force(&self, px: f64, py: f64, k_sq: f64, theta_sq: f64, self_idx: usize) -> (f64, f64) {
         match self {
             QuadTree::Empty => (0.0, 0.0),
-            QuadTree::Leaf { idx, x, y } => {
+            QuadTree::Leaf { idx, x, y, mass } => {
                 if *idx == self_idx { return (0.0, 0.0); }
                 let dx = px - x;
                 let dy = py - y;
                 let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                let rep = k_sq / dist;
+                // ForceAtlas2：排斥力按质量（度数+1）缩放
+                let rep = k_sq * mass / dist;
                 (dx / dist * rep, dy / dist * rep)
             }
             QuadTree::Internal { bounds, total_mass, cx, cy, children } => {
@@ -854,22 +856,13 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
         return r.to_string();
     }
 
-    // 初始化位置：圆形均匀分布，避免重叠
-    let init_r = 500.0_f64 * (n as f64).sqrt();
-    let mut pos_x: Vec<f64> = (0..n)
-        .map(|i| init_r * (2.0 * std::f64::consts::PI * i as f64 / n as f64).cos())
-        .collect();
-    let mut pos_y: Vec<f64> = (0..n)
-        .map(|i| init_r * (2.0 * std::f64::consts::PI * i as f64 / n as f64).sin())
-        .collect();
-
     // 建立节点 ID → 索引映射
     let id_to_idx: HashMap<&str, usize> = nodes.iter()
         .enumerate()
         .map(|(i, node)| (node.id.as_str(), i))
         .collect();
 
-    // 解析有效边（仅保留两端都存在于节点列表中的边）
+    // 解析有效边（仅保留两端都存在于节点列表中的边，跳过自环）
     let adj_edges: Vec<(usize, usize)> = edges.iter()
         .filter_map(|e| {
             let i = id_to_idx.get(e.from.as_str())?;
@@ -878,56 +871,86 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
         })
         .collect();
 
-    // Fruchterman-Reingold 参数
-    let area = 2000.0_f64 * 2000.0_f64;
-    let k = (area / n as f64).sqrt();
-    let k_sq = k * k;
-    let mut temp = 200.0_f64;
-    let cooling = 0.85_f64;
+    // ── v1.9.7：ForceAtlas2 风格布局 ──────────────────────────────────────────
+    // 核心改进：度数加权排斥力（hub 节点排斥力更强 → 自然形成中心聚类）
+    // 参考 Vis.js forceAtlas2Based 参数，产生与 Obsidian 类似的 hub-and-spoke 效果。
 
-    // M2（v1.6.4）：n > 100 时使用 Barnes-Hut O(n log n) 近似代替 O(n²) 全对排斥力
+    // 计算节点度数（入度 + 出度，用作 ForceAtlas2 质量）
+    let mut degrees = vec![0usize; n];
+    for &(i, j) in &adj_edges {
+        degrees[i] += 1;
+        degrees[j] += 1;
+    }
+    // 节点质量 = 度数 + 1（保证孤立节点质量不为零）
+    let masses: Vec<f64> = degrees.iter().map(|&d| (d + 1) as f64).collect();
+
+    // 初始化位置：节点从中心附近出发，排斥力自然将其向外推开形成聚类
+    // （圆形初始布局在 FA2 中会产生对称性陷阱，中心附近随机更优）
+    let init_r = 20.0_f64 * (n as f64).sqrt();
+    let mut pos_x: Vec<f64> = (0..n)
+        .map(|i| init_r * ((i * 7 + 3) as f64 / n as f64 * 2.0 - 1.0))
+        .collect();
+    let mut pos_y: Vec<f64> = (0..n)
+        .map(|i| init_r * ((i * 13 + 5) as f64 / n as f64 * 2.0 - 1.0))
+        .collect();
+
+    // ForceAtlas2 参数（对应 Vis.js 默认值）
+    // k_r：排斥力系数（对应 gravitationalConstant: -50 的绝对值）
+    let area  = 2000.0_f64 * 2000.0_f64;
+    let k     = (area / n as f64).sqrt();
+    let k_sq  = k * k;
+    // k_a：吸引力系数（对应 springConstant: 0.08 / springLength: 100）
+    let k_a   = 0.08_f64;
+    // k_g：向心引力系数（对应 centralGravity: 0.005，防止孤立节点飞出）
+    let k_g   = 0.005_f64;
+
+    // 温度调度（同 F-R，但初始温度更高以快速从中心扩散）
+    let mut temp = k * 4.0;
+    let cooling  = 0.88_f64;
+
+    // M2（v1.6.4）：n > 100 时使用 Barnes-Hut O(n log n) 四叉树近似
     let use_barnes_hut = n > 100;
-    // M5（v1.7.0）：θ 自适应——前 60% 迭代用较大 θ 快速收敛，后 40% 用较小 θ 精细布局。
-    //   θ = 1.2（前期）：s/d < 1.2 时用质心近似，允许更多近似 → 每迭代更快
-    //   θ = 0.7（后期）：s/d < 0.7 时用质心近似，精度更高 → 布局抖动更小
-    //   θ_sq = θ² 避免每次迭代重复乘法
-    let theta_early_sq = 1.2_f64 * 1.2_f64; // 前 60% 迭代
-    let theta_late_sq  = 0.7_f64 * 0.7_f64; // 后 40% 迭代
-    let warmup_iters = (iterations as f64 * 0.6).round() as u32;
+    // M5（v1.7.0）：θ 自适应
+    let theta_early_sq = 1.2_f64 * 1.2_f64;
+    let theta_late_sq  = 0.7_f64 * 0.7_f64;
+    let warmup_iters   = (iterations as f64 * 0.6).round() as u32;
 
     for iter_idx in 0..iterations {
         let mut fx = vec![0.0_f64; n];
         let mut fy = vec![0.0_f64; n];
 
         if use_barnes_hut {
-            // Barnes-Hut：每轮构建四叉树，每节点 O(log n) 查询排斥力
-            let pad = init_r * 0.05 + 1.0;
+            // Barnes-Hut：用度数质量构建四叉树，每节点 O(log n) 查询排斥力
+            let pad = (init_r + temp * iterations as f64) * 0.05 + 1.0;
             let x_min = pos_x.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
             let y_min = pos_y.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
             let x_max = pos_x.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
             let y_max = pos_y.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
             let bounds = [x_min, y_min, x_max, y_max];
 
+            // 插入时传入节点质量（度数+1），四叉树聚合时使用质量加权质心
             let mut tree = QuadTree::Empty;
             for i in 0..n {
-                tree.insert(i, pos_x[i], pos_y[i], bounds);
+                tree.insert(i, pos_x[i], pos_y[i], masses[i], bounds);
             }
 
-            // M5：根据迭代阶段选择 θ（前期快速收敛，后期精细布局）
             let theta_sq = if iter_idx < warmup_iters { theta_early_sq } else { theta_late_sq };
             for i in 0..n {
+                // repulsion_force 内部已使用质量缩放：F = k_sq * mass_cluster / dist
+                // 再乘以本节点质量实现 FA2 双边度数加权：F_ij = k_r * m_i * m_j / dist
                 let (rfx, rfy) = tree.repulsion_force(pos_x[i], pos_y[i], k_sq, theta_sq, i);
-                fx[i] += rfx;
-                fy[i] += rfy;
+                fx[i] += rfx * masses[i];
+                fy[i] += rfy * masses[i];
             }
         } else {
-            // 小图：标准 O(n²) Fruchterman-Reingold（精确）
+            // 小图：O(n²) FA2 精确排斥（度数双边加权）
             for i in 0..n {
                 for j in (i + 1)..n {
                     let dx = pos_x[i] - pos_x[j];
                     let dy = pos_y[i] - pos_y[j];
                     let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                    let repulsion = k_sq / dist;
+                    // FA2：F = k_sq * m_i * m_j / dist
+                    let repulsion = k_sq * masses[i] * masses[j] / dist;
                     let rx = dx / dist * repulsion;
                     let ry = dy / dist * repulsion;
                     fx[i] += rx;
@@ -938,18 +961,27 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             }
         }
 
-        // 吸引力（连边节点对，O(E)，两种模式相同）
+        // 吸引力（FA2 线性吸引，度数归一化，对应 springConstant * dist / m_i / m_j）
         for &(i, j) in &adj_edges {
             let dx = pos_x[j] - pos_x[i];
             let dy = pos_y[j] - pos_y[i];
             let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-            let attraction = dist * dist / k;
+            // FA2 吸引：F = k_a * dist / (m_i * m_j)（高度节点间吸引力小，不会拉过头）
+            let attraction = k_a * dist / (masses[i] * masses[j]).max(1.0);
             let ax = dx / dist * attraction;
             let ay = dy / dist * attraction;
             fx[i] += ax;
             fy[i] += ay;
             fx[j] -= ax;
             fy[j] -= ay;
+        }
+
+        // 向心引力（FA2 gravity：k_g * m_i * dist_from_center，防止孤立节点飞出）
+        for i in 0..n {
+            let dist_c = (pos_x[i] * pos_x[i] + pos_y[i] * pos_y[i]).sqrt().max(1.0);
+            let gravity = k_g * masses[i];
+            fx[i] -= gravity * pos_x[i] / dist_c;
+            fy[i] -= gravity * pos_y[i] / dist_c;
         }
 
         // 应用合力（受温度限制最大位移）

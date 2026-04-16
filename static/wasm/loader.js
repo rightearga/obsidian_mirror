@@ -247,6 +247,51 @@
         },
 
         /**
+         * 知识地图布局计算（v1.9.5 / v1.9.7）。
+         * 基于标签相似度（Jaccard）+ F-R 力导向布局 + K-means 聚类。
+         * 比 JS Worker 实现快 10-100×。
+         *
+         * @param {Array<{id,title,path,tags,pagerank}>} notes 笔记列表
+         * @returns {Array<{id,x,y,tags,cluster_id,pagerank}>|null} 布局结果，不可用时返回 null
+         */
+        computeKnowledgeMap(notes) {
+            if (!this.loaded || !this.module?.computeKnowledgeMap) return null;
+            try {
+                const t0 = performance.now();
+                const result = this.module.computeKnowledgeMap(JSON.stringify(notes));
+                this._logPerf('computeKnowledgeMap', 'wasm', t0);
+                return JSON.parse(result);
+            } catch (e) {
+                console.warn('[WASM] 知识地图布局计算失败:', e);
+                return null;
+            }
+        },
+
+        /**
+         * PageRank 影响力分数计算（v1.9.0）。
+         * 归一化 0.0–1.0，阻尼因子 0.85，20 轮迭代。
+         *
+         * @param {Array<{id}>} nodes 节点数组
+         * @param {Array<{from,to}>} edges 边数组
+         * @param {number} [iterations=20] 迭代次数
+         * @returns {Object|null} {node_id: score} 字典，不可用时返回 null
+         */
+        computePagerank(nodes, edges, iterations = 20) {
+            if (!this.loaded || !this.module?.computePagerank) return null;
+            try {
+                const t0 = performance.now();
+                const result = this.module.computePagerank(
+                    JSON.stringify(nodes), JSON.stringify(edges), iterations
+                );
+                this._logPerf('computePagerank', 'wasm', t0);
+                return JSON.parse(result);
+            } catch (e) {
+                console.warn('[WASM] PageRank 计算失败:', e);
+                return null;
+            }
+        },
+
+        /**
          * 本地 WASM 笔记过滤（v1.6.3）。
          * 多标签交集 + 路径前缀过滤，< 5ms（1000 条笔记）。
          *

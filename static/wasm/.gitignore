@@ -1,10 +1,5 @@
-# wasm-pack 编译输出（本地构建后自动生成，不提交到 Git）
-# 运行 `make wasm` 或 `wasm-pack build crates/wasm --target web --out-dir static/wasm` 生成
-*_bg.wasm
-*_bg.js
-*_bg.wasm.d.ts
-*.d.ts
+# wasm-pack 生成的 npm 包描述文件（不需要入库）
 package.json
-# loader.js 是手写文件，需要提交
-!loader.js
-!.gitignore
+# TypeScript 类型声明（可选，不影响运行）
+*.d.ts
+# 不排除：loader.js、obsidian_mirror_wasm.js、obsidian_mirror_wasm_bg.wasm

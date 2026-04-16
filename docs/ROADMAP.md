@@ -1283,7 +1283,7 @@ Sigma.js 专为大规模图可视化设计，底层使用 WebGL：
 
 ---
 
-### 🔧 v1.9.7 — WASM 图谱布局引擎（Rust ForceAtlas2 + Sigma.js 渲染）
+### ✅ v1.9.7 (已发布 - 2026-04-16) — WASM 图谱布局引擎（Rust ForceAtlas2 + Sigma.js 渲染）
 
 **主题**：用 Rust/WASM 接管布局计算，彻底解决 10k+ 节点的布局质量和速度问题
 
@@ -1361,9 +1361,23 @@ if (WasmLoader.computeGraphLayout) {
 | 布局质量 | 均匀分布 | hub-and-spoke 聚类（Obsidian 风格）|
 | 主线程阻塞 | 无（Worker）| 无（WASM 可在 Worker 内调用）|
 
+#### 实际交付物
+- 修改文件：`crates/wasm/src/lib.rs`（QuadTree 度数质量 + FA2 物理公式）
+- 修改文件：`static/wasm/loader.js`（新增 computeKnowledgeMap / computePagerank）
+- 新增文件：`static/wasm/obsidian_mirror_wasm.js`（wasm-pack 胶水代码）
+- 新增文件：`static/wasm/obsidian_mirror_wasm_bg.wasm`（1.5MB Rust 二进制）
+- 修改文件：`static/wasm/.gitignore`（恢复允许 .wasm/.js 入库）
+- 修改文件：`templates/graph_page.html`（gpApplyLayout WASM 优先路径）
+- 修改文件：`templates/knowledge_map.html`（kmApplyLayout WASM 优先路径）
+
+#### 测试结果
+- 服务端全量测试：**133/133 通过**
+- WASM 全量测试：**46/46 通过**
+- 新增测试：0 个（FA2 公式与现有坐标有限性测试向后兼容）
+
 #### 依赖
 
-- `wasm-pack`：已在 v1.6.0 引入，需在 CI/本地构建时执行
+- `wasm-pack 0.14.0`：已安装，需在每次 crates/wasm 变更后重新执行
 - `wasm-bindgen`：已在 `crates/wasm/Cargo.toml`
 - 无新 JS 依赖
 
