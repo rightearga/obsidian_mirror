@@ -1283,6 +1283,92 @@ Sigma.js 专为大规模图可视化设计，底层使用 WebGL：
 
 ---
 
+### 🔧 v1.9.7 — WASM 图谱布局引擎（Rust ForceAtlas2 + Sigma.js 渲染）
+
+**主题**：用 Rust/WASM 接管布局计算，彻底解决 10k+ 节点的布局质量和速度问题
+
+#### 背景与动机
+
+v1.9.6 完成了 Sigma.js WebGL 渲染迁移，渲染层已无性能瓶颈。但布局层仍是 JavaScript Worker 中的 Fruchterman-Reingold 算法，存在两个问题：
+
+1. **质量**：F-R 产生均匀分布，不如 Vis.js 内置 ForceAtlas2 的 hub-and-spoke 聚类效果
+2. **速度**：JS O(n²) 排斥力计算；2000 节点需 ~20 秒，10000 节点不可接受
+
+WASM 的速度比 JS 快 10–100 倍，且 `crates/wasm/src/lib.rs` 已有 `compute_graph_layout`（Barnes-Hut O(n log n)），70% 的工作已完成。
+
+#### 架构
+
+```
+Rust / WASM（布局）
+  └── compute_graph_layout()
+        ├── ForceAtlas2 风格物理（度数加权排斥 + 线性吸引 + 向心引力）
+        ├── Barnes-Hut 四叉树 O(n log n)（已实现，M2 v1.6.4）
+        └── 返回 Float32Array 坐标（Transferable，零拷贝回传 JS）
+                    ↓
+JavaScript + Sigma.js（渲染）
+  └── 接收坐标 → 写入 graphology Graph → Sigma.js WebGL 渲染
+```
+
+#### 工作项
+
+**P0：编译 WASM 并集成到构建流程**
+
+- 在 `Makefile` / `build.rs` / `Dockerfile` 中加入 `wasm-pack build` 步骤
+- 输出到 `static/wasm/`，服务端 `actix-web` 通过 `/static/wasm/` 路由提供
+- `WasmLoader.computeGraphLayout(nodesJson, edgesJson, iterations)` 可在浏览器调用
+
+**P1：升级 WASM `compute_graph_layout` 为 ForceAtlas2 风格**
+
+当前实现是标准 F-R；改为 FA2 关键差异：
+
+| | F-R | ForceAtlas2 |
+|---|---|---|
+| 排斥力 | `k²/d`（均匀） | `(deg_i+1)*(deg_j+1)/d`（度数加权）|
+| 吸引力 | `d²/k`（二次）| `d / (deg_i+1)*(deg_j+1)`（线性归一化）|
+| 引力 | 无 | `gravity * (deg_i+1) * d_from_center` |
+| 速度控制 | 温度 | 每节点 swing 检测 |
+
+度数加权排斥是关键：高连接节点之间形成强斥力 → hub 节点自然形成中心 → Obsidian 风格有机聚类。
+
+**P2：graph_page.html 集成 WASM 布局**
+
+```javascript
+// 加载完图谱数据后
+if (WasmLoader.computeGraphLayout) {
+    const posJson = WasmLoader.computeGraphLayout(
+        JSON.stringify(nodes), JSON.stringify(edges), 300
+    );
+    const positions = JSON.parse(posJson);  // [{id, x, y}]
+    positions.forEach(p => gpGraph.setNodeAttribute(p.id, 'x', p.x));
+    // ...
+    gpRenderer.refresh();
+} else {
+    gpStartLayoutWorker();  // fallback
+}
+```
+
+**P3：知识地图同样升级**
+
+`compute_knowledge_map()` 已实现（v1.9.5），同样通过 `wasm-pack build` 解锁，
+知识地图布局从 JS Worker 改为 WASM 调用，速度提升 10–100×。
+
+#### 预期收益
+
+| 指标 | 当前（JS Worker F-R）| v1.9.7（WASM FA2）|
+|------|---------------------|-------------------|
+| 2k 节点布局时间 | ~20s | **< 1s** |
+| 10k 节点布局时间 | > 120s（不可用）| **< 5s** |
+| 布局质量 | 均匀分布 | hub-and-spoke 聚类（Obsidian 风格）|
+| 主线程阻塞 | 无（Worker）| 无（WASM 可在 Worker 内调用）|
+
+#### 依赖
+
+- `wasm-pack`：已在 v1.6.0 引入，需在 CI/本地构建时执行
+- `wasm-bindgen`：已在 `crates/wasm/Cargo.toml`
+- 无新 JS 依赖
+
+---
+
 ## 📦 功能分类
 
 ### 💡 未来探索方向
@@ -1321,7 +1407,7 @@ Sigma.js 专为大规模图可视化设计，底层使用 WebGL：
 | Q4 2026（已完成） | v1.6.0 – v1.6.6 | WASM 加速：客户端渲染 / 离线搜索 / JS 替换 |
 | Q1 2027（已完成） | v1.7.0 – v1.7.4 | 知识洞察：图谱聚类 / Git 历史 / Dashboard / 多仓库 |
 | Q2 2027（已完成） | v1.8.0 – v1.8.7 | 规模化 · 导出发布 · PWA 离线 · 可视化增强 · 依赖升级 |
-| Q3 2027（规划中） | v1.9.0 – v1.9.6 | 可视化深度：图谱影响力 / 路径查找 / 洞察深化 / 知识地图 / WebGL 大规模图谱 |
+| Q3 2027（规划中） | v1.9.0 – v1.9.7 | 可视化深度：图谱影响力 / 路径查找 / 洞察深化 / 知识地图 / WebGL 大规模图谱 / WASM 布局引擎 |
 
 ### 核心价值主张
 
@@ -1396,6 +1482,7 @@ Sigma.js 专为大规模图可视化设计，底层使用 WebGL：
 | v1.9.3 | 标签共现矩阵，连通度评分，阅读频率热力图 |
 | v1.9.5 | 知识地图（标签相似度聚类 + Barnes-Hut + Canvas 渲染）|
 | v1.9.6 | Vis.js → Sigma.js（WebGL），知识地图 Canvas LOD，10k+ 节点 60fps |
+| v1.9.7 | WASM ForceAtlas2 布局引擎；wasm-pack build 集成；2k 节点布局 < 1s |
 
 ### 明确不做的技术方向
 
