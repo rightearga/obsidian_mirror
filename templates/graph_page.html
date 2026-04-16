@@ -422,13 +422,28 @@ function gpRender(data) {
         labelFont:         'sans-serif',
         labelSize:         11,
         labelWeight:       '400',
-        labelDensity:      0.08,   // 极低标签密度（Obsidian 风格：缩小时无标签）
-        labelGridCellSize: 150,
+        labelDensity:      0.3,    // 适中密度，缩小到合理程度即可看到标签
+        labelGridCellSize: 80,    // 更小格子 = 显示更多标签
         minCameraRatio:    0.005,
         maxCameraRatio:    30,
         hideEdgesOnMove:   true,   // 移动时隐藏边（大图性能优化）
-        hideLabelsOnMove:  true,
+        hideLabelsOnMove:  false,  // 移动时保留标签
     });
+
+    // 缩放驱动边可见性：缩小时隐藏边（减少视觉混乱），放大时显示
+    // ratio > 1 = 缩小（图全局视图）；ratio < 0.3 = 放大（局部细节）
+    let _gpEdgesVisible = false;
+    const _gpUpdateEdgeVis = () => {
+        const ratio = gpRenderer.getCamera().ratio;
+        const shouldShow = ratio < 0.4;  // 放大到 40% 以内才显示边
+        if (shouldShow !== _gpEdgesVisible) {
+            _gpEdgesVisible = shouldShow;
+            gpGraph.forEachEdge(e => gpGraph.setEdgeAttribute(e, 'hidden', !shouldShow));
+            gpRenderer.refresh();
+        }
+    };
+    gpRenderer.getCamera().on('updated', _gpUpdateEdgeVis);
+    _gpUpdateEdgeVis(); // 初始化时执行一次
 
     // 节点点击 → 跳转笔记
     gpRenderer.on('clickNode', ({ node }) => {
