@@ -338,9 +338,8 @@ async function gpLoad() {
  * 根据入度和 pagerank 计算节点显示半径
  */
 function gpNodeSize(inDeg, pagerank) {
-    // Obsidian 风格：sqrt 缩放，高入度节点稍大但不夸张
-    // degree=0: 2px, degree=5: 4.4px, degree=20: 6.7px, degree=100: 9px
-    return 2 + Math.sqrt(inDeg) * 0.7;
+    // Obsidian 风格：sqrt 缩放 + 硬上限 5px
+    return Math.min(2 + Math.sqrt(inDeg) * 0.7, 5);
 }
 
 /**
@@ -498,16 +497,18 @@ function gpRender(data) {
         });
         gpRenderer.refresh();
     });
-    // 拖动时隐藏 tooltip
+    // 拖动时隐藏 tooltip + 触发摇曳（Obsidian 风格：画面拖动节点轻晃）
     gpRenderer.on('moveBody', () => {
         document.getElementById('gp-tooltip').style.display = 'none';
+        gpKickWobble();
     });
 
     gpHideLoading();
     document.getElementById('graph-page-stats').textContent =
         `${n} 个节点  ${gpEdgeData.length} 条边  布局计算中…`;
 
-    // ── 布局：优先 WASM（ForceAtlas2，Rust 级速度），fallback 到 JS Worker ──
+    // ── 布局：优先 WASM（d3-force，Rust 级速度），fallback 到 JS Worker ──
+    gpStopWobble();
     gpApplyLayout(n);
 }
 
@@ -540,6 +541,8 @@ async function gpApplyLayout(n) {
             gpRenderer?.refresh();
             document.getElementById('graph-page-stats').textContent =
                 `${n} 个节点  ${gpEdgeData.length} 条边`;
+            // 布局完成后启动进入摇曳（alpha=0.3 衰减到静止）
+            gpStartWobble(0.3);
             return;
         }
         console.warn('[graph] WASM 布局返回空，降级到 JS Worker');
@@ -1005,6 +1008,80 @@ function gpShowError(msg) {
     el.textContent   = msg;
     el.style.display = 'flex';
 }
+// ── Obsidian 风格摇曳效果 ─────────────────────────────────────────────────────
+// 进入时：布局完成后运行短暂 d3-force 模拟（alpha 0.3 → 0.001，约 2 秒）
+// 拖动时：给节点施加小冲击（alpha 提至 0.08），再自然衰减
+// ─────────────────────────────────────────────────────────────────────────────
+let _gpWobble = null; // {ids, x, y, vx, vy, idxMap, edges, alpha, raf}
+
+/**
+ * 启动摇曳模拟。
+ * @param {number} startAlpha 初始 alpha（0.3=进入时，0.08=拖动后）
+ */
+function gpStartWobble(startAlpha = 0.3) {
+    gpStopWobble();
+    const ids = gpGraph?.nodes();
+    if (!ids?.length || !gpRenderer) return;
+    const n = ids.length;
+    const idxMap = new Map(ids.map((id, i) => [id, i]));
+    const x  = new Float64Array(ids.map(id => gpGraph.getNodeAttribute(id, 'x') || 0));
+    const y  = new Float64Array(ids.map(id => gpGraph.getNodeAttribute(id, 'y') || 0));
+    const vx = new Float64Array(n);
+    const vy = new Float64Array(n);
+    // 边索引（用于 link 力）
+    const edges = [];
+    gpEdgeData.forEach(e => {
+        const i = idxMap.get(e.from), j = idxMap.get(e.to);
+        if (i !== undefined && j !== undefined) edges.push([i, j]);
+    });
+    // alpha 衰减速率（~150 帧衰减到 0.001）
+    const alphaDecay = 1 - Math.pow(0.001, 1 / 150);
+    _gpWobble = { ids, x, y, vx, vy, idxMap, edges, alpha: startAlpha, alphaDecay, raf: 0 };
+
+    function step() {
+        const w = _gpWobble;
+        if (!w || !gpRenderer || w.alpha < 0.001) { _gpWobble = null; return; }
+
+        // Link 弹力（轻微强度，产生摇曳而非大幅移动）
+        for (const [i, j] of w.edges) {
+            const dx = w.x[j] + w.vx[j] - w.x[i] - w.vx[i];
+            const dy = w.y[j] + w.vy[j] - w.y[i] - w.vy[i];
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const l = (dist - 30) / dist * 0.25 * w.alpha;
+            w.vx[i] += dx * l * 0.5;  w.vy[i] += dy * l * 0.5;
+            w.vx[j] -= dx * l * 0.5;  w.vy[j] -= dy * l * 0.5;
+        }
+        // 速度衰减 + 位置更新（d3-force velocityDecay=0.4）
+        for (let i = 0; i < n; i++) {
+            w.vx[i] *= 0.4;  w.vy[i] *= 0.4;
+            w.x[i] += w.vx[i];  w.y[i] += w.vy[i];
+            gpGraph.setNodeAttribute(w.ids[i], 'x', w.x[i]);
+            gpGraph.setNodeAttribute(w.ids[i], 'y', w.y[i]);
+        }
+        gpRenderer.refresh();
+        w.alpha *= (1 - w.alphaDecay);
+        w.raf = requestAnimationFrame(step);
+    }
+    _gpWobble.raf = requestAnimationFrame(step);
+}
+
+/** 停止摇曳模拟 */
+function gpStopWobble() {
+    if (_gpWobble) { cancelAnimationFrame(_gpWobble.raf); _gpWobble = null; }
+}
+
+/** 拖动/平移时给节点施加冲击，产生被动摇曳 */
+function gpKickWobble() {
+    if (!gpGraph || !gpRenderer) return;
+    if (_gpWobble) {
+        // 已在摇曳中：增大 alpha 产生更明显的响应
+        _gpWobble.alpha = Math.max(_gpWobble.alpha, 0.08);
+        return;
+    }
+    // 静止状态：启动短暂摇曳
+    gpStartWobble(0.08);
+}
+
 function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
