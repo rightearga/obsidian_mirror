@@ -883,17 +883,16 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     }
     // d3-force 不做度数加权，度数仅用于边力的 bias 计算
 
-    // 初始化位置：节点从中心附近出发，排斥力自然将其向外推开形成聚类
-    // LCG 伪随机数生成器（无外部依赖，避免线性分布陷阱）
-    let init_r = 20.0_f64 * (n as f64).sqrt();
-    let mut rng: u64 = 0xdeadbeef_cafebabe;
-    let mut rand_range = |lo: f64, hi: f64| -> f64 {
-        rng = rng.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
-        let r = ((rng >> 33) as f64) / ((1u64 << 31) as f64);
-        lo + r * (hi - lo)
-    };
-    let mut pos_x: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
-    let mut pos_y: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
+    // d3-force 默认初始化：黄金角螺旋（Fibonacci spiral），从中心向外紧密排布
+    // 与 d3-force 完全一致：initialRadius=10，使相邻节点天然靠近，收敛快
+    let phi = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt()); // 黄金角 ≈ 2.399 rad
+    let initial_radius = 10.0_f64;
+    let mut pos_x: Vec<f64> = (0..n)
+        .map(|i| initial_radius * (0.5 + i as f64).sqrt() * (phi * i as f64).cos())
+        .collect();
+    let mut pos_y: Vec<f64> = (0..n)
+        .map(|i| initial_radius * (0.5 + i as f64).sqrt() * (phi * i as f64).sin())
+        .collect();
 
     // ── d3-force 参数（与 Obsidian 图谱完全一致）────────────────────────────
     // 参考：d3-force 默认值，Obsidian graph view 使用相同算法
@@ -923,8 +922,9 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
         if alpha < alpha_min { break; }
 
         // ── 1. forceManyBody：n-body 排斥（Barnes-Hut，与 d3-force 一致）────
-        // 使用均匀质量（d3-force 不做度数加权），排斥强度 = repulsion_strength
-        let k_rep_sq = repulsion_strength * repulsion_strength;
+        // d3-force forceManyBody: force = |strength| / dist，传给四叉树的 k_sq
+        // 注意：QuadTree.repulsion_force 返回 k_sq/dist，所以直接传 |strength| 即可
+        let k_rep_sq = repulsion_strength.abs(); // = 30.0，而非 900.0
 
         if use_barnes_hut {
             let pad = 10.0;
