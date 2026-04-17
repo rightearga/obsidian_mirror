@@ -881,8 +881,7 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
         degrees[i] += 1;
         degrees[j] += 1;
     }
-    // 节点质量 = 度数 + 1（保证孤立节点质量不为零）
-    let masses: Vec<f64> = degrees.iter().map(|&d| (d + 1) as f64).collect();
+    // d3-force 不做度数加权，度数仅用于边力的 bias 计算
 
     // 初始化位置：节点从中心附近出发，排斥力自然将其向外推开形成聚类
     // LCG 伪随机数生成器（无外部依赖，避免线性分布陷阱）
@@ -896,21 +895,22 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     let mut pos_x: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
     let mut pos_y: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
 
-    // ── ForceAtlas2 参数 ──────────────────────────────────────────────────────
-    let area  = 2000.0_f64 * 2000.0_f64;
-    let k     = (area / n as f64).sqrt();
-    let k_sq  = k * k;
-    let k_a   = 0.08_f64;   // 吸引力（对应 springConstant: 0.08）
-    let k_g   = 0.008_f64;  // 向心引力（对应 centralGravity: 0.005）
-
-    // FA2 速度调节（替换温度冷却）：
-    // 全局速度 = tolerance * traction / swing，自动适应收敛状态
-    // swing 大 = 振荡剧烈 → 速度小；swing 小 = 接近收敛 → 速度大
-    let tolerance = 0.1_f64;          // 速度容忍度（越小越稳定）
-    let max_disp  = k * 4.0;          // 每步最大位移
-    let mut prev_fx = vec![0.0_f64; n];
-    let mut prev_fy = vec![0.0_f64; n];
-    let mut global_speed = 0.1_f64;   // 初始全局速度
+    // ── d3-force 参数（与 Obsidian 图谱完全一致）────────────────────────────
+    // 参考：d3-force 默认值，Obsidian graph view 使用相同算法
+    let repulsion_strength = -30.0_f64;  // forceManyBody().strength(-30)
+    let link_distance      = 30.0_f64;   // forceLink().distance(30)
+    // 边强度 = 1 / max(入度, 出度)，d3-force 默认值
+    let max_degree = degrees.iter().cloned().max().unwrap_or(1).max(1) as f64;
+    let link_strength = 1.0_f64 / max_degree;
+    let center_strength = 0.1_f64;    // forceCenter 强度
+    let velocity_decay  = 0.4_f64;    // 每步保留 40% 速度（关键：产生有机惯性）
+    // alpha 从 1 衰减到 0.001，控制力的强度（d3 默认 300 步衰减完）
+    let alpha_min   = 0.001_f64;
+    let alpha_decay = 1.0_f64 - alpha_min.powf(1.0 / iterations as f64);
+    let mut alpha   = 1.0_f64;
+    // 节点速度（核心：d3-force 的惯性/动量）
+    let mut vx = vec![0.0_f64; n];
+    let mut vy = vec![0.0_f64; n];
 
     // M2（v1.6.4）：n > 100 时使用 Barnes-Hut O(n log n) 四叉树近似
     let use_barnes_hut = n > 100;
@@ -920,107 +920,83 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     let warmup_iters   = (iterations as f64 * 0.6).round() as u32;
 
     for iter_idx in 0..iterations {
-        let mut fx = vec![0.0_f64; n];
-        let mut fy = vec![0.0_f64; n];
+        if alpha < alpha_min { break; }
+
+        // ── 1. forceManyBody：n-body 排斥（Barnes-Hut，与 d3-force 一致）────
+        // 使用均匀质量（d3-force 不做度数加权），排斥强度 = repulsion_strength
+        let k_rep_sq = repulsion_strength * repulsion_strength;
 
         if use_barnes_hut {
-            // Barnes-Hut：用度数质量构建四叉树，每节点 O(log n) 查询排斥力
-            let pad = init_r * 0.1 + 1.0;
+            let pad = 10.0;
             let x_min = pos_x.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
             let y_min = pos_y.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
             let x_max = pos_x.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
             let y_max = pos_y.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
             let bounds = [x_min, y_min, x_max, y_max];
 
-            // 插入时传入节点质量（度数+1），四叉树聚合时使用质量加权质心
+            // 所有节点质量统一为 1（d3-force 默认，非 FA2 度数加权）
             let mut tree = QuadTree::Empty;
             for i in 0..n {
-                tree.insert(i, pos_x[i], pos_y[i], masses[i], bounds);
+                tree.insert(i, pos_x[i], pos_y[i], 1.0, bounds);
             }
-
             let theta_sq = if iter_idx < warmup_iters { theta_early_sq } else { theta_late_sq };
             for i in 0..n {
-                // repulsion_force 内部已使用质量缩放：F = k_sq * mass_cluster / dist
-                // 再乘以本节点质量实现 FA2 双边度数加权：F_ij = k_r * m_i * m_j / dist
-                let (rfx, rfy) = tree.repulsion_force(pos_x[i], pos_y[i], k_sq, theta_sq, i);
-                fx[i] += rfx * masses[i];
-                fy[i] += rfy * masses[i];
+                let (rfx, rfy) = tree.repulsion_force(pos_x[i], pos_y[i], k_rep_sq, theta_sq, i);
+                // d3-force：velocity += force * alpha
+                vx[i] += rfx * alpha;
+                vy[i] += rfy * alpha;
             }
         } else {
-            // 小图：O(n²) FA2 精确排斥（度数双边加权）
             for i in 0..n {
                 for j in (i + 1)..n {
                     let dx = pos_x[i] - pos_x[j];
                     let dy = pos_y[i] - pos_y[j];
-                    let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-                    // FA2：F = k_sq * m_i * m_j / dist
-                    let repulsion = k_sq * masses[i] * masses[j] / dist;
-                    let rx = dx / dist * repulsion;
-                    let ry = dy / dist * repulsion;
-                    fx[i] += rx;
-                    fy[i] += ry;
-                    fx[j] -= rx;
-                    fy[j] -= ry;
+                    let dist_sq = (dx * dx + dy * dy).max(1.0);
+                    let dist    = dist_sq.sqrt();
+                    // d3-force forceManyBody：F = strength / dist
+                    let rep = repulsion_strength / dist;
+                    vx[i] += dx / dist * rep * alpha;
+                    vy[i] += dy / dist * rep * alpha;
+                    vx[j] -= dx / dist * rep * alpha;
+                    vy[j] -= dy / dist * rep * alpha;
                 }
             }
         }
 
-        // 吸引力（FA2 线性吸引，度数归一化，对应 springConstant * dist / m_i / m_j）
+        // ── 2. forceLink：弹簧吸引（d3-force 标准实现）──────────────────────
         for &(i, j) in &adj_edges {
-            let dx = pos_x[j] - pos_x[i];
-            let dy = pos_y[j] - pos_y[i];
+            let dx   = pos_x[j] + vx[j] - pos_x[i] - vx[i];
+            let dy   = pos_y[j] + vy[j] - pos_y[i] - vy[i];
             let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-            // FA2 吸引：F = k_a * dist / (m_i * m_j)（高度节点间吸引力小，不会拉过头）
-            let attraction = k_a * dist / (masses[i] * masses[j]).max(1.0);
-            let ax = dx / dist * attraction;
-            let ay = dy / dist * attraction;
-            fx[i] += ax;
-            fy[i] += ay;
-            fx[j] -= ax;
-            fy[j] -= ay;
+            // l = 弹簧伸长量 / dist（d3-force 弹簧力）
+            let l = (dist - link_distance) / dist * link_strength * alpha;
+            let bias_i = (degrees[j] + 1) as f64 / ((degrees[i] + degrees[j] + 2) as f64);
+            vx[i] += dx * l * (1.0 - bias_i);
+            vy[i] += dy * l * (1.0 - bias_i);
+            vx[j] -= dx * l * bias_i;
+            vy[j] -= dy * l * bias_i;
         }
 
-        // 向心引力（FA2 gravity：k_g * m_i * dist_from_center，防止孤立节点飞出）
+        // ── 3. forceCenter：向心力 ──────────────────────────────────────────
+        // d3-force forceCenter: 平移所有节点使重心回到原点
+        let cx = pos_x.iter().sum::<f64>() / n as f64;
+        let cy = pos_y.iter().sum::<f64>() / n as f64;
         for i in 0..n {
-            let dist_c = (pos_x[i] * pos_x[i] + pos_y[i] * pos_y[i]).sqrt().max(1.0);
-            let gravity = k_g * masses[i];
-            fx[i] -= gravity * pos_x[i] / dist_c;
-            fy[i] -= gravity * pos_y[i] / dist_c;
+            vx[i] -= cx * center_strength * alpha;
+            vy[i] -= cy * center_strength * alpha;
         }
 
-        // ── FA2 自适应速度调节 ──────────────────────────────────────────────
-        // swing_i = 本轮与上轮合力之差（大 = 振荡；小 = 收敛）
-        // traction_i = 本轮与上轮合力之和的一半（实际推进方向分量）
-        let mut total_swing    = 0.0_f64;
-        let mut total_traction = 0.0_f64;
+        // ── 4. 速度衰减 + 位置更新（d3-force 核心）─────────────────────────
         for i in 0..n {
-            let swing_i    = ((fx[i] - prev_fx[i]).powi(2) + (fy[i] - prev_fy[i]).powi(2)).sqrt();
-            let traction_i = ((fx[i] + prev_fx[i]).powi(2) + (fy[i] + prev_fy[i]).powi(2)).sqrt() * 0.5;
-            total_swing    += masses[i] * swing_i;
-            total_traction += masses[i] * traction_i;
+            // velocityDecay = 0.4：每步保留 40% 速度（产生有机惯性）
+            vx[i] *= velocity_decay;
+            vy[i] *= velocity_decay;
+            pos_x[i] += vx[i];
+            pos_y[i] += vy[i];
         }
-        // 全局速度自适应调整
-        let target_speed = tolerance * total_traction / total_swing.max(0.001);
-        // 平滑更新（防止速度突变导致节点飞出）
-        let speed_factor = if target_speed > global_speed {
-            1.0_f64.min(target_speed / global_speed).min(1.5)
-        } else {
-            (target_speed / global_speed).max(0.5)
-        };
-        global_speed = (global_speed * speed_factor).clamp(0.0001, max_disp);
 
-        // 应用合力（per-node 速度限制）
-        for i in 0..n {
-            let force = (fx[i] * fx[i] + fy[i] * fy[i]).sqrt().max(0.001);
-            // 每节点速度受自身 swing 限制（振荡剧烈的节点移动慢）
-            let node_swing = ((fx[i] - prev_fx[i]).powi(2) + (fy[i] - prev_fy[i]).powi(2)).sqrt();
-            let speed_i = global_speed / (1.0 + global_speed * node_swing.sqrt().max(0.001));
-            let disp = (force * speed_i).min(max_disp);
-            pos_x[i] += fx[i] / force * disp;
-            pos_y[i] += fy[i] / force * disp;
-            prev_fx[i] = fx[i];
-            prev_fy[i] = fy[i];
-        }
+        // ── 5. alpha 衰减（控制力的强度，d3-force 默认约 300 步到 0.001）───
+        alpha *= 1.0 - alpha_decay;
     }
 
     // 居中（将重心移到原点）
