@@ -886,7 +886,9 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     // d3-force 默认初始化：黄金角螺旋（Fibonacci spiral），从中心向外紧密排布
     // 与 d3-force 完全一致：initialRadius=10，使相邻节点天然靠近，收敛快
     let phi = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt()); // 黄金角 ≈ 2.399 rad
-    let initial_radius = 10.0_f64;
+    // 初始半径：节点均匀铺在面积 = n × link_dist² 的圆内，避免 hub 初始太密
+    // sqrt(n * ld² / π) ≈ ld * sqrt(n/3.14)，保证节点间平均距离约等于 link_distance
+    let initial_radius = 50.0_f64 * (n as f64).sqrt() / 6.28_f64.sqrt();
     let mut pos_x: Vec<f64> = (0..n)
         .map(|i| initial_radius * (0.5 + i as f64).sqrt() * (phi * i as f64).cos())
         .collect();
@@ -896,8 +898,8 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
 
     // ── d3-force 参数（与 Obsidian 图谱完全一致）────────────────────────────
     // 参考：d3-force 默认值，Obsidian graph view 使用相同算法
-    let repulsion_strength = -30.0_f64;  // forceManyBody().strength(-30)
-    let link_distance      = 40.0_f64;   // forceLink().distance(40)，给叶子节点更多间距
+    let repulsion_strength = -80.0_f64;  // Obsidian 实际约 80-200，-30 太弱导致团块密集
+    let link_distance      = 50.0_f64;   // 加大间距，给叶子节点更多展开空间
     // d3-force 默认：每条边强度 = 1 / min(source_degree, target_degree)
     // 叶子节点（degree=1）strength=1.0，hub 间（degree=50）strength=0.02
     // 这是 Obsidian 树状辐射结构的关键：叶子被强力拉向 hub
@@ -991,9 +993,9 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             pos_y[i] -= cy * center_strength;
         }
 
-        // ── 4. forceCollide：空间哈希网格 O(n)，支持 10k+ 节点 ─────────────
+        // ── 4. forceCollide：空间哈希网格 O(n)，每 3 轮跑一次 ────────────
         // 每格大小 = min_d，每节点只检查相邻 3×3=9 格，平均 O(1) 邻居数
-        {
+        if iter_idx % 3 == 0 {
             let min_d  = link_distance * 0.6;
             let min_d2 = min_d * min_d;
             let cell   = min_d;
