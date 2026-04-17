@@ -426,9 +426,9 @@ function gpRender(data) {
         labelSize:                  11,
         labelWeight:                '400',
         // 按缩放动态显示：缩小时稀疏，放大时增多（Obsidian 行为）
-        labelDensity:               0.12,
-        labelGridCellSize:          100,
-        labelRenderedSizeThreshold: 5,    // 屏幕像素 ≥ 5 才显示标签
+        labelDensity:               0.7,   // 高密度：大多数节点显示标签
+        labelGridCellSize:          40,    // 40px 格子，节点间距 ≥ 40px 时全部显示
+        labelRenderedSizeThreshold: 0,     // 不限制最小尺寸
         minCameraRatio:    0.005,
         maxCameraRatio:    30,
         hideEdgesOnMove:   true,   // 移动时隐藏边（性能）
