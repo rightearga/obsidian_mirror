@@ -407,9 +407,9 @@ function gpRender(data) {
         if (gpGraph.hasEdge(edgeKey)) return;
         const w = e.weight || 1;
         gpGraph.addEdgeWithKey(edgeKey, e.from, e.to, {
-            // Obsidian 风格：统一灰色细线
-            color: 'rgba(140,145,155,0.22)',
-            size:  0.5,
+            // Obsidian 风格：极细灰线，始终可见
+            color: 'rgba(130,135,150,0.18)',
+            size:  0.4,
         });
         gpEdgeData.push({ from: e.from, to: e.to, weight: w });
     });
@@ -418,44 +418,49 @@ function gpRender(data) {
     const container = document.getElementById('graph-page-vis');
     gpRenderer = new Sigma(gpGraph, container, {
         renderEdgeLabels:  false,
-        labelColor:        { color: '#cdd6f4' },
-        labelFont:         'sans-serif',
-        labelSize:         11,
-        labelWeight:       '400',
-        labelDensity:               0.5,   // 较高密度，更多节点显示标签
-        labelGridCellSize:          60,    // 更小格子 = 视野内更多标签
-        labelRenderedSizeThreshold: 1,     // 节点渲染 ≥ 1px 即显示标签（默认 6，太高）
+        // ── Obsidian 风格标签设置 ──
+        labelColor:                 { color: '#9da8c0' },   // 灰白色标签，与 Obsidian 一致
+        labelFont:                  'sans-serif',
+        labelSize:                  10,
+        labelWeight:                '400',
+        labelDensity:               1.0,   // 最高密度：所有节点都尝试显示标签
+        labelGridCellSize:          50,
+        labelRenderedSizeThreshold: 0,     // 任意大小节点都显示标签（Obsidian 默认全显示）
         minCameraRatio:    0.005,
         maxCameraRatio:    30,
-        hideEdgesOnMove:   true,   // 移动时隐藏边（大图性能优化）
+        hideEdgesOnMove:   true,   // 移动时隐藏边（性能）
         hideLabelsOnMove:  false,
     });
-
-    // 初始化：所有边隐藏（默认不显示，hover 时才显示邻边）
-    gpGraph.forEachEdge(e => gpGraph.setEdgeAttribute(e, 'hidden', true));
 
     // 节点点击 → 跳转笔记
     gpRenderer.on('clickNode', ({ node }) => {
         window.location.href = '/doc/' + encodeURIComponent(node);
     });
 
-    // 节点悬停：显示该节点的所有邻边，其他节点半透明
+    // 节点悬停（Obsidian 风格）：
+    //   - 该节点邻边高亮（不透明）
+    //   - 其他边淡化
+    //   - 非邻居节点半透明
     gpRenderer.on('enterNode', ({ node, event }) => {
         gpHoveredNode = node;
-
-        // 找出邻居节点集合
         const neighbors = new Set();
+
+        // 邻边高亮，收集邻居
         gpGraph.forEachEdge(node, (e, attrs, src, tgt) => {
             neighbors.add(src === node ? tgt : src);
-            // 显示邻边
-            gpGraph.setEdgeAttribute(e, 'hidden', false);
-            gpGraph.setEdgeAttribute(e, 'color', 'rgba(180,190,230,0.7)');
+            gpGraph.setEdgeAttribute(e, 'color', 'rgba(180,190,235,0.85)');
+            gpGraph.setEdgeAttribute(e, 'size',  1.5);
         });
-
+        // 其他边淡化
+        gpGraph.forEachEdge((e, attrs, src, tgt) => {
+            if (src !== node && tgt !== node) {
+                gpGraph.setEdgeAttribute(e, 'color', 'rgba(100,105,120,0.06)');
+            }
+        });
         // 非邻居节点半透明
         gpGraph.forEachNode(n => {
             if (n !== node && !neighbors.has(n)) {
-                gpGraph.setNodeAttribute(n, 'color', 'rgba(80,85,110,0.25)');
+                gpGraph.setNodeAttribute(n, 'color', 'rgba(80,85,110,0.2)');
             }
         });
         gpRenderer.refresh();
@@ -476,14 +481,17 @@ function gpRender(data) {
         gpHoveredNode = null;
         document.getElementById('gp-tooltip').style.display = 'none';
 
-        // 恢复所有节点颜色，重新隐藏所有边
+        // 恢复全部节点颜色和边样式
         const clusterColor = document.getElementById('gp-cluster-color').checked;
         const tagColorMap  = clusterColor ? gpBuildTagColorMap(gpNodeData) : {};
         gpNodeData.forEach(nd => {
             const c = clusterColor ? gpNodeColorStr({ tags: nd._tags }, tagColorMap) : '#6a5acd';
             gpGraph.setNodeAttribute(nd.id, 'color', c);
         });
-        gpGraph.forEachEdge(e => gpGraph.setEdgeAttribute(e, 'hidden', true));
+        gpGraph.forEachEdge(e => {
+            gpGraph.setEdgeAttribute(e, 'color', 'rgba(130,135,150,0.18)');
+            gpGraph.setEdgeAttribute(e, 'size',  0.4);
+        });
         gpRenderer.refresh();
     });
     // 拖动时隐藏 tooltip
