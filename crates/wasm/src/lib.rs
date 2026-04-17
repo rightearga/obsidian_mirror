@@ -884,11 +884,9 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     // d3-force 不做度数加权，度数仅用于边力的 bias 计算
 
     // d3-force 默认初始化：黄金角螺旋（Fibonacci spiral），从中心向外紧密排布
-    // 与 d3-force 完全一致：initialRadius=10，使相邻节点天然靠近，收敛快
     let phi = std::f64::consts::PI * (3.0 - 5.0_f64.sqrt()); // 黄金角 ≈ 2.399 rad
-    // 初始半径：节点均匀铺在面积 = n × link_dist² 的圆内，避免 hub 初始太密
-    // sqrt(n * ld² / π) ≈ ld * sqrt(n/3.14)，保证节点间平均距离约等于 link_distance
-    let initial_radius = 50.0_f64 * (n as f64).sqrt() / 6.28_f64.sqrt();
+    // d3-force 硬编码 initialRadius=10；n=400 时最远节点 ≈ 10*sqrt(400)=200，安全
+    let initial_radius = 10.0_f64;
     let mut pos_x: Vec<f64> = (0..n)
         .map(|i| initial_radius * (0.5 + i as f64).sqrt() * (phi * i as f64).cos())
         .collect();
@@ -896,15 +894,13 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
         .map(|i| initial_radius * (0.5 + i as f64).sqrt() * (phi * i as f64).sin())
         .collect();
 
-    // ── d3-force 参数（与 Obsidian 图谱完全一致）────────────────────────────
-    // 参考：d3-force 默认值，Obsidian graph view 使用相同算法
-    let repulsion_strength = -80.0_f64;  // Obsidian 实际约 80-200，-30 太弱导致团块密集
-    let link_distance      = 50.0_f64;   // 加大间距，给叶子节点更多展开空间
-    // d3-force 默认：每条边强度 = 1 / min(source_degree, target_degree)
-    // 叶子节点（degree=1）strength=1.0，hub 间（degree=50）strength=0.02
-    // 这是 Obsidian 树状辐射结构的关键：叶子被强力拉向 hub
-    let center_strength = 0.1_f64;    // forceCenter 强度
-    let velocity_decay  = 0.4_f64;    // 每步保留 40% 速度（关键：产生有机惯性）
+    // ── d3-force 参数 ────────────────────────────────────────────────────────
+    let repulsion_strength = -30.0_f64;  // d3 forceManyBody 默认值
+    let link_distance      = 40.0_f64;   // 边的目标长度
+    // forceX/Y gravity：对每个节点施加向原点的弹性引力（* alpha 自然衰减）
+    // 比 forceCenter 更好：forceCenter 只移重心，孤立节点照样飞走
+    let gravity_strength   = 0.05_f64;
+    let velocity_decay     = 0.6_f64;    // d3: 1 - velocityDecay(0.4) = 保留 60%
     // alpha 从 1 衰减到 0.001，控制力的强度（d3 默认 300 步衰减完）
     let alpha_min   = 0.001_f64;
     let alpha_decay = 1.0_f64 - alpha_min.powf(1.0 / iterations as f64);
@@ -984,19 +980,17 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             vy[j] -= dy * l * (1.0 - bias_src);
         }
 
-        // ── 3. forceCenter：直接平移位置（d3-force 源码：无 alpha，直接改 pos）
-        // d3-force: node.x -= centroidOffset * strength（非 velocity，非 *alpha）
-        let cx = pos_x.iter().sum::<f64>() / n as f64;
-        let cy = pos_y.iter().sum::<f64>() / n as f64;
+        // ── 3. forceX/Y（gravity）：弹性向心引力，防止孤立节点飞走 ──────────
+        // 与 forceCenter 不同：对每个节点个别施力，正比于与原点的距离 × alpha
         for i in 0..n {
-            pos_x[i] -= cx * center_strength; // 直接修正位置，不经过速度
-            pos_y[i] -= cy * center_strength;
+            vx[i] -= pos_x[i] * gravity_strength * alpha;
+            vy[i] -= pos_y[i] * gravity_strength * alpha;
         }
 
-        // ── 4. forceCollide：空间哈希网格 O(n)，每 3 轮跑一次 ────────────
+        // ── 4. forceCollide：空间哈希网格 O(n)，每轮执行 ────────────────────
         // 每格大小 = min_d，每节点只检查相邻 3×3=9 格，平均 O(1) 邻居数
-        if iter_idx % 3 == 0 {
-            let min_d  = link_distance * 0.6;
+        {
+            let min_d  = link_distance * 0.8;
             let min_d2 = min_d * min_d;
             let cell   = min_d;
             // 构建空间哈希：(grid_x, grid_y) → [node_indices]
@@ -1023,7 +1017,7 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
                                 let d2 = dx * dx + dy * dy;
                                 if d2 < min_d2 && d2 > 0.0 {
                                     let d = d2.sqrt();
-                                    let f = (min_d - d) / d * alpha * 0.7;
+                                    let f = (min_d - d) / d * 0.7;  // d3: forceCollide 不乘 alpha
                                     col_vx[i] -= dx * f;  col_vy[i] -= dy * f;
                                     col_vx[j] += dx * f;  col_vy[j] += dy * f;
                                 }
