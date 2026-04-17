@@ -407,9 +407,9 @@ function gpRender(data) {
         if (gpGraph.hasEdge(edgeKey)) return;
         const w = e.weight || 1;
         gpGraph.addEdgeWithKey(edgeKey, e.from, e.to, {
-            // Obsidian 风格：极细灰线，始终可见
-            color: 'rgba(130,135,150,0.18)',
-            size:  0.4,
+            // Obsidian 风格：极细灰线，始终可见，opacity 极低
+            color: 'rgba(120,125,140,0.10)',
+            size:  0.3,
         });
         gpEdgeData.push({ from: e.from, to: e.to, weight: w });
     });
@@ -419,13 +419,14 @@ function gpRender(data) {
     gpRenderer = new Sigma(gpGraph, container, {
         renderEdgeLabels:  false,
         // ── Obsidian 风格标签设置 ──
-        labelColor:                 { color: '#9da8c0' },   // 灰白色标签，与 Obsidian 一致
+        labelColor:                 { color: '#9da8c0' },
         labelFont:                  'sans-serif',
-        labelSize:                  10,
+        labelSize:                  11,
         labelWeight:                '400',
-        labelDensity:               1.0,   // 最高密度：所有节点都尝试显示标签
-        labelGridCellSize:          50,
-        labelRenderedSizeThreshold: 0,     // 任意大小节点都显示标签（Obsidian 默认全显示）
+        // 按缩放动态显示：缩小时稀疏，放大时增多（Obsidian 行为）
+        labelDensity:               0.12,
+        labelGridCellSize:          100,
+        labelRenderedSizeThreshold: 5,    // 屏幕像素 ≥ 5 才显示标签
         minCameraRatio:    0.005,
         maxCameraRatio:    30,
         hideEdgesOnMove:   true,   // 移动时隐藏边（性能）
@@ -489,8 +490,8 @@ function gpRender(data) {
             gpGraph.setNodeAttribute(nd.id, 'color', c);
         });
         gpGraph.forEachEdge(e => {
-            gpGraph.setEdgeAttribute(e, 'color', 'rgba(130,135,150,0.18)');
-            gpGraph.setEdgeAttribute(e, 'size',  0.4);
+            gpGraph.setEdgeAttribute(e, 'color', 'rgba(120,125,140,0.10)');
+            gpGraph.setEdgeAttribute(e, 'size',  0.3);
         });
         gpRenderer.refresh();
     });
