@@ -973,21 +973,22 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             let dj = degrees[j].max(1) as f64;
             let strength = 1.0 / di.min(dj);
             let l = (dist - link_distance) / dist * strength * alpha;
-            // bias：高度节点位移少（更"固定"），低度节点位移多
-            let bias_i = dj / (di + dj);
-            vx[i] += dx * l * (1.0 - bias_i);
-            vy[i] += dy * l * (1.0 - bias_i);
-            vx[j] -= dx * l * bias_i;
-            vy[j] -= dy * l * bias_i;
+            // d3-force 正确 bias：source 移动量 = target_deg/(src+tgt)，target 反之
+            // 叶子(di=1)→hub(dj=100)：叶子移动 100/(101)≈99%，hub 移动 1/101≈1%
+            let bias_src = dj / (di + dj); // source i 的位移比例
+            vx[i] += dx * l * bias_src;         // source i 大幅飞向 hub（当 dj 大时）
+            vy[i] += dy * l * bias_src;
+            vx[j] -= dx * l * (1.0 - bias_src); // target j 几乎不动（当 di 小时）
+            vy[j] -= dy * l * (1.0 - bias_src);
         }
 
-        // ── 3. forceCenter：向心力 ──────────────────────────────────────────
-        // d3-force forceCenter: 平移所有节点使重心回到原点
+        // ── 3. forceCenter：直接平移位置（d3-force 源码：无 alpha，直接改 pos）
+        // d3-force: node.x -= centroidOffset * strength（非 velocity，非 *alpha）
         let cx = pos_x.iter().sum::<f64>() / n as f64;
         let cy = pos_y.iter().sum::<f64>() / n as f64;
         for i in 0..n {
-            vx[i] -= cx * center_strength * alpha;
-            vy[i] -= cy * center_strength * alpha;
+            pos_x[i] -= cx * center_strength; // 直接修正位置，不经过速度
+            pos_y[i] -= cy * center_strength;
         }
 
         // ── 4. 速度衰减 + 位置更新（d3-force 核心）─────────────────────────
