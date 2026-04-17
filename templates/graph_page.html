@@ -338,8 +338,8 @@ async function gpLoad() {
  * 根据入度和 pagerank 计算节点显示半径
  */
 function gpNodeSize(inDeg, pagerank) {
-    // Obsidian 风格：小节点，入度高的节点略大
-    return 3 + Math.min(inDeg * 0.6, 6);
+    // Obsidian 风格：核心节点（高入度）明显更大
+    return 3 + Math.min(inDeg * 1.2, 18);
 }
 
 /**
@@ -728,22 +728,25 @@ function gpFRStep() {
 }
 
 // ── 聚类着色 ──────────────────────────────────────────────────────────────────
-/** 统计节点集合中各标签频率，取出现最多的前 12 个，映射到调色板 */
+/**
+ * 统计标签频率，按频率排序后循环分配调色板颜色。
+ * 所有有标签的笔记都能得到颜色（不只是 Top-12），无标签笔记才用灰色。
+ */
 function gpBuildTagColorMap(nodes) {
     const freq = {};
     nodes.forEach(n => (n.tags || []).forEach(t => { freq[t] = (freq[t] || 0) + 1; }));
-    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 12);
+    const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     const map = {};
     sorted.forEach(([tag], i) => { map[tag] = GP_PALETTE[i % GP_PALETTE.length]; });
     return map;
 }
 
-/** 根据节点第一个匹配标签返回颜色字符串 */
+/** 根据节点第一个标签返回颜色，无标签返回灰色 */
 function gpNodeColorStr(node, tagColorMap) {
     for (const tag of (node.tags || [])) {
         if (tagColorMap[tag]) return tagColorMap[tag];
     }
-    return '#6b7280';
+    return '#6b7280';  // 无标签节点：灰色（与 Obsidian 一致）
 }
 
 /** 切换聚类着色（不重新拉取数据，直接更新颜色） */
