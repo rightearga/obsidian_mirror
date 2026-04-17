@@ -507,7 +507,6 @@ function gpRender(data) {
         `${n} 个节点  ${gpEdgeData.length} 条边  布局计算中…`;
 
     // ── 布局：优先 WASM（d3-force，Rust 级速度），fallback 到 JS Worker ──
-    gpStopWobble();
     gpApplyLayout(n);
 }
 
@@ -540,8 +539,6 @@ async function gpApplyLayout(n) {
             gpRenderer?.refresh();
             document.getElementById('graph-page-stats').textContent =
                 `${n} 个节点  ${gpEdgeData.length} 条边`;
-            // 布局完成后启动进入摇曳（alpha=0.3 衰减到静止）
-            gpStartWobble(0.3);
             return;
         }
         console.warn('[graph] WASM 布局返回空，降级到 JS Worker');
@@ -1007,103 +1004,6 @@ function gpShowError(msg) {
     el.textContent   = msg;
     el.style.display = 'flex';
 }
-// ── Obsidian 风格摇曳效果 ─────────────────────────────────────────────────────
-// 原理：给每个节点随机初速度，link 弹力把周边节点拉回 hub（hub 受多向抵消稳定）
-// 进入时：alpha=0.3 → 0.001（约 120 帧 2 秒内衰减静止）
-// 拖动时：相机平移量转化为节点冲击速度，产生"惯性晃动"
-// ─────────────────────────────────────────────────────────────────────────────
-let _gpWobble = null;
-let _gpCamPrev = { x: 0, y: 0 };   // 追踪相机位置用于拖动晃动
-
-/**
- * 启动摇曳。所有节点获得随机初速，弹力逐步收束到平衡位置。
- * 周边节点（少连接）摇得更远、更久；hub 节点（多向弹力抵消）较稳定。
- */
-function gpStartWobble(startAlpha = 0.3) {
-    gpStopWobble();
-    const ids = gpGraph?.nodes();
-    if (!ids?.length || !gpRenderer) return;
-    const n = ids.length;
-    const idxMap = new Map(ids.map((id, i) => [id, i]));
-    const x  = new Float64Array(ids.map(id => gpGraph.getNodeAttribute(id, 'x') || 0));
-    const y  = new Float64Array(ids.map(id => gpGraph.getNodeAttribute(id, 'y') || 0));
-    const vx = new Float64Array(n);
-    const vy = new Float64Array(n);
-
-    // ── 关键：给每个节点小随机初速度（方向各异，黄金角分布）──
-    const kickStr = 1.2;
-    for (let i = 0; i < n; i++) {
-        const a = i * 2.3999; // 黄金角，使方向均匀分布
-        vx[i] = Math.sin(a) * kickStr;
-        vy[i] = Math.cos(a) * kickStr;
-    }
-
-    const edges = [];
-    gpEdgeData.forEach(e => {
-        const i = idxMap.get(e.from), j = idxMap.get(e.to);
-        if (i !== undefined && j !== undefined) edges.push([i, j]);
-    });
-
-    const alphaDecay = 1 - Math.pow(0.001, 1 / 120);
-    // 记录相机当前位置（用于拖动检测）
-    const cam = gpRenderer.getCamera();
-    _gpCamPrev = { x: cam.x, y: cam.y };
-
-    _gpWobble = { ids, x, y, vx, vy, idxMap, edges, alpha: startAlpha, alphaDecay, n, raf: 0 };
-    _gpWobble.raf = requestAnimationFrame(_gpWobbleStep);
-}
-
-function _gpWobbleStep() {
-    const w = _gpWobble;
-    if (!w || !gpRenderer || w.alpha < 0.0005) { _gpWobble = null; return; }
-
-    // ── 拖动检测：相机平移 → 节点速度冲击（惯性晃动）──────────────
-    const cam = gpRenderer.getCamera();
-    const dcx = (cam.x - _gpCamPrev.x);  // 归一化相机位移
-    const dcy = (cam.y - _gpCamPrev.y);
-    _gpCamPrev = { x: cam.x, y: cam.y };
-    if (Math.abs(dcx) + Math.abs(dcy) > 0.0001) {
-        const drag = 400 / (cam.ratio || 1); // 转换为图坐标尺度
-        for (let i = 0; i < w.n; i++) {
-            w.vx[i] += dcx * drag * 0.15;
-            w.vy[i] += dcy * drag * 0.15;
-        }
-        w.alpha = Math.max(w.alpha, 0.06);
-    }
-
-    // ── link 弹力（保持节点间连接关系，拉周边回 hub）───────────────
-    for (const [i, j] of w.edges) {
-        const dx = w.x[j] + w.vx[j] - w.x[i] - w.vx[i];
-        const dy = w.y[j] + w.vy[j] - w.y[i] - w.vy[i];
-        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        const l = (dist - 30) / dist * 0.3 * w.alpha;
-        w.vx[i] += dx * l * 0.5;  w.vy[i] += dy * l * 0.5;
-        w.vx[j] -= dx * l * 0.5;  w.vy[j] -= dy * l * 0.5;
-    }
-
-    // ── 速度衰减 + 位置更新 ─────────────────────────────────────────
-    for (let i = 0; i < w.n; i++) {
-        w.vx[i] *= 0.4;  w.vy[i] *= 0.4;
-        w.x[i] += w.vx[i];  w.y[i] += w.vy[i];
-        gpGraph.setNodeAttribute(w.ids[i], 'x', w.x[i]);
-        gpGraph.setNodeAttribute(w.ids[i], 'y', w.y[i]);
-    }
-    gpRenderer.refresh();
-    w.alpha *= (1 - w.alphaDecay);
-    w.raf = requestAnimationFrame(_gpWobbleStep);
-}
-
-/** 停止摇曳 */
-function gpStopWobble() {
-    if (_gpWobble) { cancelAnimationFrame(_gpWobble.raf); _gpWobble = null; }
-}
-
-/** 摇曳未运行时触发短暂补充摇曳（供外部事件调用） */
-function gpKickWobble() {
-    if (_gpWobble) _gpWobble.alpha = Math.max(_gpWobble.alpha, 0.06);
-    else gpStartWobble(0.06);
-}
-
 function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
