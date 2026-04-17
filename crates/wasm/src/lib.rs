@@ -897,7 +897,7 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     // ── d3-force 参数（与 Obsidian 图谱完全一致）────────────────────────────
     // 参考：d3-force 默认值，Obsidian graph view 使用相同算法
     let repulsion_strength = -30.0_f64;  // forceManyBody().strength(-30)
-    let link_distance      = 30.0_f64;   // forceLink().distance(30)
+    let link_distance      = 40.0_f64;   // forceLink().distance(40)，给叶子节点更多间距
     // d3-force 默认：每条边强度 = 1 / min(source_degree, target_degree)
     // 叶子节点（degree=1）strength=1.0，hub 间（degree=50）strength=0.02
     // 这是 Obsidian 树状辐射结构的关键：叶子被强力拉向 hub
@@ -991,7 +991,28 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             pos_y[i] -= cy * center_strength;
         }
 
-        // ── 4. 速度衰减 + 位置更新（d3-force 核心）─────────────────────────
+        // ── 4. forceCollide：碰撞排斥，防止同 hub 的多个叶子重叠 ─────────────
+        // 每 15 轮执行一次（O(n²) early-exit，总开销约 200ms 可接受）
+        if iter_idx % 15 == 0 {
+            let min_d  = link_distance * 0.55; // 碰撞最小距离（约 link_distance 的一半）
+            let min_d2 = min_d * min_d;
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    let dx = pos_x[j] - pos_x[i];
+                    let dy = pos_y[j] - pos_y[i];
+                    if dx.abs() > min_d * 2.0 { continue; } // 快速裁剪：x 差距太大直接跳过
+                    let d2 = dx * dx + dy * dy;
+                    if d2 < min_d2 {
+                        let d = d2.sqrt().max(0.001);
+                        let f = (min_d - d) / d * alpha * 0.8;
+                        vx[i] -= dx * f;  vy[i] -= dy * f;
+                        vx[j] += dx * f;  vy[j] += dy * f;
+                    }
+                }
+            }
+        }
+
+        // ── 5. 速度衰减 + 位置更新（d3-force 核心）─────────────────────────
         for i in 0..n {
             // velocityDecay = 0.4：每步保留 40% 速度（产生有机惯性）
             vx[i] *= velocity_decay;
