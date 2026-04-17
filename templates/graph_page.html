@@ -42,7 +42,7 @@
 /* 图谱容器 */
 #graph-page-container {
     flex: 1; position: relative; overflow: hidden;
-    background: var(--graph-bg, #13131f);
+    background: var(--graph-bg, #2d2d2d);  /* Obsidian 图谱背景色 */
 }
 /* Sigma.js 画布填满容器 */
 #graph-page-vis { width: 100%; height: 100%; }
@@ -407,8 +407,8 @@ function gpRender(data) {
         if (gpGraph.hasEdge(edgeKey)) return;
         const w = e.weight || 1;
         gpGraph.addEdgeWithKey(edgeKey, e.from, e.to, {
-            // Obsidian 风格：极细灰线，始终可见，opacity 极低
-            color: 'rgba(120,125,140,0.10)',
+            // Obsidian 风格：暗灰线，非常低透明度，不产生白色叠加效果
+            color: 'rgba(100,105,115,0.06)',
             size:  0.3,
         });
         gpEdgeData.push({ from: e.from, to: e.to, weight: w });
@@ -418,6 +418,8 @@ function gpRender(data) {
     const container = document.getElementById('graph-page-vis');
     gpRenderer = new Sigma(gpGraph, container, {
         renderEdgeLabels:  false,
+        defaultEdgeColor:  'rgba(100,105,115,0.06)',
+        backgroundColor:   '#2d2d2d',
         // ── Obsidian 风格标签设置 ──
         labelColor:                 { color: '#9da8c0' },
         labelFont:                  'sans-serif',
@@ -490,7 +492,7 @@ function gpRender(data) {
             gpGraph.setNodeAttribute(nd.id, 'color', c);
         });
         gpGraph.forEachEdge(e => {
-            gpGraph.setEdgeAttribute(e, 'color', 'rgba(120,125,140,0.10)');
+            gpGraph.setEdgeAttribute(e, 'color', 'rgba(100,105,115,0.06)');
             gpGraph.setEdgeAttribute(e, 'size',  0.3);
         });
         gpRenderer.refresh();
