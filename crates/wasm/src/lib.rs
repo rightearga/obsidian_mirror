@@ -896,19 +896,21 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     let mut pos_x: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
     let mut pos_y: Vec<f64> = (0..n).map(|_| rand_range(-init_r, init_r)).collect();
 
-    // ForceAtlas2 参数（对应 Vis.js 默认值）
-    // k_r：排斥力系数（对应 gravitationalConstant: -50 的绝对值）
+    // ── ForceAtlas2 参数 ──────────────────────────────────────────────────────
     let area  = 2000.0_f64 * 2000.0_f64;
     let k     = (area / n as f64).sqrt();
     let k_sq  = k * k;
-    // k_a：吸引力系数（对应 springConstant: 0.08 / springLength: 100）
-    let k_a   = 0.08_f64;
-    // k_g：向心引力系数（对应 centralGravity: 0.005，防止孤立节点飞出）
-    let k_g   = 0.005_f64;
+    let k_a   = 0.08_f64;   // 吸引力（对应 springConstant: 0.08）
+    let k_g   = 0.008_f64;  // 向心引力（对应 centralGravity: 0.005）
 
-    // 温度调度（同 F-R，但初始温度更高以快速从中心扩散）
-    let mut temp = k * 4.0;
-    let cooling  = 0.88_f64;
+    // FA2 速度调节（替换温度冷却）：
+    // 全局速度 = tolerance * traction / swing，自动适应收敛状态
+    // swing 大 = 振荡剧烈 → 速度小；swing 小 = 接近收敛 → 速度大
+    let tolerance = 0.1_f64;          // 速度容忍度（越小越稳定）
+    let max_disp  = k * 4.0;          // 每步最大位移
+    let mut prev_fx = vec![0.0_f64; n];
+    let mut prev_fy = vec![0.0_f64; n];
+    let mut global_speed = 0.1_f64;   // 初始全局速度
 
     // M2（v1.6.4）：n > 100 时使用 Barnes-Hut O(n log n) 四叉树近似
     let use_barnes_hut = n > 100;
@@ -923,7 +925,7 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
 
         if use_barnes_hut {
             // Barnes-Hut：用度数质量构建四叉树，每节点 O(log n) 查询排斥力
-            let pad = (init_r + temp * iterations as f64) * 0.05 + 1.0;
+            let pad = init_r * 0.1 + 1.0;
             let x_min = pos_x.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
             let y_min = pos_y.iter().cloned().fold(f64::INFINITY, f64::min) - pad;
             let x_max = pos_x.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + pad;
@@ -986,15 +988,39 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             fy[i] -= gravity * pos_y[i] / dist_c;
         }
 
-        // 应用合力（受温度限制最大位移）
+        // ── FA2 自适应速度调节 ──────────────────────────────────────────────
+        // swing_i = 本轮与上轮合力之差（大 = 振荡；小 = 收敛）
+        // traction_i = 本轮与上轮合力之和的一半（实际推进方向分量）
+        let mut total_swing    = 0.0_f64;
+        let mut total_traction = 0.0_f64;
         for i in 0..n {
-            let magnitude = (fx[i] * fx[i] + fy[i] * fy[i]).sqrt().max(1.0);
-            let displacement = magnitude.min(temp);
-            pos_x[i] += fx[i] / magnitude * displacement;
-            pos_y[i] += fy[i] / magnitude * displacement;
+            let swing_i    = ((fx[i] - prev_fx[i]).powi(2) + (fy[i] - prev_fy[i]).powi(2)).sqrt();
+            let traction_i = ((fx[i] + prev_fx[i]).powi(2) + (fy[i] + prev_fy[i]).powi(2)).sqrt() * 0.5;
+            total_swing    += masses[i] * swing_i;
+            total_traction += masses[i] * traction_i;
         }
+        // 全局速度自适应调整
+        let target_speed = tolerance * total_traction / total_swing.max(0.001);
+        // 平滑更新（防止速度突变导致节点飞出）
+        let speed_factor = if target_speed > global_speed {
+            1.0_f64.min(target_speed / global_speed).min(1.5)
+        } else {
+            (target_speed / global_speed).max(0.5)
+        };
+        global_speed = (global_speed * speed_factor).clamp(0.0001, max_disp);
 
-        temp *= cooling;
+        // 应用合力（per-node 速度限制）
+        for i in 0..n {
+            let force = (fx[i] * fx[i] + fy[i] * fy[i]).sqrt().max(0.001);
+            // 每节点速度受自身 swing 限制（振荡剧烈的节点移动慢）
+            let node_swing = ((fx[i] - prev_fx[i]).powi(2) + (fy[i] - prev_fy[i]).powi(2)).sqrt();
+            let speed_i = global_speed / (1.0 + global_speed * node_swing.sqrt().max(0.001));
+            let disp = (force * speed_i).min(max_disp);
+            pos_x[i] += fx[i] / force * disp;
+            pos_y[i] += fy[i] / force * disp;
+            prev_fx[i] = fx[i];
+            prev_fy[i] = fy[i];
+        }
     }
 
     // 居中（将重心移到原点）
