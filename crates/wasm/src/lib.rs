@@ -991,25 +991,46 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             pos_y[i] -= cy * center_strength;
         }
 
-        // ── 4. forceCollide：碰撞排斥，防止同 hub 的多个叶子重叠 ─────────────
-        // 每 15 轮执行一次（O(n²) early-exit，总开销约 200ms 可接受）
-        if iter_idx % 15 == 0 {
-            let min_d  = link_distance * 0.55; // 碰撞最小距离（约 link_distance 的一半）
+        // ── 4. forceCollide：空间哈希网格 O(n)，支持 10k+ 节点 ─────────────
+        // 每格大小 = min_d，每节点只检查相邻 3×3=9 格，平均 O(1) 邻居数
+        {
+            let min_d  = link_distance * 0.6;
             let min_d2 = min_d * min_d;
+            let cell   = min_d;
+            // 构建空间哈希：(grid_x, grid_y) → [node_indices]
+            let mut grid: std::collections::HashMap<(i32, i32), Vec<usize>> =
+                std::collections::HashMap::with_capacity(n);
             for i in 0..n {
-                for j in (i + 1)..n {
-                    let dx = pos_x[j] - pos_x[i];
-                    let dy = pos_y[j] - pos_y[i];
-                    if dx.abs() > min_d * 2.0 { continue; } // 快速裁剪：x 差距太大直接跳过
-                    let d2 = dx * dx + dy * dy;
-                    if d2 < min_d2 {
-                        let d = d2.sqrt().max(0.001);
-                        let f = (min_d - d) / d * alpha * 0.8;
-                        vx[i] -= dx * f;  vy[i] -= dy * f;
-                        vx[j] += dx * f;  vy[j] += dy * f;
+                let gx = (pos_x[i] / cell).floor() as i32;
+                let gy = (pos_y[i] / cell).floor() as i32;
+                grid.entry((gx, gy)).or_default().push(i);
+            }
+            // 碰撞检测：每节点查相邻 9 格
+            let mut col_vx = vec![0.0_f64; n];
+            let mut col_vy = vec![0.0_f64; n];
+            for i in 0..n {
+                let gx = (pos_x[i] / cell).floor() as i32;
+                let gy = (pos_y[i] / cell).floor() as i32;
+                for dgx in -1i32..=1 {
+                    for dgy in -1i32..=1 {
+                        if let Some(neighbors) = grid.get(&(gx + dgx, gy + dgy)) {
+                            for &j in neighbors {
+                                if j <= i { continue; }
+                                let dx = pos_x[j] - pos_x[i];
+                                let dy = pos_y[j] - pos_y[i];
+                                let d2 = dx * dx + dy * dy;
+                                if d2 < min_d2 && d2 > 0.0 {
+                                    let d = d2.sqrt();
+                                    let f = (min_d - d) / d * alpha * 0.7;
+                                    col_vx[i] -= dx * f;  col_vy[i] -= dy * f;
+                                    col_vx[j] += dx * f;  col_vy[j] += dy * f;
+                                }
+                            }
+                        }
                     }
                 }
             }
+            for i in 0..n { vx[i] += col_vx[i]; vy[i] += col_vy[i]; }
         }
 
         // ── 5. 速度衰减 + 位置更新（d3-force 核心）─────────────────────────
