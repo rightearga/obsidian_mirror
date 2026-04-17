@@ -898,9 +898,9 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
     // 参考：d3-force 默认值，Obsidian graph view 使用相同算法
     let repulsion_strength = -30.0_f64;  // forceManyBody().strength(-30)
     let link_distance      = 30.0_f64;   // forceLink().distance(30)
-    // 边强度 = 1 / max(入度, 出度)，d3-force 默认值
-    let max_degree = degrees.iter().cloned().max().unwrap_or(1).max(1) as f64;
-    let link_strength = 1.0_f64 / max_degree;
+    // d3-force 默认：每条边强度 = 1 / min(source_degree, target_degree)
+    // 叶子节点（degree=1）strength=1.0，hub 间（degree=50）strength=0.02
+    // 这是 Obsidian 树状辐射结构的关键：叶子被强力拉向 hub
     let center_strength = 0.1_f64;    // forceCenter 强度
     let velocity_decay  = 0.4_f64;    // 每步保留 40% 速度（关键：产生有机惯性）
     // alpha 从 1 衰减到 0.001，控制力的强度（d3 默认 300 步衰减完）
@@ -963,14 +963,18 @@ pub fn compute_graph_layout(nodes_json: &str, edges_json: &str, iterations: u32)
             }
         }
 
-        // ── 2. forceLink：弹簧吸引（d3-force 标准实现）──────────────────────
+        // ── 2. forceLink：弹簧吸引（d3-force 默认，per-link 强度）─────────
         for &(i, j) in &adj_edges {
             let dx   = pos_x[j] + vx[j] - pos_x[i] - vx[i];
             let dy   = pos_y[j] + vy[j] - pos_y[i] - vy[i];
             let dist = (dx * dx + dy * dy).sqrt().max(1.0);
-            // l = 弹簧伸长量 / dist（d3-force 弹簧力）
-            let l = (dist - link_distance) / dist * link_strength * alpha;
-            let bias_i = (degrees[j] + 1) as f64 / ((degrees[i] + degrees[j] + 2) as f64);
+            // per-link strength：1 / min(di, dj)，叶子节点 strength=1.0
+            let di = degrees[i].max(1) as f64;
+            let dj = degrees[j].max(1) as f64;
+            let strength = 1.0 / di.min(dj);
+            let l = (dist - link_distance) / dist * strength * alpha;
+            // bias：高度节点位移少（更"固定"），低度节点位移多
+            let bias_i = dj / (di + dj);
             vx[i] += dx * l * (1.0 - bias_i);
             vy[i] += dy * l * (1.0 - bias_i);
             vx[j] -= dx * l * bias_i;
