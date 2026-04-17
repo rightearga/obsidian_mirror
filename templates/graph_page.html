@@ -734,7 +734,8 @@ function gpFRStep() {
  */
 function gpBuildTagColorMap(nodes) {
     const freq = {};
-    nodes.forEach(n => (n.tags || []).forEach(t => { freq[t] = (freq[t] || 0) + 1; }));
+    // 兼容 tags（API 原始数据）和 _tags（gpNodeData 内部字段）
+    nodes.forEach(n => (n.tags || n._tags || []).forEach(t => { freq[t] = (freq[t] || 0) + 1; }));
     const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]);
     const map = {};
     sorted.forEach(([tag], i) => { map[tag] = GP_PALETTE[i % GP_PALETTE.length]; });
@@ -743,10 +744,11 @@ function gpBuildTagColorMap(nodes) {
 
 /** 根据节点第一个标签返回颜色，无标签返回灰色 */
 function gpNodeColorStr(node, tagColorMap) {
-    for (const tag of (node.tags || [])) {
+    // 兼容 tags 和 _tags 字段
+    for (const tag of (node.tags || node._tags || [])) {
         if (tagColorMap[tag]) return tagColorMap[tag];
     }
-    return '#6b7280';  // 无标签节点：灰色（与 Obsidian 一致）
+    return '#6b7280';
 }
 
 /** 切换聚类着色（不重新拉取数据，直接更新颜色） */
