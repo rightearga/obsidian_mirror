@@ -8,6 +8,39 @@
 
 ---
 
+## [v1.9.8] — 2026-04-20
+
+时间线性能优化、移动端手势误触修复、多项 Bug 修复。
+
+### Fixed
+
+- **时间线 `date` 字段解析失败**（`src/handlers.rs`）：`extract_note_date_str` 仅处理 `Value::String`，而 serde_yaml 0.9 将无引号 YAML timestamp（如 `date: 2026-04-20 09:40:15`）解析为 `Value::Tagged`，导致 `as_str()` 返回 `None`，时间线全部回退为 git checkout 时间。新增 `yaml_value_as_str` 辅助函数兼容 `Value::Tagged`；同时按优先级支持 `date` / `created` / `created_at` 三个字段名
+
+- **增量搜索索引 Windows PermissionDenied**（`src/search_engine.rs`）：`update_documents` 未设置 `NoMergePolicy`，commit 时 Tantivy 尝试合并段文件（`.idx`），但 `IndexReader` 仍持有文件句柄，Windows 强制文件锁导致 `OS error 5`。对齐 `rebuild_index` 已有的修复，为 `update_documents` 的 `IndexWriter` 同样设置 `NoMergePolicy`
+
+- **手机端滚动时自动跳转到下一篇文章**（`static/js/gestures.js`、`static/js/init.js`）：
+  - **根本原因**：`gestures.js` v1.4.4 引入的翻页手势在移动端存在根本性缺陷——`getScrollContainer()` 返回 `.page-scrollable-content`，但该元素在手机端 CSS 被强制设为 `overflow: visible; height: auto`，导致 `scrollTop` 永远为 0，`atScrollTop` 与 `atScrollBottom` 同时为 `true`，任意 ≥100px 垂直滑动都会触发跳转
+  - **修复**：完全移除翻页导航功能，`gestures.js` 只保留侧边栏手势（左边缘右划打开、任意位置左划关闭）
+  - **附加修复**：`closeSidebar` 同步清除 `html.sidebar-expanded` 类（之前只清 `body`，CSS `position: fixed` 未完全解除）；新增侧边栏滚动守卫（`_sidebarScrolledRecently`，300ms 内屏蔽链接 click，防止 iOS 惯性滚动停止时误触发导航）；新增 ghost click 防护（页面加载后 500ms 内屏蔽 `/doc/` 链接 click，防止 iOS 在触摸导航后在新页面触发幽灵点击）
+
+- **SW 缓存导致 JS 修复不生效**（`static/sw.js`、`templates/layout.html`）：Service Worker 对 `/static/` 使用 Cache First 策略，旧版 `gestures.js` 被永久缓存。将 `gestures.js` 和 `init.js` 的 URL 查询参数升级为 `?v=20260420`，使缓存 key 不同，强制所有客户端拉取新文件；同时将 SW `CACHE_NAME` 升至 `v6` 清理旧缓存
+
+### Changed
+
+- **时间线滚动性能优化**（`templates/timeline.html`）：
+  - 移除 `.tl-note:hover` 的 `transition: background 0.1s`，消除滚动时每帧触发 paint
+  - 每个月份/年份分组加 `.tl-group` wrapper，应用 `content-visibility: auto`，浏览器跳过屏幕外分组的布局、绘制和 hit-testing
+  - 首次加载自动折叠 6 个月前的历史分组（减少初始可见 DOM 深度），展开状态跨过滤器操作保持
+  - `IntersectionObserver`（rootMargin 400px 预加载）懒加载笔记内容，初始 DOM 节点数从 O(总笔记数) 降至 O(分组数)；折叠分组展开时立即同步填充
+  - 实现 `tlToggleYear`（年份标题批量折叠/展开该年所有月份，之前为空函数）
+
+### Infra
+
+- SW `CACHE_NAME` 从 `v3` 升至 `v6`
+- `gestures.js?v=20260413` → `?v=20260420`，`init.js?v=20260130` → `?v=20260420`
+
+---
+
 ## [v1.9.7] — 2026-04-16
 
 WASM 图谱布局引擎：Rust ForceAtlas2 替换 JS Worker F-R，布局质量和速度大幅提升。

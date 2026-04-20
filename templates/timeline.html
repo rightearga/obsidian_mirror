@@ -32,9 +32,14 @@
     display: flex; align-items: baseline; gap: 10px; padding: 5px 8px;
     border-radius: 4px; text-decoration: none;
     color: var(--text-primary, #cdd6f4); font-size: 0.9rem;
-    transition: background 0.1s;
+    /* 去掉 transition：hover paint 会在每帧滚动时触发，造成卡顿 */
 }
 .tl-note:hover { background: var(--bg-hover, rgba(255,255,255,0.06)); }
+/* 每个月份/年份分组的容器；content-visibility 让浏览器跳过屏幕外分组的渲染和 hit-testing */
+.tl-group {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 160px;
+}
 .tl-note-date { font-size: 0.78rem; color: var(--text-muted, #6c7086);
     white-space: nowrap; min-width: 80px; }
 .tl-note-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -92,16 +97,18 @@
 </div>
 
 <script>
-// ── 时间线视图脚本（v1.8.4）──────────────────────────────────────────────────
+// ── 时间线视图脚本（v1.9.8：懒加载 + 默认折叠历史分组）────────────────────────
 let _tlAllNotes = [];
-let _tlCollapsed = new Set();   // 折叠的 year-month 键
+let _tlCollapsed = new Set();   // 折叠的分组键（"m-YYYY-MM" / "y-YYYY"）
+let _tlGroups    = new Map();   // 当前渲染周期的分组数据（供懒加载回填）
+let _tlObserver  = null;        // IntersectionObserver 实例
+let _tlAutoCollapseDone = false; // C：自动折叠旧分组只执行一次
 
 // v1.9.4：图表颜色调色板
 const TL_PALETTE = ['#7aa2f7','#9ece6a','#f7768e','#e0af68','#bb9af7','#2ac3de','#ff9e64','#73daca'];
 
 document.addEventListener('DOMContentLoaded', async () => {
     try {
-        // 并行获取时间线数据和洞察数据
         const [rTimeline, rInsights] = await Promise.all([
             fetch('/api/timeline'),
             fetch('/api/insights/stats'),
@@ -109,7 +116,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!rTimeline.ok) throw new Error('HTTP ' + rTimeline.status);
         _tlAllNotes = await rTimeline.json();
 
-        // v1.9.4：渲染写作速度图和标签演化图
         if (rInsights.ok) {
             const stats = await rInsights.json();
             if (stats.monthly_counts?.length && stats.monthly_char_counts?.length) {
@@ -119,7 +125,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         tlRenderTagEvolution(_tlAllNotes);
 
-        // 填充标签下拉
         const tags = new Set();
         _tlAllNotes.forEach(n => (n.tags || []).forEach(t => tags.add(t)));
         const sel = document.getElementById('tl-filter-tag');
@@ -141,17 +146,15 @@ function tlRender() {
     const filterTag   = document.getElementById('tl-filter-tag').value;
     const groupBy     = document.getElementById('tl-group-by').value;
 
-    // 过滤
     let filtered = _tlAllNotes.filter(n => {
         if (filterTitle && !n.title.toLowerCase().includes(filterTitle)) return false;
         if (filterTag && !(n.tags || []).includes(filterTag)) return false;
         return true;
     });
 
-    const summary = document.getElementById('tl-summary');
-    summary.textContent = `共 ${filtered.length} / ${_tlAllNotes.length} 篇`;
+    document.getElementById('tl-summary').textContent = `共 ${filtered.length} / ${_tlAllNotes.length} 篇`;
 
-    const empty = document.getElementById('tl-empty');
+    const empty   = document.getElementById('tl-empty');
     const content = document.getElementById('tl-content');
     empty.style.display = filtered.length === 0 ? '' : 'none';
     if (filtered.length === 0) { content.innerHTML = ''; return; }
@@ -163,8 +166,20 @@ function tlRender() {
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(n);
     });
+    _tlGroups = groups;
 
-    // 渲染
+    // ── C：首次加载时自动折叠 6 个月前的历史分组 ──────────────────────────────
+    if (!_tlAutoCollapseDone && groupBy === 'month') {
+        const d = new Date();
+        d.setMonth(d.getMonth() - 6);
+        const cutoff = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        for (const key of groups.keys()) {
+            if (key < cutoff) _tlCollapsed.add('m-' + key);
+        }
+        _tlAutoCollapseDone = true;
+    }
+
+    // ── 渲染：只生成 header + 空占位容器，不含笔记节点（D：懒加载）────────────
     let html = '';
     let lastYear = '';
     for (const [key, notes] of groups) {
@@ -174,40 +189,66 @@ function tlRender() {
                 html += `<div class="tl-year" onclick="tlToggleYear('${year}')">${year} 年</div>`;
                 lastYear = year;
             }
-            const collapsed = _tlCollapsed.has('m-' + key) ? 'collapsed' : '';
-            const hidden    = _tlCollapsed.has('m-' + key) ? 'hidden'    : '';
-            const monthName = key.slice(5) + ' 月';
-            // v1.9.4：月份旁加"图谱"跳转按钮
-            const since = key + '-01';
-            const until = key + '-31';
+            const isCollapsed = _tlCollapsed.has('m-' + key);
+            const since = key + '-01', until = key + '-31';
             const graphBtn = `<a href="/graph?since=${since}&amp;until=${until}" class="tl-graph-btn" title="查看该月图谱" onclick="event.stopPropagation()">图谱</a>`;
-            html += `<div class="tl-month ${collapsed}" id="th-m-${key}" onclick="tlToggle('m-${key}')">${key.slice(0,4)}年${monthName}（${notes.length} 篇）${graphBtn}</div>`;
-            html += `<div class="tl-notes ${hidden}" id="tn-m-${key}">`;
+            html += `<div class="tl-group">`;
+            html += `<div class="tl-month${isCollapsed ? ' collapsed' : ''}" id="th-m-${key}" onclick="tlToggle('m-${key}')">` +
+                    `${key.slice(0,4)}年${key.slice(5)} 月（${notes.length} 篇）${graphBtn}</div>`;
+            // 空占位容器，懒加载填充；折叠时加 hidden 类
+            html += `<div class="tl-notes${isCollapsed ? ' hidden' : ''}" id="tn-m-${key}" data-lazy-key="${key}"></div>`;
+            html += `</div>`;
         } else {
-            const collapsed = _tlCollapsed.has('y-' + key) ? 'collapsed' : '';
-            const hidden    = _tlCollapsed.has('y-' + key) ? 'hidden'    : '';
-            html += `<div class="tl-year ${collapsed}" id="th-y-${key}" onclick="tlToggle('y-${key}')">${key} 年（${notes.length} 篇）</div>`;
-            html += `<div class="tl-notes ${hidden}" id="tn-y-${key}">`;
+            const isCollapsed = _tlCollapsed.has('y-' + key);
+            html += `<div class="tl-group">`;
+            html += `<div class="tl-year${isCollapsed ? ' collapsed' : ''}" id="th-y-${key}" onclick="tlToggle('y-${key}')">${key} 年（${notes.length} 篇）</div>`;
+            html += `<div class="tl-notes${isCollapsed ? ' hidden' : ''}" id="tn-y-${key}" data-lazy-key="${key}"></div>`;
+            html += `</div>`;
         }
-
-        notes.forEach(n => {
-            const tags = (n.tags || []).slice(0, 3).map(t =>
-                `<span class="tl-tag">#${esc(t)}</span>`).join('');
-            html += `<a href="/doc/${encodeURIComponent(n.path)}" class="tl-note" data-no-preview>
-                <span class="tl-note-date">${esc(n.date)}</span>
-                <span class="tl-note-title">${esc(n.title)}</span>
-                <span class="tl-note-tags">${tags}</span>
-            </a>`;
-        });
-        html += '</div>';
     }
-
     content.innerHTML = html;
+
+    // ── D：设置 IntersectionObserver，视口前 400px 预加载 ─────────────────────
+    tlSetupLazyLoad();
 }
 
+// ── D：懒加载核心 ─────────────────────────────────────────────────────────────
+
+function tlSetupLazyLoad() {
+    if (_tlObserver) _tlObserver.disconnect();
+    _tlObserver = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                tlPopulateGroup(entry.target);
+                _tlObserver.unobserve(entry.target);
+            }
+        });
+    }, { rootMargin: '400px' });
+
+    // 只观察未折叠的空容器
+    document.querySelectorAll('.tl-notes[data-lazy-key]').forEach(el => {
+        if (!el.classList.contains('hidden')) _tlObserver.observe(el);
+    });
+}
+
+function tlPopulateGroup(el) {
+    if (el.dataset.populated) return;
+    const notes = _tlGroups.get(el.dataset.lazyKey);
+    if (!notes) return;
+    el.innerHTML = notes.map(n => {
+        const tags = (n.tags || []).slice(0, 3)
+            .map(t => `<span class="tl-tag">#${esc(t)}</span>`).join('');
+        return `<a href="/doc/${encodeURIComponent(n.path)}" class="tl-note" data-no-preview>` +
+               `<span class="tl-note-date">${esc(n.date)}</span>` +
+               `<span class="tl-note-title">${esc(n.title)}</span>` +
+               `<span class="tl-note-tags">${tags}</span></a>`;
+    }).join('');
+    el.dataset.populated = '1';
+}
+
+// ── 折叠/展开 ─────────────────────────────────────────────────────────────────
+
 function tlToggle(key) {
-    const type = key.startsWith('m-') ? 'm-' : 'y-';
-    const id   = key.slice(type.length);
     if (_tlCollapsed.has(key)) {
         _tlCollapsed.delete(key);
     } else {
@@ -216,12 +257,32 @@ function tlToggle(key) {
     const hdr  = document.getElementById('th-' + key);
     const body = document.getElementById('tn-' + key);
     if (hdr)  hdr.classList.toggle('collapsed', _tlCollapsed.has(key));
-    if (body) body.classList.toggle('hidden',    _tlCollapsed.has(key));
+    if (body) {
+        body.classList.toggle('hidden', _tlCollapsed.has(key));
+        // 展开时若尚未填充，立即触发懒加载（不等待 Observer）
+        if (!_tlCollapsed.has(key)) tlPopulateGroup(body);
+    }
 }
 
 function tlToggleYear(year) {
-    // 按年折叠时，折叠/展开该年下所有月份
-    const allKeys = [..._tlCollapsed];
+    // 折叠/展开该年下所有月份
+    const keys = [..._tlGroups.keys()].filter(k => k.startsWith(year + '-'));
+    const allCollapsed = keys.every(k => _tlCollapsed.has('m-' + k));
+    keys.forEach(k => {
+        const mk = 'm-' + k;
+        if (allCollapsed) {
+            _tlCollapsed.delete(mk);
+        } else {
+            _tlCollapsed.add(mk);
+        }
+        const hdr  = document.getElementById('th-' + mk);
+        const body = document.getElementById('tn-' + mk);
+        if (hdr)  hdr.classList.toggle('collapsed', _tlCollapsed.has(mk));
+        if (body) {
+            body.classList.toggle('hidden', _tlCollapsed.has(mk));
+            if (!_tlCollapsed.has(mk)) tlPopulateGroup(body);
+        }
+    });
 }
 
 function esc(s) {

@@ -267,6 +267,8 @@ impl SearchEngine {
         I: IntoIterator<Item = (String, String, String, SystemTime, Vec<String>)>,
     {
         let mut index_writer: IndexWriter = self.index.writer(50_000_000)?;
+        // Windows 文件锁修复：与 rebuild_index 保持一致，禁用段合并（见 rebuild_index 注释）
+        index_writer.set_merge_policy(Box::new(NoMergePolicy));
 
         // 删除 deleted 路径对应的文档
         for path in deleted_paths {

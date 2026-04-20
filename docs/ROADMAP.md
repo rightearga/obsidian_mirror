@@ -1383,6 +1383,49 @@ if (WasmLoader.computeGraphLayout) {
 
 ---
 
+### ✅ v1.9.8 (已发布 - 2026-04-20) — 时间线滚动性能优化
+
+**主题**：解决时间线页面在大量笔记时向下滚动严重卡顿的问题
+
+#### 根本原因分析
+
+| 问题 | 原因 | 影响 |
+|------|------|------|
+| CSS paint 触发 | `.tl-note:hover { transition: background 0.1s }` 在滚动时每帧对可见节点触发 paint | 帧率下降，GPU/CPU 占用升高 |
+| DOM hit-testing 开销 | 所有笔记一次性渲染入 DOM（O(N) 节点），浏览器每帧滚动需对全部节点做 hit-testing | N 越大越卡 |
+| 屏幕外内容浪费 | 数百/数千条笔记节点常驻 DOM，即使不可见也参与布局与绘制 | 无谓渲染开销 |
+
+#### 优化措施（A→D 逐层递进）
+
+**A: 移除 CSS hover transition**
+- `.tl-note:hover` 删除 `transition: background 0.1s`
+- hover 背景变化不再触发 paint，消除滚动时最直接的帧耗
+
+**B: `content-visibility: auto` 分组容器**
+- 每个月份/年份分组包裹 `.tl-group` wrapper
+- 应用 `content-visibility: auto; contain-intrinsic-size: auto 160px`
+- 浏览器跳过屏幕外分组的布局、绘制和 hit-testing
+
+**C: 默认折叠 6 个月前的历史分组**
+- 首次加载时自动折叠超过 6 个月的月份分组，减少可见 DOM 深度
+- 用户点击月份标题可手动展开；展开状态跨过滤器操作保持
+- 切换"按年/按月"时重置折叠状态
+
+**D: IntersectionObserver 懒加载笔记内容**
+- `tlRender()` 只生成分组 header + 空白占位容器（不含笔记节点）
+- `IntersectionObserver`（`rootMargin: 400px` 提前预加载）在分组滚入视口前填充笔记 DOM
+- DOM 节点数从 **O(总笔记数)** 降至 **O(分组数)**（通常 < 60）
+- 折叠分组展开时立即同步填充，无需等待观察器
+
+#### 实际交付物
+- 修改文件：`templates/timeline.html`（移除 transition、.tl-group wrapper、`_tlAutoCollapseDone` 逻辑、`tlSetupLazyLoad`、`tlPopulateNotesContainer`、`tlToggle` 展开时填充）
+
+#### 测试结果
+- 服务端全量测试：**133/133 通过**（纯前端变更）
+- 新增测试：0 个
+
+---
+
 ## 📦 功能分类
 
 ### 💡 未来探索方向

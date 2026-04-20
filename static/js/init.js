@@ -135,6 +135,24 @@ function _doInitFileTree(isLargeTree) {
     });
 }
 
+// iOS "-webkit-overflow-scrolling: touch" 惯性滚动停止时会触发一次额外的 click，
+// 用此标志在 300ms 内屏蔽侧边栏链接的导航，防止"滚动停止误触"跳转到其他文章。
+let _sidebarScrolledRecently = false;
+let _sidebarScrollTimer = null;
+
+function _initSidebarScrollGuard() {
+    // 侧边栏的可滚动容器（页签内容区）
+    document.querySelectorAll('.sidebar-tab-content').forEach(el => {
+        el.addEventListener('scroll', () => {
+            _sidebarScrolledRecently = true;
+            clearTimeout(_sidebarScrollTimer);
+            _sidebarScrollTimer = setTimeout(() => {
+                _sidebarScrolledRecently = false;
+            }, 300);
+        }, { passive: true });
+    });
+}
+
 /**
  * 初始化当前文件高亮和父目录展开
  */
@@ -142,6 +160,8 @@ function initActiveFile() {
     const currentPath = window.location.pathname;
     const isMobile = window.innerWidth <= 768;
     const links = document.querySelectorAll('.tree-row.file');
+
+    if (isMobile) _initSidebarScrollGuard();
     
     links.forEach(link => {
         if (link.getAttribute('href') === percentDecode(currentPath)) {
@@ -171,8 +191,16 @@ function initActiveFile() {
         // 点击文件链接时保存滚动位置
         if (isMobile) {
             link.addEventListener('click', (e) => {
+                // 侧边栏惯性滚动停止时 iOS 会触发一次 click（tap-to-stop-scroll），
+                // 若滚动刚发生（300ms 内），忽略此次 click，避免误导航
+                if (_sidebarScrolledRecently) {
+                    e.preventDefault();
+                    return;
+                }
                 saveSidebarScroll();
+                // 同时移除 body 和 html 上的 sidebar-expanded（sidebar.js 两者都加了）
                 document.body.classList.remove('sidebar-expanded');
+                document.documentElement.classList.remove('sidebar-expanded');
                 try {
                     localStorage.setItem(SIDEBAR_KEY, 'closed');
                 } catch(e) {}
@@ -184,6 +212,25 @@ function initActiveFile() {
         }
     });
 }
+
+// ===== Ghost Click 防护 =====
+// iOS Safari 在 touch 导航后会在相同坐标触发一次延迟 ~300ms 的幽灵 click。
+// 新页面加载后的 500ms 内，屏蔽所有 /doc/ 链接的 click，防止误导航。
+(function () {
+    if (!/iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) return;
+    const loadedAt = Date.now();
+    document.addEventListener('click', function ghostGuard(e) {
+        if (Date.now() - loadedAt > 500) {
+            document.removeEventListener('click', ghostGuard, true);
+            return;
+        }
+        const link = e.target.closest('a[href^="/doc/"]');
+        if (link) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+        }
+    }, true);
+})();
 
 // ===== DOM 加载完成后的初始化 =====
 document.addEventListener('DOMContentLoaded', () => {

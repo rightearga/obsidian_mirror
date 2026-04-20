@@ -1543,17 +1543,41 @@ pub async fn insights_stats_handler(
 // v1.8.4：可视化增强 — 时间线视图
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// 从笔记的 frontmatter `date` 字段提取日期字符串，若无则回退到 mtime
+/// 从 serde_yaml::Value 中提取字符串，兼容 String 和 Tagged（YAML timestamp）两种变体
+fn yaml_value_as_str(val: &serde_yaml::Value) -> Option<&str> {
+    match val {
+        serde_yaml::Value::String(s) => Some(s.as_str()),
+        // serde_yaml 0.9 将无引号的 YAML timestamp（如 2024-01-15 12:00:00）解析为
+        // Value::Tagged，内部仍是 String；直接用 as_str() 会返回 None 导致回退到 mtime
+        serde_yaml::Value::Tagged(tagged) => {
+            if let serde_yaml::Value::String(s) = &tagged.value {
+                Some(s.as_str())
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// 从笔记的 frontmatter 提取日期字符串，若无则回退到 mtime
+///
+/// 按优先级依次尝试：`date` → `created` → `created_at` → mtime
 fn extract_note_date_str(note: &crate::domain::Note) -> String {
     use chrono::{DateTime, Utc};
-    // 尝试 frontmatter 中的 date 字段（支持 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM:SS）
-    if let Some(date_val) = note.frontmatter.0.get("date") {
-        if let Some(s) = date_val.as_str() {
-            // 取前 10 个字符（YYYY-MM-DD）
-            return s[..s.len().min(10)].to_string();
+
+    for field in &["date", "created", "created_at"] {
+        if let Some(val) = note.frontmatter.0.get(*field) {
+            if let Some(s) = yaml_value_as_str(val) {
+                let n = s.len().min(10);
+                if n >= 7 {
+                    return s[..n].replace('/', "-");
+                }
+            }
         }
     }
-    // 回退到 mtime
+
+    // 回退到 mtime（git checkout 时间，精度较低）
     let dt: DateTime<Utc> = note.mtime.into();
     dt.format("%Y-%m-%d").to_string()
 }

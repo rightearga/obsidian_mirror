@@ -8,8 +8,8 @@
 //   - 搜索离线响应格式升级为 v1.8.0 分页格式
 // ==========================================
 
-// v1.8.3：版本号升 v3，清理旧版缓存（v2 静态资源 + v1 WASM）
-const CACHE_NAME = 'obsidian-mirror-static-v3';
+// v1.9.8：版本号升 v6，加 ghost click 防护
+const CACHE_NAME = 'obsidian-mirror-static-v6';
 
 // WASM 离线搜索索引缓存（与主缓存分离，方便单独更新）
 const WASM_CACHE_NAME = 'obsidian-mirror-wasm-v1';
